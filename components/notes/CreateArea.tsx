@@ -1,7 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, CheckSquare, Paintbrush, Pin, RotateCcw, RotateCw, Sparkles, Loader2, X, Plus, Minus, Square, CheckSquare as CheckSquareIcon, GripVertical, Palette, Archive, MoreVertical, Trash2, Check, Table as TableIcon, PlusSquare, MinusSquare } from 'lucide-react';
+import { Image as ImageIcon, CheckSquare, Pin, RotateCcw, RotateCw, Sparkles, Loader2, X, Plus, Minus, Square, CheckSquare as CheckSquareIcon, GripVertical, Palette, Archive, MoreVertical, Trash2, Check, Table as TableIcon, PlusSquare, MinusSquare } from 'lucide-react';
 import { Note, NoteColor, ColorStyles, ListItem, TableData } from './types';
-import { generateNoteContent } from '../../services/notesGeminiService';
+import {
+  NOTEBOOK_PROMPT_PRESETS,
+  generateNotebookDraft,
+  insertTextAtSelection,
+  splitNotebookLines,
+  NotebookPromptPreset,
+  shouldReplaceNotebookContent,
+} from '../../services/notesAiService';
+import { useToast } from '../ui/Toast';
+
+const generateNoteContent = (prompt: string, currentContent = '') => generateNotebookDraft({ content: prompt, currentContent });
 import {
   DndContext, 
   closestCenter,
@@ -89,6 +99,8 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
   const [isPinned, setIsPinned] = useState(false);
   const [color, setColor] = useState<NoteColor>(NoteColor.DEFAULT);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<NotebookPromptPreset>('rewrite');
+  const [showComposeMenu, setShowComposeMenu] = useState(false);
   const [showColorOptions, setShowColorOptions] = useState(false);
   const [focusedCell, setFocusedCell] = useState<{ rIdx: number, cIdx: number } | null>(null);
   const [showCellColorOptions, setShowCellColorOptions] = useState(false);
@@ -99,6 +111,8 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
   const fileInputRef = useRef<HTMLInputElement>(null);
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const cellColorPickerRef = useRef<HTMLDivElement>(null);
+  const composeMenuRef = useRef<HTMLDivElement>(null);
+  const { addToast } = useToast();
 
   const handleOutsideClick = (e: MouseEvent) => {
     if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -109,6 +123,9 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     }
     if (cellColorPickerRef.current && !cellColorPickerRef.current.contains(e.target as Node)) {
       setShowCellColorOptions(false);
+    }
+    if (composeMenuRef.current && !composeMenuRef.current.contains(e.target as Node)) {
+      setShowComposeMenu(false);
     }
   };
 
@@ -195,7 +212,85 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     }
   };
 
-  const handleMagicCompose = async () => {
+  const handleNotebookCompose = async (preset: NotebookPromptPreset = selectedPreset) => {
+    if (isGenerating) return;
+    if (!content.trim() && !title.trim() && listItems.length === 0 && !tableData) {
+      addToast({
+        type: 'warning',
+        title: 'Nothing to write from',
+        message: 'Add some note content first, then use Help me write.',
+      });
+      return;
+    }
+
+    if (!import.meta.env.VITE_NVIDIA_API_KEY) {
+      addToast({
+        type: 'error',
+        title: 'AI not configured',
+        message: 'Add the NVIDIA API key to use Help me write.',
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    setShowComposeMenu(false);
+    try {
+      const shouldReplace = shouldReplaceNotebookContent(preset);
+      const generated = await generateNotebookDraft({
+        preset,
+        title,
+        currentContent: [title, content].filter(Boolean).join('\n\n'),
+        isList,
+        listItems,
+        tableData,
+      });
+
+      if (isList) {
+        const lines = splitNotebookLines(generated);
+        const newItems = lines.map((line) => ({
+          id: genId(),
+          text: line,
+          checked: false,
+          indentLevel: 0,
+        }));
+        setListItems((prev) => (shouldReplace ? newItems : [...prev, ...newItems]));
+      } else {
+        if (shouldReplace) {
+          setContent(generated);
+        } else {
+          const inserted = insertTextAtSelection(textareaRef.current, content, generated);
+          setContent(inserted.nextValue);
+          setTimeout(() => {
+            if (textareaRef.current) {
+              textareaRef.current.style.height = 'auto';
+              textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+              textareaRef.current.selectionStart = inserted.nextSelectionStart;
+              textareaRef.current.selectionEnd = inserted.nextSelectionEnd;
+            }
+          }, 10);
+        }
+        setTimeout(() => {
+          if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+          }
+        }, 10);
+      }
+    } catch (e: any) {
+      console.error(e);
+      addToast({
+        type: 'error',
+        title: 'Help me write failed',
+        message: e?.message?.includes('configured')
+          ? 'Add the NVIDIA API key to continue.'
+          : e?.message || 'Could not generate notebook content.',
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleMagicComposeLegacy = async () => {
     if (!content.trim() && !title.trim() && listItems.length === 0 && !tableData) return;
     setIsGenerating(true);
     try {
@@ -231,6 +326,11 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
             }, 10);
         }
     } catch (e) { console.error(e); } finally { setIsGenerating(false); }
+  };
+
+  const handleMagicCompose = () => {
+    if (isGenerating) return;
+    setShowComposeMenu((prev) => !prev);
   };
 
   const toggleListMode = () => {
@@ -326,7 +426,7 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
       <div 
         ref={containerRef}
-        className={`relative w-full rounded-xl transition-all duration-300 bg-[var(--note-default-bg)] overflow-hidden
+        className={`relative w-full rounded-xl transition-all duration-300 bg-[var(--note-default-bg)] overflow-visible
             ${isExpanded ? 'shadow-[0_1px_2px_0_rgba(0,0,0,0.6),0_2px_6px_2px_rgba(0,0,0,0.3)]' : 'shadow-[0_1px_2px_0_rgba(0,0,0,0.6),0_1px_3px_1px_rgba(0,0,0,0.3)]'}
             ${ColorStyles[color]}
             ${color === NoteColor.DEFAULT ? 'border border-[var(--notebook-divider)]' : 'border-transparent'}
@@ -532,7 +632,28 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
                  <ToolbarButton icon={<Plus className="w-4 h-4" />} title="Increase canvas width" onClick={() => adjustWidth(true)} />
                  <div className="h-4 w-[1px] bg-[var(--notebook-divider)] mx-1" />
 
-                 <ToolbarButton onClick={handleMagicCompose} icon={isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-blue-300" /> : <Sparkles className="w-4 h-4 text-blue-300" />} title="Help me write (Gemini)" />
+                 <div className="relative inline-flex flex-col items-start" ref={composeMenuRef}>
+                   <ToolbarButton onClick={handleMagicCompose} icon={isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-blue-300" /> : <Sparkles className="w-4 h-4 text-blue-300" />} disabled={isGenerating} />
+                   {showComposeMenu && (
+                     <div className="absolute left-0 top-full z-50 mt-3 w-64 overflow-hidden rounded-xl border border-[var(--notebook-divider)] bg-[var(--note-default-bg)] py-1 shadow-2xl">
+                       {NOTEBOOK_PROMPT_PRESETS.map((preset) => (
+                         <button
+                           key={preset.id}
+                           type="button"
+                           onClick={() => {
+                             setSelectedPreset(preset.id);
+                             setShowComposeMenu(false);
+                             void handleNotebookCompose(preset.id);
+                           }}
+                           className={`w-full px-4 py-2.5 text-left transition-colors hover:bg-[var(--notebook-hover)] ${selectedPreset === preset.id ? 'text-[var(--notebook-text)]' : 'text-[var(--notebook-muted)]'}`}
+                         >
+                           <div className="text-sm font-semibold">{preset.label}</div>
+                           <div className="mt-0.5 text-[11px] leading-snug opacity-70">{preset.description}</div>
+                         </button>
+                       ))}
+                     </div>
+                   )}
+                 </div>
                  <ToolbarButton icon={<RotateCcw className="w-4 h-4" />} title="Undo" disabled />
                  <ToolbarButton icon={<RotateCw className="w-4 h-4" />} title="Redo" disabled />
               </div>
@@ -561,7 +682,7 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
   );
 };
 
-const ToolbarButton = ({ icon, title, onClick, disabled }: { icon: React.ReactNode, title: string, onClick?: (e: React.MouseEvent) => void, disabled?: boolean }) => (
+const ToolbarButton = ({ icon, title, onClick, disabled }: { icon: React.ReactNode, title?: string, onClick?: (e: React.MouseEvent) => void, disabled?: boolean }) => (
     <button
       onClick={onClick}
       disabled={disabled}

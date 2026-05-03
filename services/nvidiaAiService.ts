@@ -3,6 +3,7 @@ import { calculateStats } from "../lib/statsUtils";
 import { cleanThinkingTags, isInsideThinkingBlock } from "../lib/thinkingCleaner";
 
 const BASE_URL = "/api/nvidia";
+export const NVIDIA_CHAT_MODEL_ID = "openai/gpt-oss-120b";
 
 type AssistantMode = "research" | "mentor";
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -18,7 +19,7 @@ export type AssistantContextSummary = {
 
 export const MODAL_MODELS = {
   deepseek: {
-    id: "openai/gpt-oss-120b",
+    id: NVIDIA_CHAT_MODEL_ID,
     name: "NVIDIA Research",
     description: "GPT OSS on NVIDIA for research with no account-data access",
     type: "fast" as const,
@@ -27,7 +28,7 @@ export const MODAL_MODELS = {
     historyLimit: 3,
   },
   kimi: {
-    id: "openai/gpt-oss-120b",
+    id: NVIDIA_CHAT_MODEL_ID,
     name: "NVIDIA Mentor",
     description: "GPT OSS on NVIDIA for account-aware mentoring and coaching",
     type: "thinking" as const,

@@ -2,7 +2,17 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Pin, Archive, Trash2, Sparkles, Loader2, X, CheckSquare, Plus, Minus, Square, CheckSquare as CheckSquareIcon, GripVertical, Bell, Image as ImageIcon, MoreVertical, Palette, RotateCcw, RotateCw, Copy, Tag, Check, Table as TableIcon, PlusSquare, MinusSquare } from 'lucide-react';
 import { Note, NoteColor, ColorStyles, ListItem, TableData } from './types';
-import { generateNoteContent } from '../../services/notesGeminiService';
+import {
+  NOTEBOOK_PROMPT_PRESETS,
+  generateNotebookDraft,
+  insertTextAtSelection,
+  splitNotebookLines,
+  NotebookPromptPreset,
+  shouldReplaceNotebookContent,
+} from '../../services/notesAiService';
+import { useToast } from '../ui/Toast';
+
+const generateNoteContent = (prompt: string, currentContent = '') => generateNotebookDraft({ content: prompt, currentContent });
 import {
   DndContext, 
   closestCenter,
@@ -112,6 +122,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   const [isPinned, setIsPinned] = useState(note.isPinned);
   const [color, setColor] = useState(note.color);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<NotebookPromptPreset>('rewrite');
+  const [showComposeMenu, setShowComposeMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showColorOptions, setShowColorOptions] = useState(false);
   const [showLabelEditor, setShowLabelEditor] = useState(false);
@@ -127,6 +139,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const cellColorPickerRef = useRef<HTMLDivElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
+  const composeMenuRef = useRef<HTMLDivElement>(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     setTitle(note.title);
@@ -251,7 +265,86 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
     }
   };
 
-  const handleMagicCompose = async () => {
+  const handleNotebookCompose = async (preset: NotebookPromptPreset = selectedPreset) => {
+    if (isGenerating) return;
+    if (!content.trim() && !title.trim() && listItems.length === 0 && !tableData) {
+      addToast({
+        type: 'warning',
+        title: 'Nothing to write from',
+        message: 'Add some note content first, then use Help me write.',
+      });
+      return;
+    }
+
+    if (!import.meta.env.VITE_NVIDIA_API_KEY) {
+      addToast({
+        type: 'error',
+        title: 'AI not configured',
+        message: 'Add the NVIDIA API key to use Help me write.',
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    setShowComposeMenu(false);
+    try {
+      const shouldReplace = shouldReplaceNotebookContent(preset);
+      const generated = await generateNotebookDraft({
+        preset,
+        title,
+        currentContent: [title, content].filter(Boolean).join('\n\n'),
+        isList,
+        listItems,
+        tableData,
+      });
+
+      if (isList) {
+        const lines = splitNotebookLines(generated);
+        const newItems = lines.map((line) => ({
+          id: genId(),
+          text: line,
+          checked: false,
+          indentLevel: 0,
+        }));
+        const nextItems = shouldReplace ? newItems : [...listItems, ...newItems];
+        setListItems(nextItems);
+        handleUpdate({ listItems: nextItems, isList: true });
+        addToHistory({ title, content, listItems: nextItems, image, color, tableData });
+      } else {
+        if (shouldReplace) {
+          setContent(generated);
+          handleUpdate({ content: generated });
+          addToHistory({ title, content: generated, listItems, image, color, tableData });
+        } else {
+          const inserted = insertTextAtSelection(textareaRef.current, content, generated);
+          setContent(inserted.nextValue);
+          handleUpdate({ content: inserted.nextValue });
+          addToHistory({ title, content: inserted.nextValue, listItems, image, color, tableData });
+          setTimeout(() => {
+            if (textareaRef.current) {
+              textareaRef.current.style.height = 'auto';
+              textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+              textareaRef.current.selectionStart = inserted.nextSelectionStart;
+              textareaRef.current.selectionEnd = inserted.nextSelectionEnd;
+            }
+          }, 10);
+        }
+      }
+    } catch (e: any) {
+      console.error(e);
+      addToast({
+        type: 'error',
+        title: 'Help me write failed',
+        message: e?.message?.includes('configured')
+          ? 'Add the NVIDIA API key to continue.'
+          : e?.message || 'Could not generate notebook content.',
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleMagicComposeLegacy = async () => {
     setIsGenerating(true);
     try {
         let prompt = '';
@@ -277,10 +370,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
             setContent(generated);
             handleUpdate({ content: generated });
             addToHistory({ title, content: generated, listItems, image, color, tableData });
-        }
+      }
     } catch (e) { console.error(e); } finally { setIsGenerating(false); }
   };
 
+  const handleMagicCompose = () => {
+    if (isGenerating) return;
+    setShowComposeMenu((prev) => !prev);
+  };
+  
   const toggleListMode = () => {
       let newState;
       setTableData(undefined);
@@ -385,6 +483,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
     if (cellColorPickerRef.current && !cellColorPickerRef.current.contains(e.target as Node)) {
       setShowCellColorOptions(false);
     }
+    if (composeMenuRef.current && !composeMenuRef.current.contains(e.target as Node)) {
+      setShowComposeMenu(false);
+    }
   };
 
   useEffect(() => {
@@ -410,7 +511,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   };
 
   return (
-    <div className={`w-full rounded-xl transition-all duration-300 ${ColorStyles[color]} ${color === NoteColor.DEFAULT ? 'border border-[var(--notebook-divider)]' : 'border-transparent'} shadow-2xl relative overflow-hidden`}>
+    <div className={`w-full rounded-xl transition-all duration-300 ${ColorStyles[color]} ${color === NoteColor.DEFAULT ? 'border border-[var(--notebook-divider)]' : 'border-transparent'} shadow-2xl relative overflow-visible`}>
       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
       <div className="flex flex-col">
         {image && (
@@ -722,11 +823,32 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
                         <ToolbarButton icon={<Plus className="w-4 h-4" />} title="Increase canvas width" onClick={() => adjustWidth(true)} />
                         <div className="h-4 w-[1px] bg-[var(--notebook-divider)] mx-1" />
 
-                        <ToolbarButton 
-                            onClick={handleMagicCompose}
-                            icon={isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-blue-300" /> : <Sparkles className="w-4 h-4 text-blue-300" />}
-                            title="Magic Compose (Gemini)"
-                        />
+                        <div className="relative inline-flex flex-col items-start" ref={composeMenuRef}>
+                          <ToolbarButton 
+                              onClick={handleMagicCompose}
+                              icon={isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-blue-300" /> : <Sparkles className="w-4 h-4 text-blue-300" />}
+                              disabled={isGenerating}
+                          />
+                          {showComposeMenu && (
+                            <div className="absolute left-0 top-full z-50 mt-3 w-64 overflow-hidden rounded-xl border border-[var(--notebook-divider)] bg-[var(--note-default-bg)] py-1 shadow-2xl">
+                              {NOTEBOOK_PROMPT_PRESETS.map((preset) => (
+                                <button
+                                  key={preset.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPreset(preset.id);
+                                    setShowComposeMenu(false);
+                                    void handleNotebookCompose(preset.id);
+                                  }}
+                                  className={`w-full px-4 py-2.5 text-left transition-colors hover:bg-[var(--notebook-hover)] ${selectedPreset === preset.id ? 'text-[var(--notebook-text)]' : 'text-[var(--notebook-muted)]'}`}
+                                >
+                                  <div className="text-sm font-semibold">{preset.label}</div>
+                                  <div className="mt-0.5 text-[11px] leading-snug opacity-70">{preset.description}</div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         <ToolbarButton icon={<RotateCcw className={`w-4 h-4 ${historyIndex <= 0 ? 'opacity-30' : ''}`} />} title="Undo" onClick={handleUndo} />
                         <ToolbarButton icon={<RotateCw className={`w-4 h-4 ${historyIndex >= history.length - 1 ? 'opacity-30' : ''}`} />} title="Redo" onClick={handleRedo} />
                       </>
@@ -743,7 +865,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   );
 };
 
-const ToolbarButton = ({ icon, title, onClick, disabled }: { icon: React.ReactNode, title: string, onClick?: (e: React.MouseEvent) => void, disabled?: boolean }) => (
+const ToolbarButton = ({ icon, title, onClick, disabled }: { icon: React.ReactNode, title?: string, onClick?: (e: React.MouseEvent) => void, disabled?: boolean }) => (
     <button
       onClick={onClick}
       disabled={disabled}

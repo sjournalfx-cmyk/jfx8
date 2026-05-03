@@ -34,7 +34,7 @@ const formatDuration = (openTime?: string, closeTime?: string) => {
 
 const VOICE_TRANSCRIPTION_PROMPT = 'Transcribe this trading journal voice note faithfully. Preserve pair symbols such as EURUSD, GBPUSD, XAUUSD, NAS100, US30, percentages, prices, R-multiples, times, and short command phrases. Keep the transcript concise and do not normalize symbols.';
 
-const DAILY_CREDIT_MAX = 5;
+const DAILY_CREDIT_MAX = 10;
 
 type DailyCreditState = {
   date: string;
@@ -860,6 +860,13 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const [selectedModel, setSelectedModel] = useLocalStorage<ModalModelType>('jfx_ai_selected_model', 'deepseek');
   const [recallMemory, setRecallMemory] = useLocalStorage<boolean>('jfx_ai_recall_memory', true);
   const [dailyCredits, setDailyCredits] = useLocalStorage<DailyCreditState>('jfx_ai_daily_credits', createDailyCreditState());
+  
+  // Migrate credits when max changes
+  useEffect(() => {
+    if (dailyCredits.researchRemaining < DAILY_CREDIT_MAX || dailyCredits.mentorRemaining < DAILY_CREDIT_MAX) {
+      setDailyCredits(createDailyCreditState());
+    }
+  }, []);
   const assistantMode = useMemo(() => getAssistantMode(selectedModel), [selectedModel]);
   const isResearchMode = assistantMode === 'research';
   const assistantLabel = isResearchMode ? 'JFX Research' : 'JFX Mentor';
@@ -1620,9 +1627,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     };
   }, []);
 
-  const getCurrentCreditLabel = useCallback(() => (
-    `AI credit ${isResearchMode ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining}/${DAILY_CREDIT_MAX}`
-  ), [dailyCredits.mentorRemaining, dailyCredits.researchRemaining, isResearchMode]);
+const getCurrentCreditLabel = useCallback(() => 'AI credit 10/10', []);
 
   const currentCreditsRemaining = isResearchMode ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining;
   const isCreditWarning = currentCreditsRemaining <= 1;

@@ -39,9 +39,9 @@ const AppContent: React.FC = () => {
   const [settingsTab, setSettingsTab] = useState<'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'help'>('profile');
   const { addToast } = useToast();
   const [isDemoMode, setIsDemoMode] = useLocalStorage<boolean>('jfx_demo_mode', false);
-  
+
   // Mock for current migration version - In a real app, this would be fetched from the backend.
-  const [currentMigrationVersion] = useState('v20260221.1-mock');
+  const [currentMigrationVersion] = useState('v20250201.1');
   
   const {
     userId,
@@ -87,6 +87,14 @@ const {
       setCurrentView('dashboard');
     }
   }, [currentView, isDemoMode]);
+
+  // Auto-enable demo mode for new users (onboarded with no trades)
+  useEffect(() => {
+    const storedDemo = localStorage.getItem('jfx_demo_mode');
+    if (isAuthenticated && userProfile?.onboarded && trades.length === 0 && storedDemo === null) {
+      setIsDemoMode(true);
+    }
+  }, [isAuthenticated, userProfile?.onboarded, trades.length, setIsDemoMode, isDemoMode]);
 
   const blockDemoAction = (title: string, message = 'Demo mode is read-only. Switch back to your real journal to make changes.') => {
     addToast({

@@ -281,8 +281,8 @@ const CustomChart: React.FC<CustomChartProps> = ({
     ctx.fillRect(0, 0, width, height);
 
     // 3. Grid
-    ctx.strokeStyle = isDarkMode ? '#18181b' : '#f1f5f9';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = isDarkMode ? '#0a0a0a' : '#f8fafc';
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
     for (let i = 0; i < 10; i++) {
       const y = (chartHeight / 10) * i;
@@ -555,7 +555,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
     ctx.fillRect(chartWidth, 0, PADDING_RIGHT, height);
     ctx.fillRect(0, chartHeight, width, PADDING_BOTTOM);
 
-    ctx.strokeStyle = isDarkMode ? '#27272a' : '#e2e8f0';
+    ctx.strokeStyle = isDarkMode ? '#18181b' : '#f1f5f9';
     ctx.beginPath();
     ctx.moveTo(chartWidth, 0); ctx.lineTo(chartWidth, chartHeight);
     ctx.moveTo(0, chartHeight); ctx.lineTo(chartWidth, chartHeight);
@@ -582,7 +582,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
       const txt = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
       ctx.fillText(txt, x, chartHeight + 5);
     }
-  }, [data, isDarkMode, getX, getY, getIndexFromX, drawings]); // Added drawings dependency
+  }, [data, isDarkMode, getX, getY, getIndexFromX, drawings]);
 
   // Sync API with parent only when necessary
   useEffect(() => {

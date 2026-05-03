@@ -39,6 +39,13 @@ const cloneDrawing = (drawing: Drawing): Drawing => ({
 const cloneDrawings = (drawings: Drawing[]) => drawings.map(cloneDrawing);
 
 const getReplayIndexKey = (symbol: string, timeframe: string) => `jfx_backtest_currentIndex_${symbol}_${timeframe}`;
+const optimizeCandleData = (data: any[]) => data.map(d => ({
+    time: d.time,
+    open: Number(d.open.toFixed(5)),
+    high: Number(d.high.toFixed(5)),
+    low: Number(d.low.toFixed(5)),
+    close: Number(d.close.toFixed(5))
+}));
 
 const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUpdateProfile }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -73,7 +80,42 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     // UI State
     const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    const [dataSource, setDataSource] = useState<'live' | 'cache' | 'none'>('none');
+const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'none'>('jfx_backtest_data_source', 'none');
+
+    // Check for cached data at initialization to prevent flash
+    const hasCachedData = (() => {
+        if (dataSource === 'cache') {
+            const stored = localStorage.getItem('jfx_backtest_cached_chart');
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    return parsed && parsed.data && parsed.data.length > 0;
+                } catch { return false; }
+            }
+        }
+        return false;
+    })();
+
+    const [showWelcome, setShowWelcome] = useState(!hasCachedData);
+
+    // Load cached chart data when dataSource is cache
+    useEffect(() => {
+        if (dataSource === 'cache') {
+            const storedData = localStorage.getItem('jfx_backtest_cached_chart');
+            if (storedData) {
+                try {
+                    const parsed = JSON.parse(storedData);
+                    if (parsed && parsed.data && parsed.data.length > 0) {
+                        setAllData(parsed.data);
+                        setCurrentIdx(parsed.index || 0);
+                    }
+                } catch (e) {
+                    console.error('Failed to load cached chart data', e);
+                }
+            }
+        }
+    }, [dataSource]);
+
     const [bridgeStatus, setBridgeStatus] = useState<'online' | 'offline' | 'checking' | 'error'>('checking');
     const [bridgeError, setBridgeError] = useState<string | null>(null);
 
@@ -104,7 +146,7 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     // Replay State
     const [isPlaying, setIsPlaying] = useState(false);
     const [isAutoFollow, setIsAutoFollow] = useLocalStorage<boolean>('jfx_backtest_autofollow', true);
-    const [history, setHistory] = useState<BacktestTrade[]>([]);
+    const [history, setHistory] = useLocalStorage<BacktestTrade[]>('jfx_backtest_history', []);
     const [playSpeed, setPlaySpeed] = useLocalStorage<number>('jfx_backtest_playSpeed', 500);
     const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
     const [zoomLevel, setZoomLevel] = useLocalStorage<number>('jfx_backtest_zoom', 100);
@@ -189,24 +231,23 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [toolbarPos, setToolbarPos] = useLocalStorage<{ x: number, y: number }>('jfx_backtest_toolbar_pos_v2', { x: 60, y: 80 });
     const [toolbarOrientation, setToolbarOrientation] = useLocalStorage<'horizontal' | 'vertical'>('jfx_backtest_toolbar_orientation', 'horizontal');
 
-    // Replay Modes
+// Replay Modes
     const [isSelectBarMode, setIsSelectBarMode] = useState(false);
     const [isTFMenuOpen, setIsTFMenuOpen] = useState(false);
-    const [showWelcome, setShowWelcome] = useState(true);
 
     // Feature: Context Menu
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, drawing: Drawing } | null>(null);
     const [clipboard, setClipboard] = useState<Drawing | null>(null);
 
-    // Undo/Redo State
-    const [historyStates, setHistoryStates] = useState<Drawing[][]>([]);
-    const [historyPointer, setHistoryStep] = useState(-1);
+// Undo/Redo State
+    const [historyStates, setHistoryStates] = useLocalStorage<Drawing[][]>('jfx_backtest_drawing_states', []);
+    const [historyPointer, setHistoryStep] = useLocalStorage<number>('jfx_backtest_drawing_pointer', -1);
     const historyStatesRef = useRef<Drawing[][]>([]);
     const historyPointerRef = useRef(-1);
 
     // Feature: Backtest Settings Modal
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [savedSessions, setSavedSessions] = useState<BacktestSession[]>([]);
+    const [savedSessions, setSavedSessions] = useLocalStorage<BacktestSession[]>('jfx_backtest_sessions', []);
     const [isLoadingSessions, setIsLoadingSessions] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const importTimeoutRef = useRef<number | null>(null);
@@ -259,13 +300,22 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
         }
     }, [isSettingsOpen, fetchSavedSessions]);
 
-    useEffect(() => {
+useEffect(() => {
         historyStatesRef.current = historyStates;
     }, [historyStates]);
 
     useEffect(() => {
         historyPointerRef.current = historyPointer;
     }, [historyPointer]);
+
+    // Only persist for cache mode (import json / recent session), not for live sync
+    useEffect(() => {
+        if (dataSource === 'live') {
+            setHistory([]);
+            setHistoryStates([]);
+            setHistoryStep(-1);
+        }
+    }, [dataSource]);
 
     useEffect(() => {
         return () => {
@@ -327,8 +377,9 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
             setHistoryStep(historyPointerRef.current);
             resetDrawingInteractionState();
 
-            setCurrentIdx(session.data.length - 1);
+setCurrentIdx(session.data.length - 1);
             setDataSource('cache');
+            localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data: session.data, index: session.data.length - 1 }));
             setShowWelcome(false);
             addToast({ type: 'success', title: 'Session Loaded', message: `Restored ${session.symbol} ${session.timeframe} session.` });
             setIsSettingsOpen(false);
@@ -358,14 +409,7 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
             const activeSymbol = overrideSymbol || symbol;
             const activeTF = overrideTimeframe || timeframe;
             const key = `jfx_backtest_cache_${activeSymbol}_${activeTF}`;
-            // Compress data to avoid hitting localStorage 5MB limit
-            const optimized = data.map(d => ({
-                time: d.time,
-                open: Number(d.open.toFixed(5)),
-                high: Number(d.high.toFixed(5)),
-                low: Number(d.low.toFixed(5)),
-                close: Number(d.close.toFixed(5))
-            }));
+            const optimized = optimizeCandleData(data);
             localStorage.setItem(key, JSON.stringify(optimized));
         } catch (e) {
             console.error('Failed to cache data', e);
@@ -381,9 +425,10 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
             try {
                 const data = JSON.parse(cached);
                 if (Array.isArray(data) && data.length > 0) {
-                    setAllData(data);
+setAllData(data);
                     setCurrentIdx(Math.min(data.length - 1, 50));
                     setDataSource('cache');
+                    localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data, index: Math.min(data.length - 1, 50) }));
                     setDrawings([]);
                     setHistory([]);
                     historyStatesRef.current = [];
@@ -464,9 +509,10 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
                 }
                 importTimeoutRef.current = window.setTimeout(() => {
                     setIsPlaying(false);
-                    setAllData(validData);
+setAllData(validData);
                     setCurrentIdx(Math.min(validData.length - 1, 50));
                     setDataSource('cache');
+                    localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data: validData, index: Math.min(validData.length - 1, 50) }));
                     setShowWelcome(false);
                     setDrawings([]);
                     setHistory([]);
@@ -540,6 +586,25 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
             addToast({ type: 'error', title: 'Update Failed', message: err.message });
         }
     }, [allData, fetchData, handleFetchMT5Data, saveToLocalCache, addToast]);
+
+    const resolveTradeIsoTime = useCallback((value?: string, fallbackDate?: string, fallbackTime?: string) => {
+        if (value) {
+            const normalized = value.includes(' ') && !value.includes('T') ? value.replace(' ', 'T') : value;
+            const parsed = new Date(normalized);
+            if (!Number.isNaN(parsed.getTime())) {
+                return parsed.toISOString();
+            }
+        }
+
+        if (fallbackDate && fallbackTime) {
+            const parsed = new Date(`${fallbackDate}T${fallbackTime}`);
+            if (!Number.isNaN(parsed.getTime())) {
+                return parsed.toISOString();
+            }
+        }
+
+        return undefined;
+    }, []);
 
     const pushToHistory = useCallback((newDrawings: Drawing[]) => {
         const snapshot = cloneDrawings(newDrawings);
@@ -1179,15 +1244,13 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [centerChart, magnetMode, isLocked, selectedDrawingId, handleUndo, handleRedo, drawings, pushToHistory, addToast]);
 
-    const visibleData = useMemo(() => allData.slice(0, currentIndex + 1), [allData, currentIndex]);
-
     return (
         <div className={`w-full h-full flex flex-col overflow-hidden font-sans ${isDarkMode ? 'bg-[#09090b] text-zinc-200' : 'bg-white text-slate-900'}`} onMouseUp={handleMouseUp}>
             <div className={`h-16 shrink-0 border-b flex items-center justify-between px-8 z-50 relative shadow-sm ${isDarkMode ? 'border-zinc-800 bg-[#09090b]/95 backdrop-blur-sm' : 'border-slate-200 bg-white/95 backdrop-blur-sm'}`}>
                 <div className="flex items-center gap-5 w-72">
-                    {!showWelcome ? (
-                        <button
-                            onClick={() => setShowWelcome(true)}
+                    {(!showWelcome || allData.length > 0) ? (
+<button
+                            onClick={() => { setShowWelcome(true); setAllData([]); localStorage.removeItem('jfx_backtest_cached_chart'); localStorage.setItem('jfx_backtest_data_source', 'none'); }}
                             className={`p-1.5 rounded-xl border transition-all ${isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-[#FF4F01] hover:border-[#FF4F01]/50' : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-[#FF4F01] hover:border-[#FF4F01]/50'}`}
                             title="Back to Lab Menu"
                         >
@@ -1358,7 +1421,7 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
                 >
                     <ChartErrorBoundary>
                         <CustomChart
-                            data={visibleData}
+                            data={allData.slice(0, currentIndex + 1)}
                             trades={history as any}
                             drawings={drawings}
                             isDarkMode={isDarkMode}
@@ -1374,7 +1437,7 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
                     </ChartErrorBoundary>
 
                     <AnimatePresence>
-                        {showWelcome && (
+                        {showWelcome && allData.length === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center z-[60] p-8 bg-black/40">
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full max-w-6xl">
                                     {/* Option 1: Live Sync */}
@@ -1711,7 +1774,7 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
                                             >
                                                 <div className="min-w-0">
                                                     <div className={`text-xs font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{sess.symbol}</div>
-                                                    <div className="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-zinc-500">{sess.timeframe} • {new Date(sess.updated_at).toLocaleDateString()}</div>
+                                                    <div className="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-zinc-500">{sess.timeframe} ï¿½ {new Date(sess.updated_at).toLocaleDateString()}</div>
                                                 </div>
                                                 <div className="flex items-center gap-2 shrink-0">
                                                     <button

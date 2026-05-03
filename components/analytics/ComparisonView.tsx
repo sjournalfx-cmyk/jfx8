@@ -253,7 +253,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isD
 
     return (
         <div className="space-y-8 pb-20">            {/* Comparison Mode Switcher */}
-            <div className={`p-1.5 rounded-2xl border flex items-center w-fit gap-1 mx-auto ${isDarkMode ? 'bg-[#111] border-zinc-800' : 'bg-zinc-100 border-zinc-200'}`}>
+            <div className={`p-1.5 rounded-2xl border flex items-center w-fit gap-1 mx-auto ${isDarkMode ? 'bg-[#111] border-zinc-800' : 'bg-zinc-100 border-slate-200'}`}>
                 {(['symbol', 'strategy', 'session'] as const).map((mode) => (
                     <button
                         key={mode}
@@ -336,7 +336,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isD
                             }
                         }
                     ].map((panel, idx) => (
-                        <Card key={idx} isDarkMode={isDarkMode} padding="lg" className="relative rounded-[32px] !bg-[#000000] !border-indigo-500/20">
+                        <Card key={idx} isDarkMode={isDarkMode} padding="lg" className={`relative rounded-[32px] !bg-[#000000] ${isDarkMode ? '!border-zinc-800' : '!border-slate-200'}`}>
                             <div className="flex items-center justify-between mb-8">
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-xl ${panel.bg} ${panel.color}`}>
@@ -410,17 +410,17 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isD
             </div>
 
 
-            <Card isDarkMode={isDarkMode} padding="lg" className="rounded-[32px] !bg-[#000000] !border-indigo-500/20">
+            <Card isDarkMode={isDarkMode} padding="lg" className={`rounded-[32px] !bg-[#000000] ${isDarkMode ? '!border-zinc-800' : '!border-slate-200'}`}>
                 <div className="flex items-center justify-between mb-8">
                     <h3 className="text-xl font-bold tracking-tight">Comparative Equity Curve</h3>
                     <div className="flex gap-3">
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 shadow-sm shadow-indigo-500/5">
-                            <div className="w-2 h-2 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">{symbolA || '---'}</span>
+                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${isDarkMode ? 'bg-zinc-800/50 border border-zinc-700' : 'bg-slate-100 border border-slate-200'} ${isDarkMode ? 'shadow-zinc-900/50' : ''}`}>
+                            <div className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]' : 'bg-indigo-600'}`} />
+                            <span className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>{symbolA || '---'}</span>
                         </div>
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 shadow-sm shadow-amber-500/5">
-                            <div className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-amber-500">{symbolB || '---'}</span>
+                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${isDarkMode ? 'bg-zinc-800/50 border border-zinc-700' : 'bg-slate-100 border border-slate-200'} ${isDarkMode ? 'shadow-zinc-900/50' : ''}`}>
+                            <div className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-amber-600'}`} />
+                            <span className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>{symbolB || '---'}</span>
                         </div>
                     </div>
                 </div>

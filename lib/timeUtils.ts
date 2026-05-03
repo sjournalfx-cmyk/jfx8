@@ -93,9 +93,9 @@ export const getSastHourFromTrade = (trade?: { date?: string; time?: string; ope
     if (!trade) return null;
 
     const candidates = [
+        trade.openTime,
         trade.time,
         trade.date && trade.time ? `${trade.date}T${trade.time}` : null,
-        trade.openTime,
         trade.closeTime,
     ];
 

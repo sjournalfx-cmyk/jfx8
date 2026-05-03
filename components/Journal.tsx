@@ -500,14 +500,15 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
     const groupedTrades = useMemo(() => {
         const groups: Record<string, GroupedTrade> = {};
         const result: GroupedTrade[] = [];
+        const standaloneTradeCounts: Record<string, number> = {};
 
         // Add pending trades at the very top
-        offlineQueue.forEach(trade => {
+        offlineQueue.forEach((trade, index) => {
             result.push({
                 type: 'pending',
                 trades: [trade],
                 date: trade.date,
-                id: `pending-${trade.ticketId || Math.random()}`
+                id: `pending-${trade.ticketId || trade.id || index}`
             });
         });
 
@@ -520,7 +521,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                         setupName: trade.setupName,
                         trades: [],
                         date: trade.date,
-                        id: trade.setupId
+                        id: `setup-${trade.setupId}`
                     };
                     result.push(groups[trade.setupId]);
                 }
@@ -532,11 +533,13 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                     groups[trade.setupId].date = trade.date;
                 }
             } else {
+                const seenCount = standaloneTradeCounts[trade.id] || 0;
+                standaloneTradeCounts[trade.id] = seenCount + 1;
                 result.push({
                     type: 'standalone',
                     trades: [trade],
                     date: trade.date,
-                    id: trade.id
+                    id: `standalone-${trade.id}-${seenCount}`
                 });
             }
         });
@@ -910,8 +913,8 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
         </div>
     );
 
-    const renderTradeRow = (trade: Trade, isGrouped = false, isFirst = false, isLast = false) => (
-        <React.Fragment key={trade.id}>
+    const renderTradeRow = (trade: Trade, isGrouped = false, isFirst = false, isLast = false, rowKey?: string) => (
+        <React.Fragment key={rowKey || `${isGrouped ? 'grouped' : 'standalone'}-${trade.id}-${trade.date}-${trade.time}`}>
             <div className={`grid grid-cols-[40px_1.5fr_1fr_1fr_1.2fr_1.2fr_1fr_1.5fr_0.8fr_1.2fr_40px] px-2 py-4 border-b items-center transition-all rounded-xl ${isGrouped ? (isDarkMode ? 'bg-white/[0.02] mt-0 rounded-none first:rounded-t-xl last:rounded-b-xl last:border-b-0' : 'bg-black/[0.01] mt-0 rounded-none first:rounded-t-xl last:rounded-b-xl last:border-b-0') : 'mt-1'} ${expandedTradeId === trade.id ? (isDarkMode ? 'bg-zinc-800/50 border-indigo-500/50' : 'bg-slate-50 border-indigo-200 shadow-inner') : (isDarkMode ? 'border-[#27272a] hover:bg-zinc-800/30' : 'border-slate-100 hover:bg-slate-50')} ${selectedIds.includes(trade.id) ? (isDarkMode ? 'bg-indigo-900/10' : 'bg-indigo-50') : ''}`}>
                 <div className="col-span-1 flex items-center justify-center self-stretch relative min-h-[64px]">
                     {isGrouped ? (
@@ -1262,7 +1265,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     }
 
                                     if (group.type === 'standalone') {
-                                        return renderTradeRow(group.trades[0]);
+                                        return renderTradeRow(group.trades[0], false, false, false, group.id);
                                     }
 
                                     const isExpanded = expandedSetupIds.includes(group.setupId!);
@@ -1330,7 +1333,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                             </div>
                                             {isExpanded && (
                                                 <div className="space-y-0 py-0.5">
-                                                    {group.trades.map((trade, idx) => renderTradeRow(trade, true, idx === 0, idx === group.trades.length - 1))}
+                                                    {group.trades.map((trade, idx) => renderTradeRow(trade, true, idx === 0, idx === group.trades.length - 1, `${group.id}-trade-${trade.id}-${idx}`))}
                                                 </div>
                                             )}
                                         </div>

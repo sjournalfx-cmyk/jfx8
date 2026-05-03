@@ -2,6 +2,7 @@ import { DailyBias, EASession, Trade, UserProfile } from '../types';
 import { APP_CONSTANTS } from './constants';
 import { calculateStats } from './statsUtils';
 import { getSafePnL } from './trade-normalization';
+import { getSastHourFromTrade } from './timeUtils';
 
 const round = (value: number, decimals = 2) => Number(value.toFixed(decimals));
 
@@ -228,7 +229,7 @@ export const buildAnalyticsAiSnapshot = (
   });
 
   const hourlyStats = Array.from({ length: 24 }, (_, hour) => {
-    const related = trades.filter(trade => parseInt((trade.time || '00:00').split(':')[0], 10) === hour);
+    const related = trades.filter(trade => getSastHourFromTrade(trade) === hour);
     const wins = related.filter(trade => trade.result === 'Win').length;
     const pnl = related.reduce((sum, trade) => sum + getSafePnL(trade.pnl), 0);
     return {
