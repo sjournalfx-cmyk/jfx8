@@ -1,7 +1,7 @@
 # Firehose Market Monitoring — Design Spec
 
 **Date:** 2026-05-18
-**Status:** Draft (pending user review)
+**Status:** Approved
 
 ## Overview
 
