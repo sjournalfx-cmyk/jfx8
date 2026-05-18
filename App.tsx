@@ -1,11 +1,11 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import Sidebar from './components/Sidebar';
 import LogTrade from './components/LogTrade';
 import Dashboard from './components/Dashboard';
 import Journal from './components/Journal';
 import Auth from './components/Auth';
 import { PartyPopper, MessageSquare, Activity, CheckCircle2, Loader2 } from 'lucide-react';
-import { Trade, Note, DailyBias } from './types';
+import { Trade, Note, DailyBias, FirehoseEvent } from './types';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
 import EASetup from './components/EASetup';
@@ -16,7 +16,10 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from './lib/constants';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { getSASTDateTime } from './lib/timeUtils';
+import { buildAnalyticsAiSnapshot } from './lib/analyticsAiSnapshot';
+import { buildPsychologyInsightsPrompt, extractSectionBody, getPsychologyInsightsDayKey, getPsychologyInsightsScopeKey, PSYCHOLOGY_INSIGHTS_STORAGE_KEY, type PsychologyInsightsCache } from './lib/psychologyInsights';
 import { dataService } from './services/dataService';
+import { modalResearchService } from './services/nvidiaAiService';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { BrandedLoader } from './components/ui/BrandedLoader';
 import { useAuth } from './hooks/useAuth';
@@ -33,6 +36,7 @@ const AIChat = lazy(() => import('./components/AIChat'));
 const BacktestLab = lazy(() => import('./components/BacktestLab'));
 const ChartGrid = lazy(() => import('./components/ChartGrid'));
 const Notes = lazy(() => import('./components/Notes'));
+const Monitoring = lazy(() => import('./components/Monitoring'));
 
 const AppContent: React.FC = () => {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -81,6 +85,155 @@ const {
   const activeNotes = isDemoMode ? demoNotes : notes;
   const activeDailyBias = isDemoMode ? demoDailyBias : dailyBias;
   const activeEaSession = isDemoMode ? demoEASession : eaSession;
+  const analyticsSnapshot = useMemo(
+    () => buildAnalyticsAiSnapshot(activeTrades, activeUserProfile, activeDailyBias, activeEaSession),
+    [activeTrades, activeUserProfile, activeDailyBias, activeEaSession]
+  );
+  const [psychologyInsightsCache, setPsychologyInsightsCache] = useLocalStorage<PsychologyInsightsCache>(PSYCHOLOGY_INSIGHTS_STORAGE_KEY, {});
+  const psychologyInsightsScope = getPsychologyInsightsScopeKey(userId, isDemoMode);
+  const todayPsychologyInsightsKey = getPsychologyInsightsDayKey();
+  const buildPsychologyInsightsFallbackContent = useCallback(() => {
+    const disciplineScore = analyticsSnapshot?.psychology?.disciplineScore?.score;
+    const adherenceLevel = analyticsSnapshot?.psychology?.psychologyInsights?.adherenceLevel || 'Medium';
+    const bestMindset = analyticsSnapshot?.psychology?.psychologyInsights?.bestMindset || 'Neutral';
+    const winRate = analyticsSnapshot?.overview?.winRate;
+    const netProfit = analyticsSnapshot?.overview?.netProfit;
+
+    return `### Key Insights
+- Discipline check: score is ${disciplineScore ?? 'unavailable'}/100 and adherence is ${String(adherenceLevel).toLowerCase()}.
+- Best-performing mindset: ${bestMindset} is currently the strongest state in the analytics snapshot.
+- Performance snapshot: recent win rate is ${winRate ?? 'unavailable'}% with net P/L of ${netProfit ?? 'unavailable'}.
+
+### Warnings
+- Size pressure: do not increase size until plan adherence becomes more consistent.
+- Execution review: check the last few trades for repeated emotional or execution slips before the next session.
+
+### Immediate Action
+- Trade note review: re-open the latest trade notes and mark the exact point where discipline broke down.`;
+  }, [analyticsSnapshot]);
+  const dailyPsychologyInsights = useMemo(() => {
+    if (isDemoMode) return null;
+
+    const entry = psychologyInsightsCache[psychologyInsightsScope] ?? null;
+    if (!entry?.content?.trim()) return null;
+
+    const cleanedContent = extractSectionBody(entry.content, 'KEY_INSIGHTS_WARNINGS')
+      || entry.content.replace(/^\s*\[SECTION:KEY_INSIGHTS_WARNINGS\]\s*/i, '').trim();
+
+    if (cleanedContent.trim()) {
+      return {
+        ...entry,
+        content: cleanedContent.trim(),
+      };
+    }
+
+    return {
+      date: todayPsychologyInsightsKey,
+      generatedAt: entry.generatedAt,
+      content: buildPsychologyInsightsFallbackContent(),
+    };
+  }, [buildPsychologyInsightsFallbackContent, isDemoMode, psychologyInsightsCache, psychologyInsightsScope, todayPsychologyInsightsKey]);
+  const psychologyInsightsRequestRef = useRef<string | null>(null);
+  const [isRefreshingPsychologyInsights, setIsRefreshingPsychologyInsights] = useState(false);
+  const psychologyInsightsSourceFacts = useMemo(() => ({
+    scope: psychologyInsightsScope,
+    date: todayPsychologyInsightsKey,
+    mode: isDemoMode ? 'demo' : 'live',
+    profile: activeUserProfile ? {
+      name: activeUserProfile.name,
+      plan: activeUserProfile.plan,
+      experienceLevel: activeUserProfile.experienceLevel,
+      initialBalance: activeUserProfile.initialBalance,
+      currencySymbol: activeUserProfile.currencySymbol,
+      defaultRR: activeUserProfile.defaultRR ?? null,
+    } : null,
+    overview: analyticsSnapshot?.overview ? {
+      totalTrades: analyticsSnapshot.overview.totalTrades,
+      netProfit: analyticsSnapshot.overview.netProfit,
+      winRate: analyticsSnapshot.overview.winRate,
+      profitFactor: analyticsSnapshot.overview.profitFactor,
+      avgWin: analyticsSnapshot.overview.avgWin,
+      avgLoss: analyticsSnapshot.overview.avgLoss,
+    } : null,
+    psychology: analyticsSnapshot?.psychology ? {
+      disciplineScore: analyticsSnapshot.psychology.disciplineScore,
+      momentum: analyticsSnapshot.psychology.momentum,
+      plByMindset: analyticsSnapshot.psychology.plByMindset,
+      plByPlanAdherence: analyticsSnapshot.psychology.plByPlanAdherence,
+      psychologyInsights: analyticsSnapshot.psychology.psychologyInsights,
+    } : null,
+    recentTrades: analyticsSnapshot?.recentTrades?.slice(-10) ?? [],
+    dailyBias: activeDailyBias.slice(-5),
+  }), [activeDailyBias, activeUserProfile, analyticsSnapshot, isDemoMode, psychologyInsightsScope, todayPsychologyInsightsKey]);
+
+  const refreshPsychologyInsights = useCallback(async (force = false) => {
+    if (isDemoMode || isDataLoading || !activeUserProfile) return;
+
+    const requestKey = `${psychologyInsightsScope}:${todayPsychologyInsightsKey}`;
+    const cachedEntry = psychologyInsightsCache[psychologyInsightsScope];
+    if (!force && (cachedEntry?.date === todayPsychologyInsightsKey || psychologyInsightsRequestRef.current === requestKey)) {
+      return;
+    }
+
+    psychologyInsightsRequestRef.current = requestKey;
+    setIsRefreshingPsychologyInsights(true);
+
+    try {
+      if (force) {
+        setPsychologyInsightsCache((current) => {
+          const next = { ...current };
+          delete next[psychologyInsightsScope];
+          return next;
+        });
+      }
+
+      const response = await modalResearchService.generateResponse(
+        buildPsychologyInsightsPrompt(psychologyInsightsSourceFacts),
+        activeTrades,
+        activeUserProfile,
+        activeDailyBias,
+        analyticsSnapshot,
+        true,
+        [],
+        'kimi',
+        false
+      );
+      const extractedContent = extractSectionBody(response, 'KEY_INSIGHTS_WARNINGS')
+        || response.replace(/^\s*\[SECTION:KEY_INSIGHTS_WARNINGS\]\s*/i, '').trim();
+      const content = extractedContent.trim() || buildPsychologyInsightsFallbackContent();
+
+      setPsychologyInsightsCache((current) => ({
+        ...current,
+        [psychologyInsightsScope]: {
+          date: todayPsychologyInsightsKey,
+          generatedAt: new Date().toISOString(),
+          content: content.trim(),
+        },
+      }));
+    } catch (error) {
+      console.warn('Failed to generate daily psychology insights:', error);
+    } finally {
+      psychologyInsightsRequestRef.current = null;
+      setIsRefreshingPsychologyInsights(false);
+    }
+  }, [
+    activeDailyBias,
+    activeEaSession,
+    activeTrades,
+    activeUserProfile,
+    analyticsSnapshot,
+    isDataLoading,
+    isDemoMode,
+    psychologyInsightsCache,
+    psychologyInsightsScope,
+    psychologyInsightsSourceFacts,
+    setPsychologyInsightsCache,
+    todayPsychologyInsightsKey,
+  ]);
+
+  useEffect(() => {
+    void refreshPsychologyInsights(false);
+  }, [refreshPsychologyInsights]);
 
   useEffect(() => {
     if (isDemoMode && currentView === 'log-trade') {
@@ -111,6 +264,7 @@ const {
   
   // UI State
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [firehoseEventContext, setFirehoseEventContext] = useState<FirehoseEvent | null>(null);
   const [isQuickLogOpen, setIsQuickLogOpen] = useState(false);
   const [hasSeenBetaAnnouncement, setHasSeenBetaAnnouncement] = useLocalStorage<boolean>('jfx_beta_announcement_shown', false);
   const [showBetaAnnouncement, setShowBetaAnnouncement] = useState(false);
@@ -736,7 +890,7 @@ const onLogout = async () => {
               />
             )}
             {currentView === 'ai-chat' && (
-              <AIChat
+            <AIChat
                 isDarkMode={isDarkMode}
                 trades={activeTrades}
                 userProfile={activeUserProfile}
@@ -745,6 +899,8 @@ const onLogout = async () => {
                 onUpdateTrade={handleUpdateTrade}
                 eaSession={activeEaSession}
                 onOpenSettings={() => setCurrentView('settings')}
+                firehoseEventContext={firehoseEventContext}
+                onClearFirehoseContext={() => setFirehoseEventContext(null)}
               />
             )}
             {currentView === 'log-trade' && activeUserProfile && (
@@ -784,6 +940,9 @@ const onLogout = async () => {
             eaSession={activeEaSession}
             onViewChange={setCurrentView}
             cashTransactions={cashTransactions}
+            dailyPsychologyInsights={dailyPsychologyInsights}
+            onRefreshPsychologyInsights={() => refreshPsychologyInsights(true)}
+            isRefreshingPsychologyInsights={isRefreshingPsychologyInsights}
           />
         )}
             {currentView === 'notes' && (
@@ -844,6 +1003,18 @@ const onLogout = async () => {
                 isDarkMode={isDarkMode}
                 userProfile={activeUserProfile}
                 onUpdateProfile={handleUpdateProfile}
+              />
+            )}
+            {currentView === 'monitoring' && userId && (
+              <Monitoring
+                isDarkMode={isDarkMode}
+                userId={userId}
+                trades={activeTrades}
+                onViewChange={setCurrentView}
+                onNavigateToChat={(event) => {
+                  setFirehoseEventContext(event);
+                  setCurrentView('ai-chat');
+                }}
               />
             )}
             {currentView === 'settings' && activeUserProfile && (

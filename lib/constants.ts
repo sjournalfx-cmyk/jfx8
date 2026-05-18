@@ -14,6 +14,7 @@ export const APP_CONSTANTS = {
     CHARTS: 'charts',
     DIAGRAMS: 'diagrams',
     SETTINGS: 'settings',
+    MONITORING: 'monitoring',
   },
   TABLES: {
     PROFILES: 'profiles',
@@ -21,6 +22,8 @@ export const APP_CONSTANTS = {
     NOTES: 'notes',
     DAILY_BIAS: 'daily_bias',
     GOALS: 'goals',
+    FIREHOSE_RULES: 'firehose_rules',
+    FIREHOSE_EVENTS: 'firehose_events',
   },
   PLANS: {
     FREE: 'FREE TIER (JOURNALER)',

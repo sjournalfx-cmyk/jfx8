@@ -3,7 +3,7 @@ import { calculateStats } from "../lib/statsUtils";
 import { cleanThinkingTags, isInsideThinkingBlock } from "../lib/thinkingCleaner";
 
 const BASE_URL = "/api/nvidia";
-export const NVIDIA_CHAT_MODEL_ID = "openai/gpt-oss-120b";
+export const NVIDIA_CHAT_MODEL_ID = "stepfun-ai/step-3.5-flash";
 
 type AssistantMode = "research" | "mentor";
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -33,7 +33,7 @@ export const MODAL_MODELS = {
     description: "GPT OSS on NVIDIA for account-aware mentoring and coaching",
     type: "thinking" as const,
     assistantMode: "mentor" as const,
-    maxTokens: 420,
+    maxTokens: 900,
     historyLimit: 5,
   },
 };
@@ -44,6 +44,7 @@ const SPECIALIZED_PROMPTS = {
   psychology: {
     system: "You are a trading psychology expert specializing in emotional state management and mental peak performance.",
     templates: {
+      insights: "Generate a daily Key Insights & Warnings brief from the user's private journal context. Include: 1) 3 to 5 key insights grounded in the data 2) 2 to 3 warnings or risks 3) one immediate action. Keep it concise, practical, and specific.",
       tilt: "Create a comprehensive tilt management protocol for handling trading drawdown. Include: 1) Early warning signs identification 2) Immediate action steps 3) Reset rituals 4) Journaling prompts 5) Return-to-trading criteria",
       mindset: "Analyze the user's trading psychology based on their trade data. Include: 1) Emotional pattern analysis 2) Risk tolerance assessment 3) Confidence calibration 4) Recommended mindset shifts 5) Daily mental warmup routine",
       focus: "Design a focus enhancement protocol. Include: 1) Pre-session preparation ritual 2) Attention anchors 3) Distraction mitigation 4) Peak state triggers 5) Session closure analysis",
@@ -205,6 +206,17 @@ ROLE
 - If the user asks about their own trades, performance, psychology, risk settings, or journal, clearly say Research mode cannot access that data and they should switch to Mentor mode.
 - If the user requests trade-specific analysis, refuse to use private data and offer a general research alternative.
 
+MARKET DATA & MONITORING
+- Live market data is available via the app's Data Tools panel with two sources:
+  - **FMP Data**: earnings calendar, treasury rates, stock quotes, company profiles, key metrics, financial statements, ratios, price change, DCF valuation
+  - **Finnhub Data**: market news, company news, insider transactions, analyst recommendations, economic calendar (CPI, GDP, jobs, etc.), SEC filings, earnings surprises, peer companies, market status
+- **Firehose Monitoring** is available on the Monitoring page. Users can create rules that track financial news globally (e.g., specific symbols, sectors, or keywords). Events are polled every 60 seconds and stored for AI analysis. If a user asks about a specific market event or news, guide them to set up a Firehose monitoring rule via the Monitoring page.
+- When a user shares a Firehose event (title, summary, source, URL), analyze its market impact, relevance to their trading, and suggest actionable insights.
+- If the user asks about live market data that the Data Tools can provide, guide them to use the Data Tools button in the input bar (Research mode) or ask the user to type their request.
+- If market data is included in the user message or history, summarize it in clean Markdown.
+- Never emit raw tool syntax such as \`<tool_call>\`, \`<function=...>\`, or skill names as the answer.
+- If live market data is unavailable, say so plainly instead of inventing data.
+
 STYLE
 - Be concise, practical, and well-structured.
 - Lead with the answer, then use 3 to 6 bullets when helpful.
@@ -229,12 +241,18 @@ const buildMentorSystemPrompt = (
   const normalizedQuery = query.toLowerCase();
 
   if (
+    normalizedQuery.includes("key insights") ||
+    normalizedQuery.includes("warnings") ||
+    normalizedQuery.includes("insight") ||
+    normalizedQuery.includes("warning") ||
     normalizedQuery.includes("psychology") ||
     normalizedQuery.includes("tilt") ||
     normalizedQuery.includes("mindset") ||
     normalizedQuery.includes("emotion")
   ) {
-    const psychologyType = normalizedQuery.includes("tilt")
+    const psychologyType = normalizedQuery.includes("key insights") || normalizedQuery.includes("insight") || normalizedQuery.includes("warning")
+      ? "insights"
+      : normalizedQuery.includes("tilt")
       ? "tilt"
       : normalizedQuery.includes("mindset")
         ? "mindset"
@@ -267,10 +285,15 @@ CORE RULES
 RESPONSE MODES
 - If this is a deep analysis request (${isSpecialAnalysis}), use exact section tags when the prompt asks for them.
 - If strategy plan mode is ${isPlanMode}, favor structure, rules, and checklists over narrative.
-- Allowed structured tags: [SECTION:...] plus [WIDGET:CHECKLIST:Title]...[/WIDGET:CHECKLIST] and [WIDGET:MERMAID:TYPE]...[/WIDGET:MERMAID].
-- Checklist blocks should use one item per line. Prefer status markers like - [todo], - [doing], - [done], and - [blocked].
-- Mermaid blocks must contain pure Mermaid syntax with no code fences.
-- Supported Mermaid types: FLOWCHART, SEQUENCE, STATE, GANTT, ER.
+- Allowed structured tags: [SECTION:...] only when a prompt explicitly asks for sections.
+- Do not use widget tags, checklist widgets, Mermaid widgets, XML-like tool tags, or hidden UI syntax.
+- Write checklists as normal Markdown bullets or numbered steps.
+
+FIREHOSE MARKET MONITORING
+- The user may have active Firehose monitoring rules configured on the Monitoring page.
+- When the user asks about a market event that was captured by Firehose (title, summary, source, URL provided in context), analyze how it impacts their open trades, portfolio, and trading plan.
+- Be proactive: if relevant Firehose events exist in the context, reference them when giving market analysis.
+- Suggest Lucene queries in the format \`[Suggest Rule: Name | query]\` when the user expresses interest in monitoring a specific asset, sector, or keyword.
 
 COMMUNICATION
 - Start directly with the answer.
@@ -502,7 +525,7 @@ export const modalResearchService = {
         isPlanMode,
       });
 
-      const timeoutMs = payload.assistantMode === "research" ? 18000 : 28000;
+      const timeoutMs = payload.assistantMode === "research" ? 30000 : 45000;
       return chatCompletion(
         payload.modelId,
         payload.messages,
