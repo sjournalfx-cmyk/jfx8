@@ -11,15 +11,28 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  if (req.method === 'GET') {
+    return new Response(JSON.stringify({ status: 'ok' }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
+    })
+  }
+
   try {
     const firehoseApiKey = Deno.env.get('FIREHOSE_API_KEY')
     if (!firehoseApiKey) {
       throw new Error('FIREHOSE_API_KEY not configured')
     }
 
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      throw new Error('Missing Authorization header')
+    }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
     )
 
     const { data: rules, error: rulesError } = await supabase

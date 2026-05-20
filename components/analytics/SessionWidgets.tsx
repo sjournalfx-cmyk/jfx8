@@ -510,21 +510,25 @@ export const DailyActivityHeatmap: React.FC<WidgetProps> = ({ trades, isDarkMode
                 animationDuration={1500}
               />
               <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: isDarkMode ? '#18181b' : '#fff', 
-                  borderRadius: '16px', 
-                  border: isDarkMode ? '1px solid #27272a' : '1px solid #e2e8f0',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                  color: isDarkMode ? '#fff' : '#000'
-                }}
-                formatter={(val: number, name, props) => {
-                  const payload = props.payload as { winRate?: number; count?: number; pnl?: number };
-                  const winRate = typeof payload?.winRate === 'number' ? payload.winRate : Number(val);
-                  return [
-                    `${winRate.toFixed(0)}%`,
-                    'Win Rate'
-                  ];
+                cursor={{ stroke: '#8251EE', strokeWidth: 1, strokeOpacity: 0.2 }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+
+                  const point = payload[0]?.payload as { winRate?: number; count?: number };
+                  const winRate = typeof point?.winRate === 'number' ? point.winRate : Number(payload[0]?.value ?? 0);
+                  const totalTrades = point?.count ?? 0;
+
+                  return (
+                    <div className="rounded-2xl border border-zinc-800 bg-[#000000] px-4 py-3 shadow-2xl">
+                      <div className="text-sm font-black text-white">{label}</div>
+                      <div className="mt-1 text-xs font-semibold text-zinc-300">
+                        Win Rate: <span className="text-violet-400">{winRate.toFixed(0)}%</span>
+                      </div>
+                      <div className="mt-1 text-xs font-semibold text-zinc-300">
+                        Total trades: <span className="text-white">{totalTrades}</span>
+                      </div>
+                    </div>
+                  );
                 }}
               />
             </RadarChart>

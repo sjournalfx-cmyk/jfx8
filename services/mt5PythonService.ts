@@ -51,7 +51,7 @@ function runPythonScript(script: string, args: string[] = []): Promise<string> {
   return new Promise((resolve, reject) => {
     const python = spawn('python', [script, ...args], {
       cwd: __dirname,
-      shell: true
+      shell: false
     });
 
     let output = '';

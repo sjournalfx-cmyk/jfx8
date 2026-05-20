@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Trade, UserProfile } from '../types';
 import { getSASTDateTime } from '../lib/timeUtils';
+import { sanitizeRichTextHtml } from '../lib/htmlSanitizer';
 import { JournalSkeleton, EmptyState } from './ui/Skeleton';
 
 interface JournalProps {
@@ -845,7 +846,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 ) : trade.notes ? (
                                     <div
                                         className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none"
-                                        dangerouslySetInnerHTML={{ __html: trade.notes }}
+                                        dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trade.notes) }}
                                     />
                                 ) : (
                                     <p className="text-sm opacity-50 italic">No entry comments recorded.</p>
@@ -900,7 +901,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 ) : trade.exitComment ? (
                                     <div
                                         className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none"
-                                        dangerouslySetInnerHTML={{ __html: trade.exitComment }}
+                                        dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trade.exitComment) }}
                                     />
                                 ) : (
                                     <p className="text-sm opacity-50 italic">No exit comments recorded.</p>

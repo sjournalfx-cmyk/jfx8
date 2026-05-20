@@ -188,7 +188,7 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
 
   if (strategyData.length === 0) {
     return (
-      <Card className="flex flex-col items-center justify-center h-[480px]" isDarkMode={isDarkMode}>
+      <Card className="flex h-[320px] flex-col items-center justify-center" isDarkMode={isDarkMode}>
         <CardHeader className="text-center">
           <CardTitle>Strategy Distribution</CardTitle>
           <CardDescription>No strategy data available. Tag your trades to see performance.</CardDescription>
@@ -198,13 +198,13 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
   }
 
   return (
-    <Card data-chart={id} className="flex flex-col h-full min-h-[480px] border border-zinc-900 bg-[#000000]" isDarkMode={isDarkMode}>
+    <Card data-chart={id} className="flex h-full min-h-[320px] flex-col border border-zinc-900 bg-[#000000]" isDarkMode={isDarkMode}>
       <CardHeader className="flex-row items-start space-y-0 pb-0">
         <div className="grid gap-1">
           <CardTitle>Strategy Distribution</CardTitle>
           <CardDescription>Performance by Strategy</CardDescription>
         </div>
-        <div className="ml-auto w-[180px]">
+        <div className="ml-auto w-[150px]">
           <Select 
             value={activeStrategy} 
             onChange={setActiveStrategy}
@@ -216,13 +216,13 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
       <CardContent className="flex flex-1 justify-center pb-0">
         <ChartContainer
           config={chartConfig}
-          className="mx-auto aspect-square w-full max-w-[350px]"
+          className="mx-auto aspect-square w-full max-w-[230px]"
         >
           <PieChart>
             <ChartTooltip
               cursor={false}
               allowEscapeViewBox={{ x: true, y: true }}
-              position={{ x: 360, y: 20 }}
+              position={{ x: 246, y: 18 }}
               wrapperStyle={{ pointerEvents: 'none', zIndex: 30 }}
               content={<CustomTooltip />}
             />
@@ -230,8 +230,8 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
               data={strategyData}
               dataKey="trades"
               nameKey="strategy"
-              innerRadius={70}
-              strokeWidth={5}
+              innerRadius={50}
+              strokeWidth={4}
               stroke={isDarkMode ? "#000000" : "#e2e8f0"}
               shape={renderPieShape}
               onClick={(_, index) => setActiveStrategy(strategyData[index].strategy)}

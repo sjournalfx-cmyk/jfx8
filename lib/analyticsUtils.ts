@@ -13,7 +13,3 @@ export const getTradeTimestamp = (trade: Trade): number => {
 export const sortTradesChronologically = (trades: Trade[] = []): Trade[] => {
   return [...trades].sort((a, b) => getTradeTimestamp(a) - getTradeTimestamp(b));
 };
-
-export const getCompletedTradesChronologically = (trades: Trade[] = []): Trade[] => {
-  return sortTradesChronologically(getCompletedTrades(trades));
-};

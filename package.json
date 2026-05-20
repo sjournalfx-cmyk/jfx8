@@ -4,10 +4,10 @@
   "version": "1.0.0-beta.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test": "vitest",
+    "dev": "node scripts/with-esbuild.cjs vite",
+    "build": "node scripts/with-esbuild.cjs vite build",
+    "preview": "node scripts/with-esbuild.cjs vite preview",
+    "test": "node scripts/with-esbuild.cjs vitest",
     "lint": "tsc --noEmit",
     "supabase:migrate": "supabase db diff --local > supabase/migrations/$(date +%Y%m%d%H%M%S)_migration.sql && supabase db push",
     "supabase:reset": "supabase db reset"

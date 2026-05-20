@@ -1,0 +1,64 @@
+﻿<h2>Market Data Tools — Dropdown</h2>
+<p class="subtitle">Replaces the current single Calendar button in the input bar</p>
+
+<div style="display:flex;align-items:center;gap:12px;padding:16px;background:var(--bg-secondary);border-radius:12px;margin:24px 0">
+  <div style="background:rgba(6,182,212,0.15);padding:8px;border-radius:10px;color:var(--accent)">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+      <line x1="16" y1="2" x2="16" y2="6"></line>
+      <line x1="8" y1="2" x2="8" y2="6"></line>
+      <line x1="3" y1="10" x2="21" y2="10"></line>
+    </svg>
+  </div>
+  <div style="flex:1;text-align:left;font-size:13px;color:var(--text-secondary)">Data Tools ▼</div>
+  <div style="display:flex;gap:6px">
+    <div style="width:24px;height:24px;border-radius:6px;background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.2)"></div>
+    <div style="width:24px;height:24px;border-radius:6px;background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.2)"></div>
+  </div>
+</div>
+
+<div style="position:relative;margin-bottom:24px">
+  <div style="position:absolute;top:0;left:20px;width:220px;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.3);overflow:hidden;z-index:10">
+    <div style="padding:10px 14px;font-size:12px;font-weight:600;color:var(--text-secondary);border-bottom:1px solid var(--border-color);text-transform:uppercase;letter-spacing:0.5px">Market Data Tools</div>
+
+    <div style="padding:6px 8px">
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">📰</span> Market News</div>
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">📊</span> Sector Performance</div>
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">📈</span> Market Movers</div>
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">🗓️</span> Earnings Calendar</div>
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">💰</span> Stock Quote</div>
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">🏢</span> Company Profile</div>
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">🌍</span> Economic Indicators</div>
+      <div class="option" style="cursor:pointer;padding:8px 10px;border-radius:8px;background:transparent;border:none;font-size:14px"><span style="margin-right:10px">🏦</span> Treasury Rates</div>
+    </div>
+  </div>
+</div>
+
+<h3>After Selecting "Stock Quote" — Inline Input</h3>
+<p class="subtitle">User sees this right in the chat after picking a ticker-dependent tool</p>
+
+<div style="margin-top:16px;padding:12px 16px;background:var(--bg-secondary);border-radius:12px;display:inline-flex;align-items:center;gap:8px">
+  <span style="font-size:14px">💰 Stock Quote —</span>
+  <input type="text" placeholder="Enter symbol (e.g. AAPL, EUR/USD)" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;width:240px">
+  <button style="padding:6px 14px;border-radius:8px;background:var(--accent);color:white;border:none;font-size:13px;cursor:pointer">Fetch</button>
+</div>
+
+<h3 style="margin-top:48px">Result Appears as Chat Message</h3>
+<p class="subtitle">Example: Market Movers result</p>
+
+<div style="margin-top:16px;padding:16px;background:var(--bg-secondary);border-radius:12px">
+  <div style="font-size:12px;color:var(--accent);font-weight:600;margin-bottom:8px;text-transform:upperrcase;letter-spacing:0.5px">📈 MARKET MOVERS</div>
+  <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">May 18, 2026 — US Markets</div>
+  <div style="font-size:13px;font-weight:600;margin-bottom:8px">Biggest Gainers</div>
+  <div style="font-size:12px;padding:4px 0">NVDA +4.2%</div>
+  <div style="font-size:12px;padding:4px 0">AMD +3.1%</div>
+  <div style="font-size:12px;padding:4px 0">META +2.8%</div>
+  <div style="font-size:13px;font-weight:600;margin-top:12px;margin-bottom:8px">Biggest Losers</div>
+  <div style="font-size:12px;padding:4px 0">TSLA -2.1%</div>
+  <div style="font-size:12px;padding:4px 0">JPM -1.5%</div>
+</div>
+
+<div class="section">
+  <h3>Data Source Note</h3>
+  <p class="subtitle">All data from FMP free plan — max 250 calls/day, US stocks, delayed quotes.</p>
+</div>

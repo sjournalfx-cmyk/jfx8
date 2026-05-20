@@ -55,6 +55,20 @@ export const firehoseService = {
     return mapRuleFromDB(data);
   },
 
+  async updateRule(ruleId: string, updates: { name?: string; luceneQuery?: string }): Promise<FirehoseRule> {
+    const dbUpdates: Record<string, string> = {};
+    if (updates.name !== undefined) dbUpdates.name = updates.name;
+    if (updates.luceneQuery !== undefined) dbUpdates.lucene_query = updates.luceneQuery;
+    const { data, error } = await supabase
+      .from('firehose_rules')
+      .update(dbUpdates)
+      .eq('id', ruleId)
+      .select()
+      .single();
+    if (error) throw error;
+    return mapRuleFromDB(data);
+  },
+
   async toggleRule(ruleId: string, active: boolean): Promise<void> {
     const { error } = await supabase
       .from('firehose_rules')
@@ -113,5 +127,49 @@ export const firehoseService = {
       .eq('seen', false);
 
     if (error) throw error;
+  },
+
+  async syncEvents(userId: string, force: boolean = false): Promise<void> {
+    try {
+      // Check last sync time
+      const { data, error: fetchError } = await supabase
+        .from('firehose_sync_state')
+        .select('last_sync_at')
+        .eq('user_id', userId)
+        .single();
+
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('Failed to fetch sync state:', fetchError);
+      }
+
+      const lastSync = data ? new Date(data.last_sync_at).getTime() : 0;
+      const now = Date.now();
+
+      if (!force && now - lastSync < 60000) {
+        return; // Skip if within 60 seconds
+      }
+
+      // Update timestamp to prevent concurrent calls
+      await supabase
+        .from('firehose_sync_state')
+        .upsert({ user_id: userId, last_sync_at: new Date().toISOString() });
+
+      const { error } = await supabase.functions.invoke('sync-firehose');
+      if (error) {
+        throw error;
+      }
+    } catch (err) {
+      console.error('Failed to sync firehose events:', err);
+      throw err; // Re-throw so UI can catch and show toast
+    }
+  },
+
+  async checkHealth(): Promise<boolean> {
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-firehose', { method: 'GET' });
+      return !error && data?.status === 'ok';
+    } catch {
+      return false;
+    }
   },
 };

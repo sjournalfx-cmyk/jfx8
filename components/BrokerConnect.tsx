@@ -60,7 +60,6 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
   const [orderError, setOrderError] = useState('');
   const [orderSuccess, setOrderSuccess] = useState('');
   const intervalRef = useRef<number | null>(null);
-  const savedPasswordRef = useRef<string>('');
 
   const attemptAutoLogin = async (pwd: string) => {
     if (!server || !login || !pwd) return;
@@ -88,10 +87,6 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
         login: data.login
       });
 
-      localStorage.setItem('mt5_password', pwd);
-      localStorage.setItem('mt5_server', server);
-      localStorage.setItem('mt5_login', login);
-
       await supabase
         .from('profiles')
         .update({
@@ -102,29 +97,12 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
         })
         .eq('id', userProfile.accountName);
     } catch (err: any) {
-      localStorage.removeItem('mt5_password');
       setError(err.message || 'Could not connect to MT5');
       setStatus({ connected: false, error: err.message });
     } finally {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (!status.connected) {
-      const savedPassword = localStorage.getItem('mt5_password');
-      const savedServer = localStorage.getItem('mt5_server');
-      const savedLogin = localStorage.getItem('mt5_login');
-      
-      if (savedServer && savedLogin) {
-        setServer(savedServer);
-        setLogin(savedLogin);
-        if (savedPassword) {
-          setPassword(savedPassword);
-        }
-      }
-    }
-  }, [userProfile?.accountName, userProfile?.broker_server, userProfile?.broker_login]);
 
   const fetchPositions = async () => {
     if (!status.connected) return;
@@ -209,10 +187,6 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
         login: data.login
       });
 
-      localStorage.setItem('mt5_password', pwdToUse);
-      localStorage.setItem('mt5_server', server);
-      localStorage.setItem('mt5_login', login);
-
       await supabase
         .from('profiles')
         .update({
@@ -230,6 +204,13 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
     }
   };
 
+  useEffect(() => {
+    if (!status.connected) {
+      setServer(userProfile?.broker_server || '');
+      setLogin(userProfile?.broker_login || '');
+    }
+  }, [status.connected, userProfile?.broker_server, userProfile?.broker_login]);
+
   const handleSync = async () => {
     setSyncing(true);
     try {
@@ -243,13 +224,8 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
 
   const handleDisconnect = async () => {
     setStatus({ connected: false });
-    setServer('');
-    setLogin('');
     setPassword('');
     setPositions([]);
-    localStorage.removeItem('mt5_password');
-    localStorage.removeItem('mt5_server');
-    localStorage.removeItem('mt5_login');
   };
 
   const handleOpenPosition = async (direction: 'BUY' | 'SELL') => {

@@ -210,8 +210,6 @@ MARKET DATA & MONITORING
 - Live market data is available via the app's Data Tools panel with two sources:
   - **FMP Data**: earnings calendar, treasury rates, stock quotes, company profiles, key metrics, financial statements, ratios, price change, DCF valuation
   - **Finnhub Data**: market news, company news, insider transactions, analyst recommendations, economic calendar (CPI, GDP, jobs, etc.), SEC filings, earnings surprises, peer companies, market status
-- **Firehose Monitoring** is available on the Monitoring page. Users can create rules that track financial news globally (e.g., specific symbols, sectors, or keywords). Events are polled every 60 seconds and stored for AI analysis. If a user asks about a specific market event or news, guide them to set up a Firehose monitoring rule via the Monitoring page.
-- When a user shares a Firehose event (title, summary, source, URL), analyze its market impact, relevance to their trading, and suggest actionable insights.
 - If the user asks about live market data that the Data Tools can provide, guide them to use the Data Tools button in the input bar (Research mode) or ask the user to type their request.
 - If market data is included in the user message or history, summarize it in clean Markdown.
 - Never emit raw tool syntax such as \`<tool_call>\`, \`<function=...>\`, or skill names as the answer.
@@ -288,12 +286,6 @@ RESPONSE MODES
 - Allowed structured tags: [SECTION:...] only when a prompt explicitly asks for sections.
 - Do not use widget tags, checklist widgets, Mermaid widgets, XML-like tool tags, or hidden UI syntax.
 - Write checklists as normal Markdown bullets or numbered steps.
-
-FIREHOSE MARKET MONITORING
-- The user may have active Firehose monitoring rules configured on the Monitoring page.
-- When the user asks about a market event that was captured by Firehose (title, summary, source, URL provided in context), analyze how it impacts their open trades, portfolio, and trading plan.
-- Be proactive: if relevant Firehose events exist in the context, reference them when giving market analysis.
-- Suggest Lucene queries in the format \`[Suggest Rule: Name | query]\` when the user expresses interest in monitoring a specific asset, sector, or keyword.
 
 COMMUNICATION
 - Start directly with the answer.
@@ -425,7 +417,10 @@ async function chatCompletion(
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`NVIDIA API error: ${response.status} - ${error}`);
+      if (response.status === 401) {
+        throw new Error('NVIDIA_API_KEY is missing or invalid. Add NVIDIA_API_KEY to your .env.local file.');
+      }
+      throw new Error(`NVIDIA API error (${response.status})`);
     }
 
     if (onStream && response.body) {
@@ -495,6 +490,16 @@ async function chatCompletion(
 }
 
 export const modalResearchService = {
+  async generateRuleSuggestions(prompt: string, signal?: AbortSignal): Promise<string> {
+    const modelId = MODAL_MODELS.deepseek.id;
+    const maxTokens = 600;
+    const messages: ChatMessage[] = [
+      { role: "system", content: "/no_think" },
+      { role: "user", content: prompt },
+    ];
+    return chatCompletion(modelId, messages, maxTokens, undefined, signal, 30000);
+  },
+
   async generateResponse(
     query: string,
     trades: Trade[],

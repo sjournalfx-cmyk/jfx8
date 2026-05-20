@@ -17,10 +17,28 @@ const restoreStructuredWidgets = (text: string, widgets: string[]) => (
   ), text)
 );
 
+const stripLeakedToolCalls = (text: string) => (
+  text
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/<function=[^>\n]+>\s*(?:<parameter=[^>\n]+>[\s\S]*?<\/parameter>\s*)*<\/function>/gi, '')
+);
+
+export const stripAssistantWidgetMarkup = (text: string): string => {
+  if (!text) return '';
+
+  return text
+    .replace(/\[WIDGET:CHECKLIST(?::[^\]]+)?\]([\s\S]*?)(?:\[\/WIDGET:CHECKLIST\]|\[\/WIDGET\])/gi, (_match, body: string) => body.trim())
+    .replace(/\[WIDGET:MERMAID(?::[^\]]+)?\][\s\S]*?(?:\[\/WIDGET:MERMAID\]|\[\/WIDGET\])/gi, '')
+    .replace(/\[\/?WIDGET(?::[A-Z]+)?(?::[^\]]+)?\]/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
 export const normalizeAssistantMarkdown = (text: string): string => {
   if (!text) return '';
 
-  const { masked, widgets } = preserveStructuredWidgets(text.replace(/\r\n/g, '\n').trim());
+  const { masked, widgets } = preserveStructuredWidgets(stripLeakedToolCalls(text).replace(/\r\n/g, '\n').trim());
   let result = masked;
 
   result = result.replace(/^(#{1,6})([^\s#])/gm, '$1 $2');

@@ -7,6 +7,27 @@ import { supabase } from '../lib/supabase';
 import { normalizeThemePreference } from '../lib/theme';
 import { normalizePlan } from '../lib/constants';
 
+const AUTH_BOOT_TIMEOUT_MS = 8000;
+
+const withTimeout = <T,>(promise: Promise<T>, label: string, timeoutMs = AUTH_BOOT_TIMEOUT_MS): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+};
+
 export const useAuth = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -60,12 +81,12 @@ export const useAuth = () => {
     if (isInitializing.current) return;
     isInitializing.current = true;
     try {
-      const user = await authService.getCurrentUser();
+      const user = await withTimeout(authService.getCurrentUser(), 'Auth bootstrap');
       if (user) {
         setUserId(user.id);
         setIsAuthenticated(true);
         setUserEmail(user.email || '');
-        await loadUserData(user.id);
+        await withTimeout(loadUserData(user.id), 'Profile bootstrap');
       }
     } catch (error) {
       console.error("Failed to initialize app:", error);

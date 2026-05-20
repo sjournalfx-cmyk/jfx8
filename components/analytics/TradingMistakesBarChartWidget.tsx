@@ -97,18 +97,18 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
   return (
     <Card
       data-chart="trading-mistakes-bar"
-      className={`relative flex h-full min-h-[480px] flex-col overflow-hidden border shadow-sm ${isDarkMode ? 'border-zinc-800 bg-[#0d1117]' : 'border-slate-200 bg-white'}`}
+      className={`relative flex h-full min-h-[320px] flex-col overflow-hidden border shadow-sm ${isDarkMode ? 'border-zinc-800 bg-[#0d1117]' : 'border-slate-200 bg-white'}`}
       isDarkMode={isDarkMode}
     >
       <ChartStyle id="trading-mistakes-bar" config={chartConfig} />
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-rose-500/50 to-transparent" />
-      <CardHeader className="flex-row items-start gap-4 space-y-0 pb-4">
-        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${isDarkMode ? 'border-rose-500/20 bg-rose-500/10' : 'border-rose-500/15 bg-rose-50'}`}>
-          <BarChart3 size={20} className="text-rose-500" />
+      <CardHeader className="flex-row items-start gap-3 space-y-0 pb-2">
+        <div className={`flex h-8 w-8 items-center justify-center rounded-2xl border ${isDarkMode ? 'border-rose-500/20 bg-rose-500/10' : 'border-rose-500/15 bg-rose-50'}`}>
+          <BarChart3 size={16} className="text-rose-500" />
         </div>
         <div className="min-w-0 flex-1">
-          <CardTitle className="text-xl tracking-tight">Trading Mistakes</CardTitle>
-          <CardDescription className="mt-1 max-w-[28rem]">
+          <CardTitle className="text-base tracking-tight">Trading Mistakes</CardTitle>
+          <CardDescription className="mt-1 max-w-[24rem] text-sm">
             Patterns that keep repeating in your journal
           </CardDescription>
         </div>
@@ -122,19 +122,19 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
           </div>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-4 pt-0 pb-0">
+      <CardContent className="flex flex-1 flex-col gap-2 pt-0 pb-0">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className={`rounded-2xl border p-4 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`rounded-2xl border p-2.5 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
             <div className="text-[10px] font-black uppercase tracking-widest opacity-50">Total mistakes</div>
-            <div className="mt-2 text-2xl font-black">{totalMistakes}</div>
+            <div className="mt-1 text-lg font-black">{totalMistakes}</div>
           </div>
-          <div className={`rounded-2xl border p-4 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`rounded-2xl border p-2.5 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
             <div className="text-[10px] font-black uppercase tracking-widest opacity-50">Unique types</div>
-            <div className="mt-2 text-2xl font-black">{mistakeData.length}</div>
+            <div className="mt-1 text-lg font-black">{mistakeData.length}</div>
           </div>
-          <div className={`rounded-2xl border p-4 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`rounded-2xl border p-2.5 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
             <div className="text-[10px] font-black uppercase tracking-widest opacity-50">Most common</div>
-            <div className="mt-2 truncate text-lg font-black">{mostCommonMistake?.mistake || 'None'}</div>
+            <div className="mt-1 truncate text-sm font-black">{mostCommonMistake?.mistake || 'None'}</div>
             <div className="mt-1 text-[10px] font-bold uppercase tracking-widest opacity-50">
               {mostCommonMistake ? `${mostCommonMistake.count} occurrences` : 'No data'}
             </div>
@@ -142,7 +142,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
         </div>
 
         {mistakeData.length === 0 ? (
-          <div className={`flex flex-1 min-h-[220px] items-center justify-center rounded-[28px] border border-dashed text-center ${isDarkMode ? 'border-zinc-800 bg-white/5 text-zinc-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
+          <div className={`flex flex-1 min-h-[160px] items-center justify-center rounded-[28px] border border-dashed text-center ${isDarkMode ? 'border-zinc-800 bg-white/5 text-zinc-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
             <div className="space-y-3 px-6">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10 text-rose-500">
                 <AlertTriangle size={22} />
@@ -154,18 +154,18 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
             </div>
           </div>
         ) : (
-          <ChartContainer config={chartConfig} className="h-[320px] w-full">
+          <ChartContainer config={chartConfig} className="h-[200px] w-full">
             <BarChart
               accessibilityLayer
               data={mistakeData}
-              layout="vertical"
-              margin={{
-                left: 12,
+                layout="vertical"
+                margin={{
+                left: 8,
                 right: 16,
-                top: 4,
-                bottom: 4,
-              }}
-            >
+                top: 0,
+                bottom: 0,
+                }}
+              >
               <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke={isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)'} />
               <XAxis type="number" dataKey="count" hide />
               <YAxis
@@ -174,7 +174,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
                 tickLine={false}
                 axisLine={false}
                 tickMargin={10}
-                width={160}
+                width={128}
                 tick={{ fill: isDarkMode ? '#a1a1aa' : '#475569', fontSize: 11, fontWeight: 700 }}
                 tickFormatter={truncatedTick}
               />
@@ -192,7 +192,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
           </ChartContainer>
         )}
       </CardContent>
-      <div className="mt-auto border-t border-zinc-500/10 p-6 pt-4">
+      <div className="mt-auto border-t border-zinc-500/10 p-3 pt-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-[10px] font-black uppercase tracking-widest opacity-50">
             Top mistakes

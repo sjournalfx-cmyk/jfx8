@@ -75,6 +75,25 @@ describe('nvidiaAiService payload builder', () => {
     expect(systemPrompt).not.toContain('Private journal note');
   });
 
+  it('injects the market data guidance into research mode', () => {
+    const payload = buildAiRequestPayload({
+      query: 'What is happening in the markets?',
+      trades: [sampleTrade],
+      userProfile: sampleProfile,
+      modelType: 'deepseek',
+    });
+
+    const systemPrompt = payload.messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n');
+
+    expect(systemPrompt).toContain('MARKET DATA');
+    expect(systemPrompt).toContain('FMP');
+    expect(systemPrompt).toContain('Finnhub');
+    expect(systemPrompt).toContain('Data Tools');
+  });
+
   it('includes compact private context for mentor mode and caps history', () => {
     const payload = buildAiRequestPayload({
       query: 'Analyze my trading psychology based on my trade data.',
@@ -94,7 +113,7 @@ describe('nvidiaAiService payload builder', () => {
 
     expect(getAssistantMode('kimi')).toBe('mentor');
     expect(payload.assistantMode).toBe('mentor');
-    expect(payload.maxTokens).toBe(420);
+    expect(payload.maxTokens).toBe(900);
     expect(payload.messages).toHaveLength(8);
     expect(payload.contextSummary).toMatchObject({
       mode: 'mentor',

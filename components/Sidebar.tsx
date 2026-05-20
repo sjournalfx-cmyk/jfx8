@@ -145,7 +145,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'charts', icon: <IconChartCandle size={18} />, label: 'Market Grid', restricted: true, description: 'Multi-chart analysis view' },
     { id: 'backtest-lab', icon: <IconFlask size={18} />, label: 'Backtest Lab', restricted: true, description: 'Test strategies historically' },
     { id: 'ai-chat', icon: <IconMessage size={18} />, label: 'AI Assistant', description: 'Get AI trading insights' },
-    { id: 'monitoring', icon: <IconRadio size={18} />, label: 'Monitoring', description: 'Market news & event monitoring' },
     { id: 'broker', icon: <IconWorld size={18} />, label: 'Broker', description: 'Connect your broker account' },
   ];
 

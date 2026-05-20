@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Trade, UserProfile, EASession, CashTransaction } from '../types';
 import {
     TrendingUp, Info, Activity,
-    Target, LineChart, Shield, X, Printer, Gauge, Zap, TrendingDown, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck
+    Target, LineChart, Shield, X, Printer, Gauge, Zap, TrendingDown, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw
 } from 'lucide-react';
 
 import {
@@ -45,6 +45,7 @@ import { DetailedStatistics } from './analytics/DetailedStatistics';
 import { PLByPlanAdherenceWidget } from './analytics/PLByPlanAdherenceWidget';
 import { CashTransactionsView } from './analytics/CashTransactionsView';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
+import { type PsychologyInsightsEntry } from '../lib/psychologyInsights';
 
 import {
     DndContext,
@@ -65,6 +66,122 @@ import { SortableWidget } from './ui/SortableWidget';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { calculateStats } from '../lib/statsUtils';
 import { getCompletedTrades, sortTradesChronologically } from '../lib/analyticsUtils';
+
+type PsychologyBriefTone = 'insight' | 'warning' | 'action';
+
+type PsychologyBriefItem = {
+    title: string;
+    body: string;
+    tone: PsychologyBriefTone;
+};
+
+type PsychologyBriefSection = {
+    title: string;
+    tone: PsychologyBriefTone;
+    items: PsychologyBriefItem[];
+};
+
+const parsePsychologyBrief = (content: string): PsychologyBriefSection[] => {
+    const lines = content.split(/\r?\n/).map((line) => line.trim());
+    const sections: PsychologyBriefSection[] = [];
+    let currentSection: PsychologyBriefSection | null = null;
+
+    const flushSection = () => {
+        if (currentSection && currentSection.items.length > 0) {
+            sections.push(currentSection);
+        }
+        currentSection = null;
+    };
+
+    const getTone = (label: string): PsychologyBriefTone => {
+        if (/warning|risk/i.test(label)) return 'warning';
+        if (/action/i.test(label)) return 'action';
+        return 'insight';
+    };
+
+    for (const rawLine of lines) {
+        if (!rawLine) continue;
+
+        const headingMatch = rawLine.match(/^#{1,6}\s*(.+)$/);
+        const heading = (headingMatch?.[1] ?? rawLine).trim();
+        const normalizedHeading = heading.toLowerCase();
+
+        if (normalizedHeading === 'key insights' || normalizedHeading === 'warnings' || normalizedHeading === 'immediate action') {
+            flushSection();
+            currentSection = {
+                title: heading,
+                tone: getTone(heading),
+                items: [],
+            };
+            continue;
+        }
+
+        if (!currentSection) {
+            continue;
+        }
+
+        const cleanedLine = rawLine.replace(/^[-*•]\s+/, '').trim();
+        if (!cleanedLine) continue;
+
+        const colonIndex = cleanedLine.indexOf(':');
+        const title = colonIndex > 0 ? cleanedLine.slice(0, colonIndex).trim() : cleanedLine;
+        const body = colonIndex > 0 ? cleanedLine.slice(colonIndex + 1).trim() : '';
+
+        currentSection.items.push({
+            title,
+            body,
+            tone: currentSection.tone,
+        });
+    }
+
+    flushSection();
+    return sections;
+};
+
+const psychologyCardToneClasses: Record<PsychologyBriefTone, { shell: string; stripe: string; icon: string; title: string }> = {
+    insight: {
+        shell: 'border-[#19371f] bg-[#0e1711]',
+        stripe: 'bg-emerald-500',
+        icon: 'text-emerald-400',
+        title: 'text-white',
+    },
+    warning: {
+        shell: 'border-[#4a201f] bg-[#170e0f]',
+        stripe: 'bg-rose-500',
+        icon: 'text-rose-400',
+        title: 'text-white',
+    },
+    action: {
+        shell: 'border-[#19412b] bg-[#0d1612]',
+        stripe: 'bg-sky-500',
+        icon: 'text-sky-400',
+        title: 'text-white',
+    },
+};
+
+const renderRadarAngleTick = ({ x, y, payload }: any) => {
+    const label = payload?.value;
+    const offsets: Record<string, { dx: number; dy: number }> = {
+        Confident: { dx: 0, dy: -30 },
+        Neutral: { dx: 28, dy: 0 },
+        Hesitant: { dx: 12, dy: 24 },
+        Anxious: { dx: -12, dy: 24 },
+        FOMO: { dx: -28, dy: 0 },
+    };
+    const { dx = 0, dy = 0 } = offsets[label] || {};
+    return (
+        <text
+            x={x + dx}
+            y={y + dy}
+            fill="#64748b"
+            fontSize={13}
+            textAnchor="middle"
+            dominantBaseline="middle"
+        >
+            {label}
+        </text>
+    );
+};
 
 const safePnL = (value: unknown): number => {
     const n = typeof value === 'number' ? value : Number(value);
@@ -89,7 +206,7 @@ function DonutChart({ value }: { value: number }) {
     const progressGap = circumference - progressLength;
 
     return (
-        <div className="relative flex justify-center items-center w-full">
+        <div className="relative flex w-full justify-center">
             <svg className="h-[220px] w-[220px]" viewBox="0 0 140 140" aria-hidden="true">
                 <circle
                     cx="70"
@@ -114,7 +231,7 @@ function DonutChart({ value }: { value: number }) {
                     transform="rotate(135 70 70)"
                 />
             </svg>
-            <div className="absolute flex flex-col items-center justify-center top-1/2 left-1/2 -translate-x-1/2 -translate-y-[38%]">
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <div className="flex items-end justify-center gap-1 leading-none">
                     <span className="text-[46px] font-bold text-[#2563eb]">{value}</span>
                     <span className="pb-1 text-[20px] font-semibold text-[#cbd5e1]">/100</span>
@@ -134,9 +251,12 @@ interface AnalyticsProps {
   onViewChange: (view: string) => void;
   eaSession?: EASession | null;
   cashTransactions?: CashTransaction[];
+  dailyPsychologyInsights?: PsychologyInsightsEntry | null;
+  onRefreshPsychologyInsights?: () => void;
+  isRefreshingPsychologyInsights?: boolean;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, cashTransactions = [] }) => {
+const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false }) => {
     const trades = useMemo(() => {
         return sortTradesChronologically(rawTrades);
     }, [rawTrades]);
@@ -145,6 +265,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
 
     const [activeInfo, setActiveInfo] = useState<{ title: string, content: string } | null>(null);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+    const psychologyBriefSections = useMemo(
+        () => (dailyPsychologyInsights?.content ? parsePsychologyBrief(dailyPsychologyInsights.content) : []),
+        [dailyPsychologyInsights]
+    );
     const [scoreToggled, setScoreToggled] = useState(false);
     
     const currencySymbol = userProfile?.currencySymbol || '$';
@@ -317,41 +441,67 @@ const renderPsychologyLayout = () => (
                 <section className="flex min-h-[380px] flex-col rounded-[20px] border border-[#1f1f1f] bg-[#000000] px-7 py-7 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
                     <div className="flex items-center justify-between">
                         <h2 className="text-[18px] font-bold text-white">{scoreToggled ? 'Performance Radar' : 'Tilt Score'}</h2>
-                        <div className="flex items-center gap-2">
-                            <span className="text-[15px] font-medium text-[#cbd5e1]">{scoreToggled ? 'Radar' : 'Score'}</span>
+                        <div
+                            className="inline-flex rounded-full border border-[#2a2a2a] bg-[#0a0a0a] p-1 shadow-[0_1px_0_rgba(255,255,255,0.03)]"
+                            role="tablist"
+                            aria-label="Tilt score display mode"
+                        >
                             <button
-                                onClick={() => setScoreToggled(!scoreToggled)}
-                                className={`relative h-[26px] w-[48px] rounded-full transition-colors ${scoreToggled ? 'bg-[#2563eb]' : 'bg-[#1f2937]'}`}
-                                aria-label="Toggle tilt score display"
+                                type="button"
+                                onClick={() => setScoreToggled(false)}
+                                aria-pressed={!scoreToggled}
+                                className={`rounded-full px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] transition-all ${
+                                    !scoreToggled
+                                        ? 'bg-white text-black shadow-sm'
+                                        : 'text-[#94a3b8] hover:text-white'
+                                }`}
                             >
-                                <span
-                                    className={`absolute top-[3px] h-[20px] w-[20px] rounded-full bg-white shadow-sm transition-transform ${scoreToggled ? 'translate-x-[24px]' : 'translate-x-[3px]'}`}
-                                />
+                                Score
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setScoreToggled(true)}
+                                aria-pressed={scoreToggled}
+                                className={`rounded-full px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] transition-all ${
+                                    scoreToggled
+                                        ? 'bg-white text-black shadow-sm'
+                                        : 'text-[#94a3b8] hover:text-white'
+                                }`}
+                            >
+                                Radar
                             </button>
                         </div>
                     </div>
 
-                    <div className="flex flex-1 flex-col items-center justify-center gap-5 pt-3">
+                    <div className="flex flex-1 flex-col items-center justify-center gap-6 pt-2">
                         {scoreToggled ? (
-                            <div className="h-[250px] w-full">
+                            <div className="mx-auto flex h-[320px] w-[320px] items-center justify-center">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <RadarChart cx="50%" cy="50%" outerRadius="72%" data={radarData}>
+                                    <RadarChart cx="50%" cy="50%" outerRadius="74%" data={radarData} margin={{ top: 28, right: 28, bottom: 28, left: 28 }}>
                                         <PolarGrid stroke="#e2e8f0" />
-                                        <PolarAngleAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 13 }} />
+                                        <PolarAngleAxis dataKey="name" tick={renderRadarAngleTick} />
                                         <PolarRadiusAxis
                                             angle={90}
                                             domain={[-20, 40]}
-                                            tick={{ fill: '#64748b', fontSize: 12 }}
-                                            tickCount={7}
+                                            tick={false}
+                                            axisLine={false}
                                         />
-                                        <Radar name="Performance" dataKey="pl" stroke="#4f46e5" strokeWidth={2} fill="#4f46e5" fillOpacity={0.15} />
+                                        <Radar
+                                            name="Performance"
+                                            dataKey="pl"
+                                            stroke="#4f46e5"
+                                            strokeWidth={2}
+                                            fill="#4f46e5"
+                                            fillOpacity={0.15}
+                                            isAnimationActive={false}
+                                        />
                                     </RadarChart>
                                 </ResponsiveContainer>
                             </div>
                         ) : (
                             <>
                                 <DonutChart value={disciplineScore} />
-                                <p className="max-w-[340px] text-center text-[14px] leading-7 text-[#cbd5e1]">
+                                <p className="max-w-[280px] text-center text-[14px] leading-7 text-[#cbd5e1]">
                                     {disciplineScore >= 90
                                         ? 'Your rule-following is strong. Keep protecting that consistency.'
                                         : disciplineScore >= 75
@@ -365,40 +515,69 @@ const renderPsychologyLayout = () => (
                     </div>
                 </section>
 
-                <section className="flex min-h-[380px] flex-col rounded-[20px] border border-[#1f1f1f] bg-[#000000] px-7 py-7 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
-                    <h2 className="mb-6 text-[18px] font-bold text-white">Key Insights & Warnings</h2>
-
-                    <div className="space-y-5">
-                        <div className="flex gap-4 rounded-[10px] border-l-[5px] border-[#ef4444] bg-[#080808] px-5 py-5">
-                            <AlertTriangle className="mt-[2px] h-[18px] w-[18px] flex-shrink-0 text-[#ef4444]" strokeWidth={2.4} />
-                            <div>
-                                <h3 className="mb-2 text-[16px] font-medium text-white">Revenge Trading Pattern Detected</h3>
-                                <p className="text-[15px] leading-7 text-[#cbd5e1]">
-                                    You have a tendency to enter larger trades immediately after a loss, leading to an average of <span className="font-medium text-[#ff5a5a]">{currencySymbol}{psychologySummary.revengePnl.toFixed(2)} per revenge trade</span>. Consider taking a break after a losing trade.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-4 rounded-[10px] border-l-[5px] border-[#eab308] bg-[#080808] px-5 py-5">
-                            <Lightbulb className="mt-[2px] h-[18px] w-[18px] flex-shrink-0 text-[#eab308]" strokeWidth={2.4} />
-                            <div>
-                                <h3 className="mb-2 text-[16px] font-medium text-white">Cost of FOMO</h3>
-                                <p className="text-[15px] leading-7 text-[#cbd5e1]">
-                                    Trades marked with 'FOMO' mindset underperform by <span className="font-medium text-[#f59e0b]">{psychologySummary.fomoCost.toFixed(3)}%</span> compared to trades where you felt 'Confident'. Sticking to your setup criteria is crucial.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-4 rounded-[10px] border-l-[5px] border-[#22c55e] bg-[#080808] px-5 py-5">
-                            <CircleCheck className="mt-[2px] h-[18px] w-[18px] flex-shrink-0 text-[#22c55e]" strokeWidth={2.4} />
-                            <div>
-                                <h3 className="mb-2 text-[16px] font-medium text-white">Plan Adherence Pays Off</h3>
-                                <p className="text-[15px] leading-7 text-[#cbd5e1]">
-                                    When you follow your plan exactly, your win rate increases by <span className="font-medium text-[#16a34a]">{psychologySummary.adherenceLift.toFixed(2)}%</span>. Your discipline is directly correlated with profitability.
-                                </p>
-                            </div>
-                        </div>
+                <section className="flex min-h-[220px] flex-col rounded-[14px] border border-[#1f1f1f] bg-[#000000] p-4.5 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
+                    <div className="mb-3.5 flex items-start justify-between gap-4">
+                        <h2 className="text-[18px] font-bold text-white">Key Insights & Warnings</h2>
+                        <button
+                            type="button"
+                            onClick={onRefreshPsychologyInsights}
+                            disabled={!onRefreshPsychologyInsights || isRefreshingPsychologyInsights}
+                            className="group inline-flex items-center gap-2 rounded-full border border-[#2c2c2c] bg-[linear-gradient(180deg,#121212_0%,#090909_100%)] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e2e8f0] shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.25)] transition-all duration-200 hover:border-[#3a3a3a] hover:bg-[linear-gradient(180deg,#161616_0%,#0b0b0b_100%)] hover:text-white hover:shadow-[0_1px_0_rgba(255,255,255,0.06),0_12px_22px_rgba(0,0,0,0.32)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#2c2c2c] disabled:hover:bg-[linear-gradient(180deg,#121212_0%,#090909_100%)]"
+                        >
+                            <RotateCcw size={12} className={isRefreshingPsychologyInsights ? 'animate-spin text-white' : 'text-[#93c5fd] transition-transform duration-200 group-hover:rotate-12'} />
+                            <span className="translate-y-[0.5px]">Analyze</span>
+                        </button>
                     </div>
+
+                    {dailyPsychologyInsights?.content ? (
+                        psychologyBriefSections.length > 0 ? (
+                            <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+                                {psychologyBriefSections.flatMap((section, sectionIndex) =>
+                                    section.items.map((item, itemIndex) => {
+                                        const tone = item.tone;
+                                        const toneClasses = psychologyCardToneClasses[tone];
+                                        const Icon = tone === 'warning' ? AlertTriangle : tone === 'action' ? CircleCheck : Lightbulb;
+
+                                        return (
+                                            <article
+                                                key={`${section.title}-${itemIndex}-${sectionIndex}`}
+                                                className={`relative overflow-hidden rounded-[8px] border px-4 py-3.5 ${toneClasses.shell} shadow-[0_1px_0_rgba(255,255,255,0.03)]`}
+                                            >
+                                                <div className={`absolute left-0 top-0 h-full w-[4px] ${toneClasses.stripe}`} />
+                                                <div className="flex items-start gap-2.5 pl-1">
+                                                    <div className={`mt-0.5 shrink-0 ${toneClasses.icon}`}>
+                                                        <Icon size={16} strokeWidth={2.35} />
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <h3 className={`text-[14px] font-semibold leading-5 ${toneClasses.title}`}>
+                                                            {item.title}
+                                                        </h3>
+                                                        {item.body ? (
+                                                            <p className="mt-1 text-[12px] leading-5 text-white/82">
+                                                                {item.body}
+                                                            </p>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        ) : (
+                            <div className="rounded-[14px] border border-[#1f1f1f] bg-[#080808] px-5 py-5">
+                                <pre className="whitespace-pre-wrap text-[15px] leading-7 text-white">
+                                    {dailyPsychologyInsights.content}
+                                </pre>
+                            </div>
+                        )
+                    ) : (
+                        <div className="flex flex-1 items-center justify-center rounded-[14px] border border-dashed border-[#1f1f1f] bg-[#080808] px-6 text-center">
+                            <p className="max-w-sm text-[13px] leading-5 text-white">
+                                Click <span className="font-semibold text-white">Analyze</span> to generate today&apos;s real psychology insights from your live journal data.
+                            </p>
+                        </div>
+                    )}
                 </section>
             </div>
 
@@ -564,12 +743,12 @@ const renderPsychologyLayout = () => (
                         <h1 className={`text-3xl font-black tracking-tight mb-2 ${pageIsLight ? 'text-slate-950' : 'text-zinc-100'}`}>Performance Analytics</h1>
                     </div>
                 </div>
-                <div className={`flex gap-1 p-1.5 rounded-xl border overflow-x-auto ${pageIsLight ? 'bg-slate-100 border-slate-200' : 'bg-[#111] border-zinc-800'}`}>
+                <div className={`grid grid-cols-2 gap-1.5 p-1.5 rounded-xl border sm:grid-cols-4 md:grid-cols-8 ${pageIsLight ? 'bg-slate-100 border-slate-200' : 'bg-[#111] border-zinc-800'}`}>
                     {tabDefinitions.map(tab => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id as any)}
-                            className={`px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id 
+                            className={`w-full justify-center px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id 
                                 ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-zinc-800 text-white shadow-lg') 
                                 : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
                         >

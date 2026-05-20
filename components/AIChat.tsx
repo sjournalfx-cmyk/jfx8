@@ -502,8 +502,6 @@ interface AIChatProps {
   onAddNote?: (note: any) => Promise<any>;
   onUpdateTrade?: (trade: Trade) => Promise<void>;
   onOpenSettings?: () => void;
-  firehoseEventContext?: FirehoseEvent | null;
-  onClearFirehoseContext?: () => void;
 }
 
 const STRATEGY_SECTION_ORDER = ['IDENTITY', 'MARKET_SELECTION', 'CORE_EDGE', 'RISK', 'STRATEGY_RULES', 'EXECUTION_FLOW', 'EXIT_PROTOCOL', 'ROUTINE', 'REVIEW'];
@@ -883,12 +881,42 @@ const FORGE_ITEMS = [
   { title: "Strategy Roadmap", icon: <Workflow size={20} />, desc: "Logic & decision trees", prompt: "Generate a visual decision tree for my current trading strategy." },
   { title: "Psychology Flow", icon: <Brain size={20} />, desc: "Emotional state management", prompt: "Create a psychology protocol for managing state during drawdown." }
 ];
-
 const isEconomicCalendarRequest = (query: string) => {
   const normalized = query.toLowerCase();
   return normalized.includes('economic calendar')
     || (normalized.includes('calendar') && /\b(cpi|ppi|nfp|fomc|fed|ecb|boe|boj|gdp|inflation|employment|jobs|rate|macro)\b/.test(normalized));
+};// --- Slash Commands ---
+type SlashCommand = {
+  cmd: string;
+  kind: DataToolKind | FinnhubToolKind;
+  source: 'fmp' | 'finnhub';
+  label: string;
+  needsSymbol: boolean;
+  desc: string;
 };
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  // FMP Tools
+  { cmd: '/quote', kind: 'quote', source: 'fmp', label: 'Stock Quote', needsSymbol: true, desc: 'Current stock price & volume' },
+  { cmd: '/profile', kind: 'profile', source: 'fmp', label: 'Company Profile', needsSymbol: true, desc: 'Company overview & fundamentals' },
+  { cmd: '/earnings', kind: 'earnings-calendar', source: 'fmp', label: 'Earnings Calendar', needsSymbol: false, desc: 'Upcoming earnings reports' },
+  { cmd: '/treasury', kind: 'treasury-rates', source: 'fmp', label: 'Treasury Rates', needsSymbol: false, desc: 'Yield curve data' },
+  { cmd: '/metrics', kind: 'key-metrics', source: 'fmp', label: 'Key Metrics', needsSymbol: true, desc: 'P/E, EV, ROE & key ratios' },
+  { cmd: '/statements', kind: 'statements', source: 'fmp', label: 'Financial Statements', needsSymbol: true, desc: 'Income, balance & cash flow' },
+  { cmd: '/ratios', kind: 'ratios', source: 'fmp', label: 'Ratios & Growth', needsSymbol: true, desc: 'Margins, ROE, growth rates' },
+  { cmd: '/price', kind: 'price-change', source: 'fmp', label: 'Price Change', needsSymbol: true, desc: 'Performance across timeframes' },
+  { cmd: '/dcf', kind: 'dcf', source: 'fmp', label: 'DCF Valuation', needsSymbol: true, desc: 'Discounted cash flow fair value' },
+  // Finnhub Tools
+  { cmd: '/news', kind: 'market-news', source: 'finnhub', label: 'Market News', needsSymbol: false, desc: 'General market headlines' },
+  { cmd: '/ticker-news', kind: 'company-news', source: 'finnhub', label: 'Company News', needsSymbol: true, desc: 'News by ticker symbol' },
+  { cmd: '/insider', kind: 'insider-transactions', source: 'finnhub', label: 'Insider Trades', needsSymbol: true, desc: 'Insider buying & selling' },
+  { cmd: '/analyst', kind: 'analyst-recommendations', source: 'finnhub', label: 'Analyst Ratings', needsSymbol: true, desc: 'Buy/hold/sell consensus' },
+  { cmd: '/macro', kind: 'economic-calendar', source: 'finnhub', label: 'Macro Events', needsSymbol: false, desc: 'CPI, GDP, jobs & macro events' },
+  { cmd: '/filings', kind: 'sec-filings', source: 'finnhub', label: 'SEC Filings', needsSymbol: true, desc: '10-K, 10-Q & other filings' },
+  { cmd: '/surprises', kind: 'earnings-surprises', source: 'finnhub', label: 'Earnings Surprises', needsSymbol: true, desc: 'Historical beat/miss rates' },
+  { cmd: '/peers', kind: 'peer-companies', source: 'finnhub', label: 'Peer Companies', needsSymbol: true, desc: 'Similar companies' },
+  { cmd: '/status', kind: 'market-status', source: 'finnhub', label: 'Market Status', needsSymbol: false, desc: 'Open/closed & holidays' },
+];
 
 const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, onAddNote, onUpdateTrade, onOpenSettings }) => {
   const safePnL = (value: unknown): number => {
@@ -994,17 +1022,47 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const analyserNodeRef = useRef<AnalyserNode | null>(null);
   const analyserSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserFrameRef = useRef<number | null>(null);
-  const [showDataTools, setShowDataTools] = useState(false);
-  const [dataSource, setDataSource] = useState<'fmp' | 'finnhub'>('fmp');
-  const [activeTickerTool, setActiveTickerTool] = useState<DataToolKind | null>(null);
-  const [activeFinnhubTickerTool, setActiveFinnhubTickerTool] = useState<FinnhubToolKind | null>(null);
-  const [tickerInput, setTickerInput] = useState('');
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const commandListRef = useRef<HTMLDivElement>(null);
+  const [commandUsage, setCommandUsage] = useLocalStorage<Record<string, number>>('jfx_ai_command_usage', {});
+
+  const filteredCommands = useMemo(() => {
+    if (!input.startsWith('/') || input.includes(' ')) return [];
+    
+    const search = input.toLowerCase();
+    const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(search));
+    
+    if (matches.length === 0) return [];
+    
+    // Sort by usage count (descending)
+    return [...matches].sort((a, b) => {
+      const usageA = commandUsage[a.cmd] || 0;
+      const usageB = commandUsage[b.cmd] || 0;
+      return usageB - usageA;
+    });
+  }, [input, commandUsage]);
+
+  useEffect(() => {
+    if (filteredCommands.length > 0 && commandListRef.current) {
+      const activeItem = commandListRef.current.children[selectedCommandIndex] as HTMLElement;
+      if (activeItem) {
+        activeItem.scrollIntoView({
+          block: 'nearest',
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [selectedCommandIndex, filteredCommands.length]);
+
+  useEffect(() => {
+    setSelectedCommandIndex(0);
+  }, [filteredCommands]);
 
   useEffect(() => {
     const syncDailyCredits = () => {
@@ -1060,12 +1118,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     }
   }, [showWizard]);
 
-  useEffect(() => {
-    if (!firehoseEventContext) return;
-    const msg = `Analyze this market event and explain how it affects my trades:\n\n**${firehoseEventContext.title}**${firehoseEventContext.summary ? '\n' + firehoseEventContext.summary : ''}\nSource: ${firehoseEventContext.source || 'Unknown'}\nURL: ${firehoseEventContext.url}\n\nWhat's the market impact and how should I adjust?`;
-    handleSend(msg);
-    onClearFirehoseContext?.();
-  }, [firehoseEventContext]);
+
 
   const handleStopGeneration = () => {
     if (abortControllerRef.current) {
@@ -1523,6 +1576,42 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     const hasAudioAttachment = Boolean(nextAudioAttachment);
     const normalizedInput = finalInput.trim();
     if ((!normalizedInput && !hasAudioAttachment) || isGenerating) return;
+
+    // --- Slash Command Processing ---
+    if (normalizedInput.startsWith('/')) {
+      const parts = normalizedInput.split(/\s+/);
+      const cmdStr = parts[0].toLowerCase();
+      const symbol = parts[1]?.toUpperCase();
+      
+      const found = SLASH_COMMANDS.find(c => c.cmd === cmdStr);
+      if (found) {
+        if (found.needsSymbol && !symbol) {
+          addToast({ 
+            type: 'error', 
+            title: 'Symbol Required', 
+            message: `Please provide a symbol for ${found.label} (e.g. ${found.cmd} AAPL)` 
+          });
+          return;
+        }
+        
+        setInput('');
+        
+        const userMsg: Message = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: normalizedInput,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, userMsg]);
+
+        if (found.source === 'fmp') {
+          handleFetchDataTool(found.kind as DataToolKind, symbol);
+        } else {
+          handleFetchFinnhubDataTool(found.kind as FinnhubToolKind, symbol);
+        }
+        return;
+      }
+    }
     
     isProcessingRef.current = true;
     const userMsg: Message = {
@@ -1714,7 +1803,10 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     };
   }, []);
 
-const getCurrentCreditLabel = useCallback(() => 'AI credit 10/10', []);
+  const getCurrentCreditLabel = useCallback(() => {
+    const remaining = isResearchMode ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining;
+    return `AI credit ${remaining}/${DAILY_CREDIT_MAX}`;
+  }, [isResearchMode, dailyCredits]);
 
   const currentCreditsRemaining = isResearchMode ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining;
   const isCreditWarning = currentCreditsRemaining <= 1;
@@ -1768,10 +1860,7 @@ const getCurrentCreditLabel = useCallback(() => 'AI credit 10/10', []);
   const handleFetchDataTool = async (kind: DataToolKind, symbol?: string) => {
     if (isGenerating) return;
     setIsGenerating(true);
-    setShowDataTools(false);
-    setActiveTickerTool(null);
-    setActiveFinnhubTickerTool(null);
-    setTickerInput('');
+
 
     try {
       let markdown: string;
@@ -1819,10 +1908,7 @@ const getCurrentCreditLabel = useCallback(() => 'AI credit 10/10', []);
   const handleFetchFinnhubDataTool = async (kind: FinnhubToolKind, symbol?: string) => {
     if (isGenerating) return;
     setIsGenerating(true);
-    setShowDataTools(false);
-    setActiveTickerTool(null);
-    setActiveFinnhubTickerTool(null);
-    setTickerInput('');
+
 
     try {
       const baseUrl = FINNHUB_TOOL_API_ROUTES[kind];
@@ -1862,6 +1948,28 @@ const getCurrentCreditLabel = useCallback(() => 'AI credit 10/10', []);
       setIsGenerating(false);
     }
   };
+
+  const handleSelectCommand = useCallback((cmd: SlashCommand) => {
+    // Track usage
+    setCommandUsage(prev => ({
+      ...prev,
+      [cmd.cmd]: (prev[cmd.cmd] || 0) + 1
+    }));
+
+    if (cmd.needsSymbol) {
+      setInput(cmd.cmd + ' ');
+      setSelectedCommandIndex(0);
+      setTimeout(() => inputRef.current?.focus(), 50);
+    } else {
+      setInput('');
+      setSelectedCommandIndex(0);
+      if (cmd.source === 'fmp') {
+        handleFetchDataTool(cmd.kind as DataToolKind);
+      } else {
+        handleFetchFinnhubDataTool(cmd.kind as FinnhubToolKind);
+      }
+    }
+  }, [setCommandUsage, handleFetchDataTool, handleFetchFinnhubDataTool]);
 
   const handleFeatureRequest = async (mode: 'psychology' | 'scaling', userRequest: string) => {
     if (isGenerating) return;
@@ -3172,214 +3280,67 @@ ${strategyProfile.whyITrade}`;
                 </div>
               )}
 
-              <AnimatePresence>
-                {showDataTools && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className={`overflow-hidden rounded-2xl border mx-2 ${
-                      isDarkMode ? 'border-zinc-700 bg-zinc-900' : 'border-slate-200 bg-white'
-                    }`}
-                  >
-                    {/* Source Switcher */}
-                    <div className={`flex border-b px-3 ${isDarkMode ? 'border-zinc-800' : 'border-slate-200'}`}>
-                      <button
-                        onClick={() => { setDataSource('fmp'); setActiveTickerTool(null); setActiveFinnhubTickerTool(null); setTickerInput(''); }}
-                        className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
-                          dataSource === 'fmp'
-                            ? isDarkMode ? 'text-emerald-400 border-emerald-400' : 'text-emerald-600 border-emerald-600'
-                            : isDarkMode ? 'text-zinc-500 border-transparent hover:text-zinc-300' : 'text-slate-400 border-transparent hover:text-slate-600'
-                        }`}
-                      >
-                        FMP Data
-                      </button>
-                      <button
-                        onClick={() => { setDataSource('finnhub'); setActiveTickerTool(null); setActiveFinnhubTickerTool(null); setTickerInput(''); }}
-                        className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
-                          dataSource === 'finnhub'
-                            ? isDarkMode ? 'text-cyan-400 border-cyan-400' : 'text-cyan-600 border-cyan-600'
-                            : isDarkMode ? 'text-zinc-500 border-transparent hover:text-zinc-300' : 'text-slate-400 border-transparent hover:text-slate-600'
-                        }`}
-                      >
-                        Finnhub Data
-                      </button>
-                    </div>
 
-                    {dataSource === 'fmp' && (
-                      <div className="p-3 space-y-3">
-                        <div>
-                          <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Instant Fetch</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(['earnings-calendar', 'treasury-rates'] as DataToolKind[]).map((kind) => {
-                              const tool = DATA_TOOL_LABELS[kind];
-                              return (
-                                <button
-                                  key={kind}
-                                  onClick={() => handleFetchDataTool(kind)}
-                                  disabled={isGenerating}
-                                  className={`shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                                    isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-slate-100 text-slate-600'
-                                  } disabled:opacity-50`}
-                                  title={tool.desc}
-                                >
-                                  {tool.icon} {tool.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div>
-                          <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Requires Symbol</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(['quote', 'profile', 'key-metrics', 'statements', 'ratios', 'price-change', 'dcf'] as DataToolKind[]).map((kind) => {
-                              const tool = DATA_TOOL_LABELS[kind];
-                              return (
-                                <button
-                                  key={kind}
-                                  onClick={() => { setActiveTickerTool(kind); setTickerInput(''); }}
-                                  className={`shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                                    isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-slate-100 text-slate-600'
-                                  }`}
-                                  title={tool.desc}
-                                >
-                                  {tool.icon} {tool.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {dataSource === 'finnhub' && (
-                      <div className="p-3 space-y-3">
-                        <div>
-                          <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Instant Fetch</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(['market-news', 'economic-calendar', 'market-status'] as FinnhubToolKind[]).map((kind) => {
-                              const tool = FINNHUB_TOOL_LABELS[kind];
-                              return (
-                                <button
-                                  key={kind}
-                                  onClick={() => handleFetchFinnhubDataTool(kind)}
-                                  disabled={isGenerating}
-                                  className={`shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                                    isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-slate-100 text-slate-600'
-                                  } disabled:opacity-50`}
-                                  title={tool.desc}
-                                >
-                                  {tool.icon} {tool.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div>
-                          <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Requires Symbol</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(['company-news', 'insider-transactions', 'analyst-recommendations', 'sec-filings', 'earnings-surprises', 'peer-companies'] as FinnhubToolKind[]).map((kind) => {
-                              const tool = FINNHUB_TOOL_LABELS[kind];
-                              return (
-                                <button
-                                  key={kind}
-                                  onClick={() => { setActiveFinnhubTickerTool(kind); setTickerInput(''); }}
-                                  className={`shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                                    isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-slate-100 text-slate-600'
-                                  }`}
-                                  title={tool.desc}
-                                >
-                                  {tool.icon} {tool.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {activeFinnhubTickerTool && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className={`mx-2 flex items-center gap-2 overflow-hidden rounded-xl border px-3 py-2 ${
-                    isDarkMode ? 'border-zinc-700 bg-zinc-900' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  <span className="text-xs font-medium shrink-0">{FINNHUB_TOOL_LABELS[activeFinnhubTickerTool].icon} Symbol:</span>
-                  <input
-                    value={tickerInput}
-                    onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && tickerInput.trim()) { handleFetchFinnhubDataTool(activeFinnhubTickerTool, tickerInput.trim()); } }}
-                    placeholder="e.g. AAPL"
-                    className={`min-w-0 flex-1 bg-transparent px-1 py-1 text-sm focus:outline-none uppercase ${
-                      isDarkMode ? 'text-white placeholder-zinc-500' : 'text-slate-900 placeholder-slate-400'
-                    }`}
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => { if (tickerInput.trim()) handleFetchFinnhubDataTool(activeFinnhubTickerTool, tickerInput.trim()); }}
-                    disabled={!tickerInput.trim() || isGenerating}
-                    className={`shrink-0 px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                      isDarkMode ? 'bg-cyan-600 text-white hover:bg-cyan-500' : 'bg-cyan-600 text-white hover:bg-cyan-500'
-                    } disabled:opacity-50`}
-                  >
-                    Fetch
-                  </button>
-                  <button
-                    onClick={() => { setActiveFinnhubTickerTool(null); setTickerInput(''); }}
-                    className={`shrink-0 p-1 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-400' : 'hover:bg-slate-100 text-slate-400'}`}
-                  >
-                    <X size={14} />
-                  </button>
-                </motion.div>
-              )}
-
-              <AnimatePresence>
-                {activeTickerTool && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className={`mx-2 flex items-center gap-2 overflow-hidden rounded-xl border px-3 py-2 ${
-                      isDarkMode ? 'border-zinc-700 bg-zinc-900' : 'border-slate-200 bg-white'
-                    }`}
-                  >
-                    <span className="text-xs font-medium shrink-0">{DATA_TOOL_LABELS[activeTickerTool].icon} Symbol:</span>
-                    <input
-                      value={tickerInput}
-                      onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && tickerInput.trim()) { handleFetchDataTool(activeTickerTool, tickerInput.trim()); } }}
-                      placeholder="e.g. AAPL"
-                      className={`min-w-0 flex-1 bg-transparent px-1 py-1 text-sm focus:outline-none uppercase ${
-                        isDarkMode ? 'text-white placeholder-zinc-500' : 'text-slate-900 placeholder-slate-400'
+              <div className="relative flex items-center gap-2 p-2">
+                {/* Slash Command Overlay */}
+                <AnimatePresence>
+                  {input.startsWith('/') && !input.includes(' ') && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      transition={{ duration: 0.15 }}
+                      className={`absolute bottom-full left-2 right-2 mb-2 overflow-hidden rounded-2xl border ${
+                        isDarkMode ? 'bg-zinc-900/70 border-zinc-800 backdrop-blur-sm' : 'bg-white/90 border-slate-200 backdrop-blur-sm'
                       }`}
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => { if (tickerInput.trim()) handleFetchDataTool(activeTickerTool, tickerInput.trim()); }}
-                      disabled={!tickerInput.trim() || isGenerating}
-                      className={`shrink-0 px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                        isDarkMode ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-emerald-600 text-white hover:bg-emerald-500'
-                      } disabled:opacity-50`}
+                      style={{ zIndex: 100 }}
                     >
-                      Fetch
-                    </button>
-                    <button
-                      onClick={() => { setActiveTickerTool(null); setTickerInput(''); }}
-                      className={`shrink-0 p-1 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-400' : 'hover:bg-slate-100 text-slate-400'}`}
-                    >
-                      <X size={14} />
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                      {filteredCommands.length > 0 ? (
+                        <div 
+                          ref={commandListRef}
+                          className="max-h-[260px] overflow-y-auto p-1.5 custom-scrollbar"
+                        >
+                          {filteredCommands.map((cmd, idx) => {
+                            const usage = commandUsage[cmd.cmd] || 0;
+                            const isFrequent = usage > 5; // Show star for frequently used
 
-              <div className="flex items-center gap-2 p-2">
+                            return (
+                              <button
+                                key={cmd.cmd}
+                                onClick={() => handleSelectCommand(cmd)}
+                                onMouseEnter={() => setSelectedCommandIndex(idx)}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-colors ${
+                                  idx === selectedCommandIndex
+                                    ? (isDarkMode ? 'bg-zinc-800 text-white' : 'bg-slate-100 text-slate-900')
+                                    : (isDarkMode ? 'text-zinc-400 hover:bg-zinc-800/50' : 'text-slate-600 hover:bg-slate-50')
+                                }`}
+                              >
+                                <span className="font-mono text-xs font-semibold">{cmd.cmd}</span>
+                                <span className={`text-xs truncate ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{cmd.desc}</span>
+                                <div className="ml-auto flex items-center gap-2">
+                                  {isFrequent && (
+                                    <Star size={10} className="text-amber-400 fill-amber-400 opacity-60" />
+                                  )}
+                                  {cmd.needsSymbol && (
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0 ${isDarkMode ? 'bg-zinc-800 text-zinc-500' : 'bg-slate-200 text-slate-400'}`}>
+                                      +SYM
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className={`px-4 py-3 text-xs flex items-center gap-2 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                          <AlertCircle size={14} />
+                          No commands found matching "{input}"
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <button 
                   onClick={() => setShowFeaturesMenu(!showFeaturesMenu)}
                   className={`features-btn shrink-0 p-2.5 rounded-2xl transition-colors ${
@@ -3393,28 +3354,29 @@ ${strategyProfile.whyITrade}`;
                   <Zap size={18} />
                 </button>
 
-                {isResearchMode && (
-                  <button
-                    type="button"
-                    onClick={() => { setShowDataTools(!showDataTools); setActiveTickerTool(null); setActiveFinnhubTickerTool(null); setTickerInput(''); }}
-                    disabled={isGenerating || isRecording || isTranscribing}
-                    className={`shrink-0 p-2.5 rounded-2xl transition-colors ${
-                      showDataTools
-                        ? isDarkMode ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white'
-                        : isDarkMode ? 'hover:bg-zinc-800 text-cyan-400' : 'hover:bg-slate-100 text-cyan-600'
-                    } disabled:cursor-not-allowed disabled:opacity-50`}
-                    title="Data Tools"
-                    aria-label="Toggle data tools panel"
-                  >
-                    <BarChart3 size={18} />
-                  </button>
-                )}
-
                 <input 
                   ref={inputRef}
                   value={input} 
                   onChange={(e) => setInput(e.target.value)} 
-                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()} 
+                  onKeyDown={(e) => {
+                    if (filteredCommands.length > 0) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setSelectedCommandIndex(prev => (prev + 1) % filteredCommands.length);
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setSelectedCommandIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+                      } else if (e.key === 'Enter' || e.key === 'Tab') {
+                        e.preventDefault();
+                        handleSelectCommand(filteredCommands[selectedCommandIndex]);
+                      } else if (e.key === 'Escape') {
+                        setInput('');
+                      }
+                    } else if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }} 
                   placeholder={inputPlaceholder}
                   className={`min-w-0 flex-1 bg-transparent px-2 py-3 focus:outline-none text-sm ${
                     isDarkMode ? 'text-white placeholder-zinc-500' : 'text-slate-900 placeholder-slate-400'
