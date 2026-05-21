@@ -33,12 +33,13 @@ function findEsbuildBinary() {
     }
   }
 
-  throw new Error(`Could not locate the esbuild binary (searched: ${candidateDirs.join(', ')})`);
+  return null;
 }
 
 function stageEsbuildBinary(sourceBinary) {
   const targetDir = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'memories', 'esbuild-cache');
-  const targetBinary = path.join(targetDir, 'esbuild.exe');
+  const binaryName = path.basename(sourceBinary);
+  const targetBinary = path.join(targetDir, binaryName);
 
   fs.mkdirSync(targetDir, { recursive: true });
 
@@ -72,11 +73,12 @@ function resolveCommandBinary(name) {
 }
 
 const sourceBinary = findEsbuildBinary();
-const stagedBinary = stageEsbuildBinary(sourceBinary);
-const env = {
-  ...process.env,
-  ESBUILD_BINARY_PATH: stagedBinary,
-};
+const env = { ...process.env };
+
+if (sourceBinary) {
+  const stagedBinary = stageEsbuildBinary(sourceBinary);
+  env.ESBUILD_BINARY_PATH = stagedBinary;
+}
 
 const commandBinary = resolveCommandBinary(command);
 const finalArgs = command === 'vite' && !args.includes('--configLoader')
