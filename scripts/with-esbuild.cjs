@@ -13,20 +13,27 @@ if (!command) {
 
 function findEsbuildBinary() {
   const esbuildPackageDir = path.dirname(require.resolve('esbuild/package.json'));
-  const esbuildVendorDir = path.join(esbuildPackageDir, 'node_modules', '@esbuild');
+  const binaryName = process.platform === 'win32' ? 'esbuild.exe' : 'esbuild';
   const platformPrefix = `${process.platform}-${process.arch}`;
 
-  const candidates = fs
-    .readdirSync(esbuildVendorDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.includes(platformPrefix))
-    .map((entry) => path.join(esbuildVendorDir, entry.name, 'esbuild.exe'))
-    .filter((candidate) => fs.existsSync(candidate));
+  const candidateDirs = [
+    path.join(esbuildPackageDir, 'node_modules', '@esbuild'),
+    path.join(esbuildPackageDir, '..', '@esbuild'),
+  ];
 
-  if (!candidates.length) {
-    throw new Error(`Could not locate the esbuild binary under ${esbuildVendorDir}`);
+  for (const vendorDir of candidateDirs) {
+    if (!fs.existsSync(vendorDir)) continue;
+    const entries = fs
+      .readdirSync(vendorDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.includes(platformPrefix));
+
+    for (const entry of entries) {
+      const candidate = path.join(vendorDir, entry.name, binaryName);
+      if (fs.existsSync(candidate)) return candidate;
+    }
   }
 
-  return candidates[0];
+  throw new Error(`Could not locate the esbuild binary (searched: ${candidateDirs.join(', ')})`);
 }
 
 function stageEsbuildBinary(sourceBinary) {
