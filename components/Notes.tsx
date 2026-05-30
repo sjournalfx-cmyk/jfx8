@@ -486,7 +486,7 @@ const Notes: React.FC<NotesProps> = ({
                             >
                                 <Lightbulb className="w-16 h-16 mb-4" />
                                 <p className="text-sm font-bold uppercase tracking-wider">{emptyTitle}</p>
-                                <p className="text-xs mt-2 max-w-sm leading-relaxed">{emptyDescription}</p>
+                                <p className="text-xs mt-2 max-w-2xl leading-relaxed whitespace-normal break-normal">{emptyDescription}</p>
                             </motion.div>
                         )}
                     </AnimatePresence>

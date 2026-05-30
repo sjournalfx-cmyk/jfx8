@@ -359,11 +359,11 @@ const chartData = useMemo(() => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div
             className={clsx(
-              "w-full max-w-md p-6 rounded-2xl border shadow-xl",
+              "w-[min(94vw,48rem)] max-h-[90vh] overflow-y-auto p-6 md:p-8 rounded-2xl border shadow-xl",
               isDarkMode ? "bg-black border-zinc-800" : "bg-white border-slate-200"
             )}
           >
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex items-start justify-between gap-4 mb-6">
               <h3 className="text-lg font-black tracking-tight">
                 {editingTransaction ? 'Edit Transaction' : 'Add Transaction'}
               </h3>
@@ -372,7 +372,10 @@ const chartData = useMemo(() => {
                   setShowAddModal(false);
                   setEditingTransaction(null);
                 }}
-                className="p-2 rounded-lg hover:bg-black/50"
+                className={clsx(
+                  "p-2 rounded-lg transition-colors",
+                  isDarkMode ? "hover:bg-black text-zinc-300" : "hover:bg-slate-100 text-slate-600"
+                )}
               >
                 <X size={18} />
               </button>
@@ -410,7 +413,7 @@ const chartData = useMemo(() => {
                   )}
                   placeholder="0.00"
                 />
-                <p className="mt-2 text-[11px] opacity-40">
+                <p className="mt-2 text-[11px] leading-relaxed opacity-40 max-w-2xl whitespace-normal break-normal">
                   Deposits and Interest are saved as positive values. Withdrawals and Fees are saved as negative values.
                 </p>
               </div>
@@ -443,7 +446,7 @@ const chartData = useMemo(() => {
                   placeholder="Optional description..."
                 />
               </div>
-              <div className="flex gap-3 pt-4">
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -694,7 +697,7 @@ const chartData = useMemo(() => {
                   <Sparkles size={28} />
                 </div>
                 <h4 className="text-lg font-black tracking-tight">No matching transactions</h4>
-                <p className="mt-2 text-sm opacity-50 max-w-md mx-auto">
+                <p className="mt-2 text-sm leading-6 opacity-50 max-w-2xl mx-auto whitespace-normal break-normal">
                   Your current filters hide every transaction in this tab. Adjust the date or type filter to see results.
                 </p>
                 <button
@@ -722,7 +725,7 @@ const chartData = useMemo(() => {
                   <Coins size={28} />
                 </div>
                 <h4 className="text-lg font-black tracking-tight">No transactions yet</h4>
-                <p className="mt-2 text-sm opacity-50 max-w-md mx-auto">
+                <p className="mt-2 text-sm leading-6 opacity-50 max-w-2xl mx-auto whitespace-normal break-normal">
                   Add a transaction to start tracking deposits, withdrawals, fees, and transfers inside this tab.
                 </p>
                 <button

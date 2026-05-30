@@ -496,3 +496,46 @@ canvas, svg {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 120, 120, 0.3);
 }
+
+/* AI Chat Demo Premium Animations */
+@keyframes chat-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.chat-demo-cursor {
+  animation: chat-blink 0.9s step-end infinite;
+}
+
+@keyframes chat-bounce {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+
+.chat-demo-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  animation: chat-bounce 1s infinite ease-in-out;
+}
+
+@keyframes laser-sweep {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.animate-laser-sweep {
+  animation: laser-sweep 2.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes pulse-fast {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
+.animate-pulse-fast {
+  animation: pulse-fast 1.2s infinite ease-in-out;
+}

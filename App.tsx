@@ -12,7 +12,6 @@ import Settings from './components/Settings';
 import EASetup from './components/EASetup';
 import ConfirmationModal from './components/ConfirmationModal';
 import QuickLogModal from './components/QuickLogModal';
-import LandingPage from './components/LandingPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from './lib/constants';
 import { useLocalStorage } from './hooks/useLocalStorage';
@@ -44,7 +43,6 @@ const AppContent: React.FC = () => {
   const [settingsTab, setSettingsTab] = useState<'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'help'>('profile');
   const { addToast } = useToast();
   const [isDemoMode, setIsDemoMode] = useLocalStorage<boolean>('jfx_demo_mode', false);
-  const [showLanding, setShowLanding] = useState(() => !window.location.search.includes('auth') && !window.location.search.includes('app'));
 
   // Mock for current migration version - In a real app, this would be fetched from the backend.
   const [currentMigrationVersion] = useState('v20250201.1');
@@ -114,7 +112,7 @@ const {
       // Cleanup: restore compact scale on unmount (returning to authenticated state)
       document.documentElement.classList.add('compact-scale');
     };
-  }, [showLanding, isAuthenticated]);
+  }, [isAuthenticated]);
 
   const analyticsSnapshot = useMemo(
     () => buildAnalyticsAiSnapshot(activeTrades, activeUserProfile, activeDailyBias, activeEaSession),
@@ -780,17 +778,6 @@ const onLogout = async () => {
 
   if (isMobile) {
     return <MobileBlocker isDarkMode={isDarkMode} />;
-  }
-
-  if (showLanding && !isAuthenticated) {
-    return (
-      <LandingPage
-        onEnterAuth={() => {
-          window.history.pushState({}, '', '/?auth=1');
-          setShowLanding(false);
-        }}
-      />
-    );
   }
 
   if (!isAuthenticated) {

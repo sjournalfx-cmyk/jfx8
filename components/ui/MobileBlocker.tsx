@@ -193,7 +193,7 @@ export const MobileBlocker: React.FC<MobileBlockerProps> = ({ isDarkMode = true 
             </span>
           </h2>
           
-          <p className="text-zinc-400 text-xs leading-relaxed max-w-sm mx-auto mb-6">
+          <p className="text-zinc-400 text-xs leading-relaxed max-w-2xl mx-auto whitespace-normal break-normal mb-6">
             We are building a highly customized, ultra-low latency mobile trading journal. 
             For now, please switch to a <strong>desktop or laptop browser</strong> to access your trading suite, charts, and MT5 Desktop Bridge.
           </p>

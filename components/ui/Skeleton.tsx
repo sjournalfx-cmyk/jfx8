@@ -43,7 +43,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ isDarkMode, title, descr
       <h3 className={`text-lg font-bold mb-2 ${isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}>
         {title}
       </h3>
-      <p className={`text-sm max-w-sm leading-relaxed mb-6 ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
+      <p className={`text-sm max-w-2xl leading-relaxed whitespace-normal break-normal mb-6 ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
         {description}
       </p>
       {action && (

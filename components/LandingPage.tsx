@@ -3,6 +3,7 @@ import { BarChart2, HelpCircle, Coins, Clock } from 'lucide-react';
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip, ResponsiveContainer } from 'recharts';
 import { clsx } from 'clsx';
 import { Tooltip as InfoTooltip } from './ui/Tooltip';
+import { PerformanceSequence } from './PerformanceSequence';
 
 interface LandingPageProps {
   onEnterAuth: () => void;
@@ -98,6 +99,58 @@ const timeOfDayHeatmap: Record<string, Record<number, { pnl: number; count: numb
 const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
   const [hoveredCell, setHoveredCell] = React.useState<{ day: string; hour: number } | null>(null);
   const [mousePos, setMousePos] = React.useState({ x: 0, y: 0 });
+  const heroFrameRef = React.useRef<HTMLDivElement | null>(null);
+  const heroVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const heroVideoEndedRef = React.useRef(false);
+  const heroVideoExitedAfterEndRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const heroFrame = heroFrameRef.current;
+    const heroVideo = heroVideoRef.current;
+
+    if (!heroFrame || !heroVideo || typeof IntersectionObserver === 'undefined') return;
+
+    const handleEnded = () => {
+      heroVideoEndedRef.current = true;
+      heroVideoExitedAfterEndRef.current = false;
+      heroVideo.pause();
+    };
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry) return;
+
+        if (!entry.isIntersecting && heroVideoEndedRef.current) {
+          heroVideoExitedAfterEndRef.current = true;
+          return;
+        }
+
+        const shouldStartPlayback = entry.isIntersecting && entry.intersectionRatio >= 0.65;
+
+        if (shouldStartPlayback && heroVideoEndedRef.current && heroVideoExitedAfterEndRef.current) {
+          heroVideoEndedRef.current = false;
+          heroVideoExitedAfterEndRef.current = false;
+          heroVideo.currentTime = 0;
+          void heroVideo.play().catch(() => undefined);
+          return;
+        }
+
+        if (shouldStartPlayback && !heroVideoEndedRef.current && heroVideo.paused) {
+          void heroVideo.play().catch(() => undefined);
+        }
+      },
+      { threshold: [0, 0.35, 0.65], rootMargin: '0px 0px -12% 0px' }
+    );
+
+    heroVideo.addEventListener('ended', handleEnded);
+    observer.observe(heroFrame);
+
+    return () => {
+      heroVideo.removeEventListener('ended', handleEnded);
+      observer.disconnect();
+    };
+  }, []);
+
   return (
     <div className="min-h-dvh bg-[#FAF9F5] text-[#1B1B1B]">
       <header className="fixed top-[24px] left-0 right-0 z-50 flex items-center justify-center px-4 w-full pointer-events-none">
@@ -131,14 +184,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
           <p className="text-[18px] leading-[1.6] text-[#111111] max-w-2xl mb-16">
             Track every trade, analyse every outcome, and evolve your strategy with the most comprehensive trading journal built for serious traders.
           </p>
-          <div className="w-full max-w-[1194px] bg-[#F0EFEB] overflow-hidden shadow-2xl relative z-10 rounded-[40px] h-[640px]">
+          <div ref={heroFrameRef} className="w-full max-w-[1194px] bg-[#F0EFEB] overflow-hidden shadow-2xl relative z-10 rounded-[40px] h-[640px]">
             <video
+              ref={heroVideoRef}
               className="w-full h-full object-cover"
-              autoPlay
               muted
-              loop
               playsInline
-              poster="https://lh3.googleusercontent.com/aida-public/AB6AXuCZfadtPwCaL7GcKGqde5_m46RsgQuGHyvmFJKZWsW5jfFqnNirmZPOdmGitXGSosoyvd2ARpUMWjjL8IEKefG6Ke85eAGiFMBHIfFA02wVwfcf75CnI7Zlw-OjEat9LRRuqHbfAWLeBZeTEUbVQRAoPIjSlWUOZmW8R32Bk0XUblejaVIpv6gSC4cngTCtp7tXSmIz5jJIUVZIPoKSyGDhck_ulpZZnIfCQmxw2h73JqSgD__x2T1wiMf4Q_TQCvHgDTzQ3sY3JjqV"
+              preload="auto"
               src="/Man_decluttering_desk_then_relaxing_202605241120.mp4"
             />
             <div
@@ -326,7 +378,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
             </div>
           </div>
 
-          <div className="absolute left-[7%] top-[58%] z-20 w-[280px] rotate-[-3deg] origin-center opacity-60">
+          <div className="absolute right-[5%] top-[58%] z-20 w-[400px] rotate-[3deg] origin-center opacity-60">
             <div className="p-4 rounded-[32px] border flex flex-col bg-[#000000] border-zinc-800 shadow-2xl shadow-black/40">
               <div className="mb-3">
                 <div className="flex items-center gap-2">
@@ -364,7 +416,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
             </div>
           </div>
 
-          <div className="absolute left-[7%] right-[7%] bottom-[5%] z-20 rotate-[-3deg] origin-center opacity-60">
+          <div className="absolute left-[7%] top-[58%] z-20 w-[58vw] max-w-[780px] rotate-[-3deg] origin-center opacity-60">
             <div className="p-4 rounded-[32px] border flex flex-col bg-[#000000] border-zinc-800 shadow-2xl shadow-black/40" onMouseMove={e => { const r = e.currentTarget.getBoundingClientRect(); setMousePos({ x: e.clientX - r.left, y: e.clientY - r.top }); }}>
               <div className="mb-3">
                 <div className="flex items-center gap-2">
@@ -378,8 +430,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
                 </div>
                 <p className="text-[9px] font-bold opacity-40 uppercase tracking-widest mt-1 ml-7 text-zinc-400">Day vs Hour Heatmap</p>
               </div>
-              <div className="overflow-x-auto custom-scrollbar pb-1">
-                <div className="min-w-[500px]">
+              <div className="overflow-hidden">
+                <div className="min-w-0">
                   <div className="flex mb-1 ml-12">
                     {Array.from({ length: 24 }, (_, h) => (
                       <div key={h} className="flex-1 text-center text-[8px] font-black opacity-60 tracking-wider text-zinc-300">
@@ -443,7 +495,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
                   className="fixed pointer-events-none z-[9999] p-3 rounded-2xl border shadow-2xl backdrop-blur-xl"
                   style={{
                     left: mousePos.x + 320,
-                    top: mousePos.y + 500,
+                    top: mousePos.y + 350,
                     backgroundColor: 'rgba(0, 0, 0, 0.95)',
                     borderColor: 'rgba(63, 63, 70, 0.5)',
                     minWidth: '180px'
@@ -494,46 +546,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
           </h2>
         </section>
 
-        <section className="py-[120px] px-10 max-w-[1728px] mx-auto bg-[#FAF9F5]">
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-[72px] items-center">
-            <div className="bg-gradient-to-br from-[#F1EBDD] to-[#F8F7F2] rounded-[40px] p-8 h-[700px] flex items-center justify-center relative overflow-hidden border border-[#E7E0D4]/70 shadow-sm">
-              <div className="w-full max-w-[470px] bg-white rounded-[28px] shadow-[0_18px_40px_rgba(17,17,17,0.10)] border border-[#E7E0D4] p-6">
-                <div className="flex items-center justify-between mb-8">
-                  <span className="text-[12px] font-bold text-[#1B1B1B]">Files</span>
-                  <span className="material-symbols-outlined text-[#8C8880]">more_horiz</span>
-                </div>
-                <div className="space-y-4">
-                  {['2025_Trades', 'Strategy_Rules', 'Performance_Reports', 'Psychology_Notes'].map((item, index) => (
-                    <div key={item} className="flex items-center gap-4 p-3 hover:bg-[#FAF9F5] rounded-xl transition-colors">
-                      <span className="material-symbols-outlined text-jfx">{['folder', 'description', 'image', 'analytics'][index]}</span>
-                      <span className="text-[15px] font-medium text-[#1B1B1B]">{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-col justify-center h-full w-full max-w-[700px]">
-              <h3 className="text-[30px] leading-[1.15] tracking-[-0.03em] mb-12 font-bold text-[#1B1B1B] text-balance">
-                The intelligent foundation for your trading.
-              </h3>
-              <div className="relative pl-8 border-l-[3px] border-[#D6D0C5] space-y-12">
-                <div className="absolute left-[-3px] top-0 w-[3px] h-1/3 bg-gradient-to-b from-[#FF416C] to-[#FF4B2B]" />
-                <div>
-                  <h4 className="text-[24px] leading-[1.3] tracking-[-0.01em] font-bold mb-3 text-[#1B1B1B]">Centralized Trade History</h4>
-                  <p className="text-[15px] leading-[1.6] text-[#8C8880] max-w-[430px]">Every trade logged, tagged, and searchable in one place.</p>
-                </div>
-                <div className="opacity-50 hover:opacity-100 transition-opacity">
-                  <h4 className="text-[24px] leading-[1.3] tracking-[-0.01em] font-bold mb-3 text-[#1B1B1B]">Performance Intelligence</h4>
-                  <p className="text-[15px] leading-[1.6] text-[#8C8880] max-w-[430px]">AI-driven analysis that surfaces patterns, strengths, and weaknesses you would miss.</p>
-                </div>
-                <div className="opacity-50 hover:opacity-100 transition-opacity">
-                  <h4 className="text-[24px] leading-[1.3] tracking-[-0.01em] font-bold mb-3 text-[#1B1B1B]">Seamless Sync</h4>
-                  <p className="text-[15px] leading-[1.6] text-[#8C8880] max-w-[430px]">Auto-import from MT4/MT5 via desktop bridge or broker VPS sync.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        <PerformanceSequence />
 
         <section className="py-[120px] px-10 max-w-[1728px] mx-auto bg-[#FAF9F5]">
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-[40px] items-center">

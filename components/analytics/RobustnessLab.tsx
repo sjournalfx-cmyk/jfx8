@@ -91,7 +91,7 @@ export const RobustnessLab: React.FC<RobustnessLabProps> = ({ isDarkMode, trades
                             <Lock size={48} />
                         </div>
                         <h2 className="text-3xl font-black uppercase tracking-tight mb-3">Strategy Robustness Lab</h2>
-                        <p className={cn("max-w-md text-sm font-bold opacity-60 mb-8", isDarkMode ? 'text-zinc-400' : 'text-slate-500')}>
+                        <p className={cn("max-w-2xl text-sm font-bold opacity-60 mb-8 whitespace-normal break-normal", isDarkMode ? 'text-zinc-400' : 'text-slate-500')}>
                             Advanced parameter sensitivity analysis and robustness scoring are exclusive to <span className="text-indigo-400">Elite Masters</span>. Upgrade to unlock the "Sweet Spot" finder.
                         </p>
                         <Button variant="primary" className="bg-indigo-600 hover:bg-indigo-700 px-8 py-4 text-xs font-black uppercase tracking-widest shadow-xl shadow-indigo-500/20" rightIcon={<Zap size={16} />}>

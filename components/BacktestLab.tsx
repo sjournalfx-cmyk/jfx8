@@ -1601,7 +1601,7 @@ setAllData(validData);
                                 <Zap size={32} className="text-[#FF4F01]" />
                             </div>
                             <h2 className="text-2xl font-black uppercase tracking-tight text-white">Advanced Optimizer</h2>
-                            <p className="text-sm text-zinc-500 max-w-md mx-auto">
+                            <p className="text-sm text-zinc-500 max-w-2xl mx-auto whitespace-normal break-normal">
                                 Upload your backtest data to begin the neural parameter optimization process.
                             </p>
                             <button className="px-8 py-4 bg-[#FF4F01] text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-[#e64601] transition-all active:scale-95 shadow-lg shadow-[#FF4F01]/20">

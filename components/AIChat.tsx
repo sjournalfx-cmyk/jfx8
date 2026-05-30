@@ -3020,7 +3020,7 @@ ${strategyProfile.whyITrade}`;
                 <AssistantIcon size={28} className="text-white" />
               </div>
               <h2 className={`text-xl font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{assistantLabel}</h2>
-              <p className={`text-sm mt-1 mb-6 max-w-xl text-center ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+              <p className={`text-sm mt-1 mb-6 max-w-2xl text-center leading-relaxed whitespace-normal break-normal ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
                 {isResearchMode
                   ? 'Research markets, setups, and risk ideas without touching private trading data.'
                   : 'Use your journal context for performance coaching, psychology work, and strategy architecture.'}
@@ -3028,20 +3028,20 @@ ${strategyProfile.whyITrade}`;
               
               {/* Quick Start Options */}
               {isResearchMode && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full">
                   {RESEARCH_STARTERS.map((item) => (
                     <button
                       key={item.title}
                       onClick={() => handleSend(item.prompt)}
-                      className={`p-4 rounded-xl border text-left transition-all ${
+                      className={`w-full min-w-0 p-4 rounded-xl border text-left transition-all ${
                         isDarkMode ? 'bg-black border-zinc-800 hover:border-zinc-700' : 'bg-white border-slate-200 hover:border-slate-300'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <span className={item.color}>{item.icon}</span>
-                        <span className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{item.title}</span>
+                        <span className={`text-sm font-medium whitespace-normal break-normal ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{item.title}</span>
                       </div>
-                      <p className={`text-xs ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{item.desc}</p>
+                      <p className={`text-xs leading-relaxed whitespace-normal break-normal ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{item.desc}</p>
                     </button>
                   ))}
                 </div>
@@ -3154,15 +3154,15 @@ ${strategyProfile.whyITrade}`;
                       <button
                         key={item.title}
                         onClick={() => { void handleSend(item.prompt); setShowFeaturesMenu(false); }}
-                        className={`p-4 rounded-xl border text-left transition-all ${
+                        className={`w-full min-w-0 p-4 rounded-xl border text-left transition-all ${
                           isDarkMode ? 'bg-black border-zinc-700 hover:border-zinc-600' : 'bg-white border-slate-200 hover:border-slate-300'
                         }`}
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span className={item.color}>{item.icon}</span>
-                          <span className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{item.title}</span>
+                          <span className={`text-sm font-medium whitespace-normal break-normal ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{item.title}</span>
                         </div>
-                        <p className={`text-xs ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{item.desc}</p>
+                        <p className={`text-xs leading-relaxed whitespace-normal break-normal ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{item.desc}</p>
                       </button>
                     ))}
                   </div>
