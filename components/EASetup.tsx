@@ -12,6 +12,7 @@ import { dataService } from '../services/dataService';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Trade, EASession, EADeal, EAPosition } from '../types';
 import OpenPositions from './OpenPositions';
+import BrokerConnect from './BrokerConnect';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
@@ -31,6 +32,7 @@ interface BridgeProps {
 const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, trades, userId }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
+    const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | null>(null);
     
     // Persistent cache for bridge data
     const [liveData, setLiveData] = useLocalStorage<any>(`jfx_bridge_live_data_${userId}`, eaSession?.data || null);
@@ -81,6 +83,32 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
         }
     }, [eaSession]);
 
+    if (connectionMode === 'broker') {
+        return (
+            <>
+                <div className="relative mb-6 flex items-center gap-3">
+                    <button
+                        onClick={() => setConnectionMode(null)}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
+                    >
+                        <ArrowRight size={12} className="rotate-180" />
+                        Back to methods
+                    </button>
+                </div>
+                <BrokerConnect
+                    isDarkMode={isDarkMode}
+                    userProfile={userProfile}
+                    onUpdateProfile={onUpdateProfile}
+                    embedded
+                />
+            </>
+        );
+    }
+
+    if (!connectionMode) {
+        return <MethodChoice onSelect={setConnectionMode} isDarkMode={isDarkMode} />;
+    }
+
     if (isInternalConnected) {
         return (
             <BridgeMonitor
@@ -110,6 +138,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             isDarkMode={isDarkMode}
             userProfile={userProfile}
             onUpdateProfile={onUpdateProfile}
+            onBack={() => setConnectionMode(null)}
             onComplete={async (key) => {
                 const updated = { ...userProfile, syncKey: key, eaConnected: true };
                 await onUpdateProfile(updated);
@@ -117,6 +146,159 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
                 setIsInternalConnected(true);
             }}
         />
+    );
+};
+
+/* --- SUB-COMPONENT: METHOD CHOICE SCREEN --- */
+interface MethodChoiceProps {
+    onSelect: (mode: 'bridge' | 'broker') => void;
+    isDarkMode: boolean;
+}
+
+const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, isDarkMode }) => {
+    const options = [
+        {
+            id: 'bridge' as const,
+            title: 'Desktop Bridge',
+            subtitle: 'EA Terminal Bridge',
+            icon: (
+                <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                    <line x1="8" y1="21" x2="16" y2="21" />
+                    <line x1="12" y1="17" x2="12" y2="21" />
+                    <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01" strokeWidth="2" />
+                    <path d="M4 11h16" />
+                    <path d="M4 14h16" />
+                </svg>
+            ),
+            features: [
+                'Windows EXE bridge client',
+                'Auto-sync via Supabase Realtime',
+                'Full monitor dashboard',
+                'One-click setup'
+            ],
+            accent: '#FF4F01',
+            gradient: 'from-[#FF4F01]/20 via-transparent to-transparent',
+            description: 'Install the JournalFX Bridge application on your Windows desktop for automated, real-time trade synchronization via the EA.'
+        },
+        {
+            id: 'broker' as const,
+            title: 'Broker Direct',
+            subtitle: 'MT5 API Connection',
+            icon: (
+                <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                    <path d="M5 5a18.8 18.8 0 0 1 14 0" />
+                    <path d="M5 19a18.8 18.8 0 0 1 14 0" />
+                </svg>
+            ),
+            features: [
+                'Direct MT5 terminal connection',
+                'Python/MetaTrader5 backend',
+                'Open & close positions',
+                'Manual trade sync'
+            ],
+            accent: '#22C55E',
+            gradient: 'from-[#22C55E]/20 via-transparent to-transparent',
+            description: 'Connect directly to your MetaTrader 5 terminal using the MT5 API. Requires Python and the MetaTrader5 library installed.'
+        }
+    ];
+
+    return (
+        <div className="w-full h-full overflow-y-auto custom-scrollbar bg-black">
+            <div className="max-w-5xl w-full mx-auto pt-12 pb-8 px-8">
+                {/* Header */}
+                <div className="mb-12 text-center">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-400 text-xs font-medium mb-4 tracking-wider uppercase">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#FF4F01] animate-pulse" />
+                        Connection Setup
+                    </div>
+                    <h1 className="text-4xl font-black tracking-tight text-white mb-3">
+                        Choose Your Connection
+                    </h1>
+                    <p className="text-zinc-500 text-sm leading-relaxed max-w-2xl mx-auto whitespace-normal break-normal">
+                        Select how you want to connect your trading terminal to JournalFX. 
+                        You can switch between methods at any time.
+                    </p>
+                </div>
+
+                {/* Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {options.map((opt, idx) => (
+                        <button
+                            key={opt.id}
+                            onClick={() => onSelect(opt.id)}
+                            style={{
+                                animationDelay: `${idx * 150}ms`,
+                                animationFillMode: 'both'
+                            } as React.CSSProperties}
+                            className={`group relative text-left w-full rounded-3xl border bg-black/60 backdrop-blur-xl p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 ${
+                                opt.id === 'bridge'
+                                    ? 'border-white/10 hover:border-[#FF4F01]/40'
+                                    : 'border-white/10 hover:border-[#22C55E]/40'
+                            }`}
+                        >
+                            {/* Content */}
+                            <div className="relative z-10">
+                                {/* Icon */}
+                                <div
+                                    className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6"
+                                    style={{
+                                        backgroundColor: `${opt.accent}15`,
+                                        color: opt.accent,
+                                        boxShadow: `0 0 30px -10px ${opt.accent}40`
+                                    }}
+                                >
+                                    {opt.icon}
+                                </div>
+
+                                {/* Title */}
+                                <h2 className="text-2xl font-black tracking-tight text-white mb-1">
+                                    {opt.title}
+                                </h2>
+                                <p className="text-xs font-medium uppercase tracking-widest mb-4" style={{ color: opt.accent }}>
+                                    {opt.subtitle}
+                                </p>
+                                <p className="text-zinc-400 text-sm leading-relaxed mb-6">
+                                    {opt.description}
+                                </p>
+
+                                {/* Features */}
+                                <ul className="space-y-2 mb-8">
+                                    {opt.features.map((f, i) => (
+                                        <li key={i} className="flex items-center gap-2.5 text-zinc-500 text-xs">
+                                            <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: opt.accent }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                <polyline points="20 6 9 17 4 12" />
+                                            </svg>
+                                            {f}
+                                        </li>
+                                    ))}
+                                </ul>
+
+                                {/* CTA */}
+                                <div
+                                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-300 group-hover:gap-3"
+                                    style={{ backgroundColor: opt.accent }}
+                                >
+                                    Get Started
+                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="5" y1="12" x2="19" y2="12" />
+                                        <polyline points="12 5 19 12 12 19" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Bottom note */}
+                <p className="text-center text-zinc-600 text-xs mt-10">
+                    Both methods require an active MetaTrader 5 terminal running on your computer.
+                </p>
+            </div>
+        </div>
     );
 };
 
@@ -669,7 +851,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                                 <div className="space-y-4 flex-1">
                                     <div>
                                         <h3 className="text-lg font-black mb-1 text-white uppercase tracking-wider">Connection Diagnostics</h3>
-                                        <p className="text-sm text-slate-400 max-w-md">Technical details about your current bridge session. Ensure the JournalFX Bridge app is running.</p>
+                                        <p className="text-sm text-slate-400 max-w-2xl whitespace-normal break-normal">Technical details about your current bridge session. Ensure the JournalFX Bridge app is running.</p>
                                     </div>
                                     <div className="flex flex-wrap gap-3">
                                         <div className="px-4 py-3 rounded-2xl bg-slate-900 border border-slate-800">
@@ -739,11 +921,12 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
 interface BridgeWizardProps {
     isDarkMode: boolean;
     onComplete: (syncKey: string) => void;
+    onBack: () => void;
     userProfile: UserProfile;
     onUpdateProfile: (profile: UserProfile) => Promise<void>;
 }
 
-const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, userProfile, onUpdateProfile }) => {
+const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, onBack, userProfile, onUpdateProfile }) => {
     const [step, setStep] = useState(0);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
     const [connectionStatus, setConnectionStatus] = useState<'waiting' | 'success' | 'error'>('waiting');
@@ -850,6 +1033,13 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, use
         <div className="w-full h-full overflow-y-auto custom-scrollbar bg-black">
             <div className="max-w-6xl w-full mx-auto px-6 py-8 md:px-8 md:py-10">
                 <div className="mb-8 md:mb-10">
+                    <button
+                        onClick={onBack}
+                        className="mb-4 px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
+                    >
+                        <ArrowRight size={12} className="rotate-180" />
+                        Back to methods
+                    </button>
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#FF4F01]/20 bg-[#FF4F01]/8 text-[10px] font-black uppercase tracking-[0.28em] text-[#FF4F01]">
                         Desktop Bridge Setup
                     </div>
@@ -1013,7 +1203,7 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, use
                                                         </div>
                                                     </div>
                                                     <h3 className={`text-xl font-black ${textPrimary}`}>Waiting for connection</h3>
-                                                    <p className={`mt-2 max-w-lg text-sm ${subTextColor}`}>
+                                                    <p className={`mt-2 max-w-2xl whitespace-normal break-normal text-sm ${subTextColor}`}>
                                                         Keep the bridge app open. Once you start it, this screen will switch automatically.
                                                     </p>
                                                 </div>
@@ -1032,7 +1222,7 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, use
                                                     <Check size={40} strokeWidth={4} />
                                                 </div>
                                                 <h3 className={`text-2xl font-black ${textPrimary}`}>Bridge connected</h3>
-                                                <p className={`mt-2 max-w-lg text-sm ${subTextColor}`}>
+                                                <p className={`mt-2 max-w-2xl whitespace-normal break-normal text-sm ${subTextColor}`}>
                                                     Your terminal data is now streaming to JournalFX.
                                                 </p>
                                                 <button

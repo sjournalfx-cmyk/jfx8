@@ -10,7 +10,6 @@ import { Trade, Note, DailyBias, FirehoseEvent } from './types';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
 import EASetup from './components/EASetup';
-import BrokerConnect from './components/BrokerConnect';
 import ConfirmationModal from './components/ConfirmationModal';
 import QuickLogModal from './components/QuickLogModal';
 import LandingPage from './components/LandingPage';
@@ -1051,13 +1050,6 @@ const onLogout = async () => {
                 onAddOffline={addToOfflineQueue}
                 trades={activeTrades}
                 userId={userId}
-              />
-            )}
-            {currentView === 'broker' && activeUserProfile && (
-              <BrokerConnect
-                isDarkMode={isDarkMode}
-                userProfile={activeUserProfile}
-                onUpdateProfile={handleUpdateProfile}
               />
             )}
             {currentView === 'settings' && activeUserProfile && (

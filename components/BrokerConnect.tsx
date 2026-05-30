@@ -20,6 +20,7 @@ interface BrokerConnectProps {
   isDarkMode: boolean;
   userProfile: UserProfile;
   onUpdateProfile: (profile: UserProfile) => Promise<void>;
+  embedded?: boolean;
 }
 
 interface BrokerStatus {
@@ -43,7 +44,7 @@ interface Position {
   tp: number;
 }
 
-const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }) => {
+const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, embedded }) => {
   const [server, setServer] = useState(userProfile?.broker_server || '');
   const [login, setLogin] = useState(userProfile?.broker_login || '');
   const [password, setPassword] = useState('');
@@ -286,10 +287,305 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
     }
   };
 
+  const renderContent = () => (
+    <>
+      {!status.connected ? (
+        <div className="space-y-5">
+          {/* Prerequisites */}
+          <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-white/5 bg-white/[0.02]">
+            <Shield size={14} className="text-zinc-500 mt-0.5 shrink-0" />
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              Requires Python and <code className="px-1 py-0.5 rounded bg-white/5 text-[#FF4F01] text-[11px]">pip install MetaTrader5</code>.
+              Keep MT5 open and logged in.
+            </p>
+          </div>
+
+          {/* Form */}
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1.5 uppercase tracking-wider">Server</label>
+              <input
+                type="text"
+                value={server}
+                onChange={(e) => setServer(e.target.value)}
+                placeholder="MetaQuotes-Demo"
+                list="servers"
+                className="w-full px-4 py-2.5 rounded-xl border border-white/10 bg-black text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#FF4F01]/50 focus:ring-1 focus:ring-[#FF4F01]/20 transition-colors"
+              />
+              <datalist id="servers">
+                <option value="MetaQuotes-Demo" />
+                <option value="ICMarkets-Demo" />
+                <option value="OANDA-Demo" />
+                <option value="fxpro-Demo" />
+              </datalist>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1.5 uppercase tracking-wider">Account</label>
+                <input
+                  type="text"
+                  value={login}
+                  onChange={(e) => setLogin(e.target.value)}
+                  placeholder="Account number"
+                  className="w-full px-4 py-2.5 rounded-xl border border-white/10 bg-black text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#FF4F01]/50 focus:ring-1 focus:ring-[#FF4F01]/20 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1.5 uppercase tracking-wider">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Investor password"
+                  className="w-full px-4 py-2.5 rounded-xl border border-white/10 bg-black text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[#FF4F01]/50 focus:ring-1 focus:ring-[#FF4F01]/20 transition-colors"
+                />
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 text-rose-500 text-xs">
+              <AlertTriangle size={14} />
+              {error}
+            </div>
+          )}
+
+          <button
+            onClick={handleConnect}
+            disabled={loading || !server || !login || !password}
+            className="w-full py-2.5 rounded-xl bg-[#FF4F01] text-white text-sm font-medium hover:bg-[#FF4F01]/90 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
+          >
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            {loading ? 'Connecting...' : 'Connect Terminal'}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {/* Status Bar */}
+          <div className="flex items-center justify-between px-4 py-3 rounded-xl border border-white/5 bg-white/[0.02]">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+              <div>
+                <p className="text-xs text-zinc-400">
+                  Connected to <span className="text-white">{status.server}</span>
+                  <span className="text-zinc-600 mx-1.5">&#183;</span>
+                  <span className="text-zinc-500">#{status.login}</span>
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleDisconnect}
+              className="text-xs text-zinc-600 hover:text-rose-400 transition-colors"
+            >
+              Disconnect
+            </button>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] px-5 py-4">
+              <p className="text-xs text-zinc-500 mb-1">Balance</p>
+              <p className="text-2xl font-light tracking-tight text-white">
+                ${status.balance?.toFixed(2)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] px-5 py-4">
+              <p className="text-xs text-zinc-500 mb-1">Equity</p>
+              <p className="text-2xl font-light tracking-tight text-white">
+                ${status.equity?.toFixed(2)}
+              </p>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-white/5">
+            <button
+              onClick={() => setActiveTab('trading')}
+              className={`pb-2.5 px-1 text-xs font-medium transition-all mr-6 ${
+                activeTab === 'trading'
+                  ? 'text-white border-b-2 border-[#FF4F01]'
+                  : 'text-zinc-600 hover:text-zinc-400 border-b-2 border-transparent'
+              }`}
+            >
+              Trading
+            </button>
+            <button
+              onClick={() => setActiveTab('connect')}
+              className={`pb-2.5 px-1 text-xs font-medium transition-all ${
+                activeTab === 'connect'
+                  ? 'text-white border-b-2 border-[#FF4F01]'
+                  : 'text-zinc-600 hover:text-zinc-400 border-b-2 border-transparent'
+              }`}
+            >
+              Sync
+            </button>
+          </div>
+
+          {/* Trading Tab */}
+          {activeTab === 'trading' && (
+            <div className="space-y-5">
+              {/* Quick Order */}
+              <div>
+                <p className="text-xs text-zinc-500 font-medium mb-3 uppercase tracking-wider">Quick Order</p>
+                <div className="grid grid-cols-4 gap-2.5">
+                  <div>
+                    <input
+                      type="text"
+                      value={symbol}
+                      onChange={(e) => setSymbol(e.target.value)}
+                      placeholder="EURUSD"
+                      className="w-full px-3 py-2 rounded-lg border border-white/10 bg-black text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#FF4F01]/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={volume}
+                      onChange={(e) => setVolume(e.target.value)}
+                      placeholder="0.01"
+                      className="w-full px-3 py-2 rounded-lg border border-white/10 bg-black text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#FF4F01]/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={sl}
+                      onChange={(e) => setSl(e.target.value)}
+                      placeholder="SL"
+                      className="w-full px-3 py-2 rounded-lg border border-white/10 bg-black text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#FF4F01]/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={tp}
+                      onChange={(e) => setTp(e.target.value)}
+                      placeholder="TP"
+                      className="w-full px-3 py-2 rounded-lg border border-white/10 bg-black text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#FF4F01]/50 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => handleOpenPosition('BUY')}
+                    disabled={!!orderSuccess || !!orderError}
+                    className="flex-1 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 disabled:opacity-30 transition-colors"
+                  >
+                    Buy
+                  </button>
+                  <button
+                    onClick={() => handleOpenPosition('SELL')}
+                    disabled={!!orderSuccess || !!orderError}
+                    className="flex-1 py-2 rounded-lg bg-rose-500/10 text-rose-400 text-xs font-medium hover:bg-rose-500/20 disabled:opacity-30 transition-colors"
+                  >
+                    Sell
+                  </button>
+                </div>
+
+                {orderError && (
+                  <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 text-rose-500 text-xs">
+                    <AlertTriangle size={12} />
+                    {orderError}
+                  </div>
+                )}
+
+                {orderSuccess && (
+                  <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-500 text-xs">
+                    <CheckCircle2 size={12} />
+                    {orderSuccess}
+                  </div>
+                )}
+              </div>
+
+              {/* Positions */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">
+                    Positions <span className="text-zinc-600">({positions.length})</span>
+                  </p>
+                  <button
+                    onClick={fetchPositions}
+                    className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                  >
+                    <RefreshCw size={12} />
+                  </button>
+                </div>
+
+                {positions.length === 0 ? (
+                  <p className="text-xs text-zinc-600">No open positions</p>
+                ) : (
+                  <div className="space-y-1">
+                    {positions.map((pos) => (
+                      <div
+                        key={pos.ticket}
+                        className="flex items-center justify-between px-4 py-2.5 rounded-xl border border-white/5 hover:bg-white/[0.02] transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`text-xs font-medium tabular-nums ${
+                            pos.type === 'BUY' ? 'text-emerald-400' : 'text-rose-400'
+                          }`}>
+                            {pos.type}
+                          </span>
+                          <span className="text-xs text-white">{pos.symbol}</span>
+                          <span className="text-xs text-zinc-600">{pos.volume}</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-xs text-zinc-500 tabular-nums">{pos.price_open.toFixed(5)}</p>
+                            <p className={`text-xs font-medium tabular-nums ${
+                              pos.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}>
+                              {pos.profit >= 0 ? '+' : ''}{pos.profit.toFixed(2)}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleClosePosition(pos.ticket)}
+                            disabled={!!orderSuccess || !!orderError}
+                            className="text-zinc-600 hover:text-rose-400 disabled:opacity-30 transition-colors"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Sync Tab */}
+          {activeTab === 'connect' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-white/5 bg-white/[0.02] px-5 py-4">
+                <p className="text-xs text-zinc-500 leading-relaxed">
+                  MT5 terminal must remain running with your account logged in.
+                  Click to pull the latest trades into your journal.
+                </p>
+              </div>
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="w-full py-2.5 rounded-xl border border-white/10 text-xs text-zinc-300 font-medium hover:bg-white/[0.03] disabled:opacity-30 transition-all flex items-center justify-center gap-2"
+              >
+                <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
+                {syncing ? 'Syncing...' : 'Sync Trades'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  if (embedded) return renderContent();
+
   return (
     <div className="h-full overflow-y-auto custom-scrollbar p-8 bg-[#000000]">
       <div className="max-w-4xl mx-auto space-y-8">
-        
+
         {/* Header */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3 text-[#FF4F01]">
@@ -303,321 +599,7 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile }
           </p>
         </div>
 
-        {!status.connected ? (
-          <div className={`rounded-3xl border p-6 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'} shadow-xl`}>
-            <div className="space-y-6">
-              <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-black' : 'bg-slate-50'}`}>
-                <h3 className="font-semibold mb-2 flex items-center gap-2">
-                  <Shield size={16} className="text-[#FF4F01]" />
-                  Before Connecting
-                </h3>
-                <ol className={`text-sm space-y-1 ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
-                  <li>1. Make sure Python is installed on your computer</li>
-                  <li>2. Run <code className="px-1 py-0.5 rounded bg-[#FF4F01]/20 text-[#FF4F01]">pip install MetaTrader5</code> in terminal</li>
-                  <li>3. Open MT5 and login to your demo/live account</li>
-                  <li>4. Return here and enter your credentials below</li>
-                </ol>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Server</label>
-                  <input
-                    type="text"
-                    value={server}
-                    onChange={(e) => setServer(e.target.value)}
-                    placeholder="e.g., MetaQuotes-Demo"
-                    list="servers"
-                    className={`w-full px-4 py-3 rounded-xl border ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'} focus:outline-none focus:border-[#FF4F01]`}
-                  />
-                  <datalist id="servers">
-                    <option value="MetaQuotes-Demo" />
-                    <option value="ICMarkets-Demo" />
-                    <option value="OANDA-Demo" />
-                    <option value="fxpro-Demo" />
-                  </datalist>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">Account Number</label>
-                  <input
-                    type="text"
-                    value={login}
-                    onChange={(e) => setLogin(e.target.value)}
-                    placeholder="Your MT5 account number"
-                    className={`w-full px-4 py-3 rounded-xl border ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'} focus:outline-none focus:border-[#FF4F01]`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">Investor Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Your investor (read-only) password"
-                    className={`w-full px-4 py-3 rounded-xl border ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'} focus:outline-none focus:border-[#FF4F01]`}
-                  />
-                </div>
-              </div>
-
-              {error && (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-rose-500/10 text-rose-500 text-sm">
-                  <AlertTriangle size={16} />
-                  {error}
-                </div>
-              )}
-
-              <button
-                onClick={handleConnect}
-                disabled={loading || !server || !login || !password}
-                className="w-full py-3 px-6 rounded-xl bg-[#FF4F01] text-white font-semibold hover:bg-[#FF4F01]/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {loading && <Loader2 size={18} className="animate-spin" />}
-                Connect Terminal
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Status Card */}
-            <div className={`rounded-3xl border p-6 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'} shadow-xl`}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-green-500/10">
-                    <CheckCircle2 size={20} className="text-green-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold">Connected</h3>
-                    <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
-                      {status.server} • #{status.login}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleDisconnect}
-                  className={`p-2 rounded-lg ${isDarkMode ? 'hover:bg-black' : 'hover:bg-slate-100'}`}
-                >
-                  <XCircle size={18} />
-                </button>
-              </div>
-
-              {/* Account Stats */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-black' : 'bg-slate-50'}`}>
-                  <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Balance</p>
-                  <p className="text-2xl font-bold">${status.balance?.toFixed(2)}</p>
-                </div>
-                <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-black' : 'bg-slate-50'}`}>
-                  <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Equity</p>
-                  <p className="text-2xl font-bold">${status.equity?.toFixed(2)}</p>
-                </div>
-              </div>
-
-              {/* Tab Switcher */}
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={() => setActiveTab('trading')}
-                  className={`flex-1 py-2 px-4 rounded-xl font-medium transition ${
-                    activeTab === 'trading'
-                      ? 'bg-[#FF4F01] text-white'
-                      : isDarkMode ? 'bg-black text-zinc-400' : 'bg-slate-50 text-slate-600'
-                  }`}
-                >
-                  Trading
-                </button>
-                <button
-                  onClick={() => setActiveTab('connect')}
-                  className={`flex-1 py-2 px-4 rounded-xl font-medium transition ${
-                    activeTab === 'connect'
-                      ? 'bg-[#FF4F01] text-white'
-                      : isDarkMode ? 'bg-black text-zinc-400' : 'bg-slate-50 text-slate-600'
-                  }`}
-                >
-                  Sync
-                </button>
-              </div>
-            </div>
-
-            {/* Trading Tab */}
-            {activeTab === 'trading' && (
-              <div className="space-y-4">
-                {/* Quick Order Form */}
-                <div className={`rounded-3xl border p-6 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'} shadow-xl`}>
-                  <h3 className="font-semibold mb-4 flex items-center gap-2">
-                    <Plus size={18} className="text-[#FF4F01]" />
-                    Quick Order
-                  </h3>
-
-                  <div className="grid grid-cols-4 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Symbol</label>
-                      <input
-                        type="text"
-                        value={symbol}
-                        onChange={(e) => setSymbol(e.target.value)}
-                        placeholder="EURUSD"
-                        className={`w-full px-3 py-2 rounded-lg border text-sm ${
-                          isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'
-                        } focus:outline-none focus:border-[#FF4F01]`}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Volume</label>
-                      <input
-                        type="text"
-                        value={volume}
-                        onChange={(e) => setVolume(e.target.value)}
-                        placeholder="0.01"
-                        className={`w-full px-3 py-2 rounded-lg border text-sm ${
-                          isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'
-                        } focus:outline-none focus:border-[#FF4F01]`}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">SL (optional)</label>
-                      <input
-                        type="text"
-                        value={sl}
-                        onChange={(e) => setSl(e.target.value)}
-                        placeholder="0"
-                        className={`w-full px-3 py-2 rounded-lg border text-sm ${
-                          isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'
-                        } focus:outline-none focus:border-[#FF4F01]`}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1">TP (optional)</label>
-                      <input
-                        type="text"
-                        value={tp}
-                        onChange={(e) => setTp(e.target.value)}
-                        placeholder="0"
-                        className={`w-full px-3 py-2 rounded-lg border text-sm ${
-                          isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'
-                        } focus:outline-none focus:border-[#FF4F01]`}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 mt-4">
-                    <button
-                      onClick={() => handleOpenPosition('BUY')}
-                      disabled={!!orderSuccess || !!orderError}
-                      className="flex-1 py-3 px-4 rounded-xl bg-green-500 text-white font-semibold hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <TrendingUp size={18} />
-                      BUY
-                    </button>
-                    <button
-                      onClick={() => handleOpenPosition('SELL')}
-                      disabled={!!orderSuccess || !!orderError}
-                      className="flex-1 py-3 px-4 rounded-xl bg-rose-500 text-white font-semibold hover:bg-rose-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <TrendingDown size={18} />
-                      SELL
-                    </button>
-                  </div>
-
-                  {orderError && (
-                    <div className="mt-3 flex items-center gap-2 p-3 rounded-lg bg-rose-500/10 text-rose-500 text-sm">
-                      <AlertTriangle size={14} />
-                      {orderError}
-                    </div>
-                  )}
-
-                  {orderSuccess && (
-                    <div className="mt-3 flex items-center gap-2 p-3 rounded-lg bg-green-500/10 text-green-500 text-sm">
-                      <CheckCircle2 size={14} />
-                      {orderSuccess}
-                    </div>
-                  )}
-                </div>
-
-                {/* Positions List */}
-                <div className={`rounded-3xl border p-6 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'} shadow-xl`}>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold flex items-center gap-2">
-                      <DollarSign size={18} className="text-[#FF4F01]" />
-                      Open Positions ({positions.length})
-                    </h3>
-                    <button
-                      onClick={fetchPositions}
-                      className={`p-2 rounded-lg ${isDarkMode ? 'hover:bg-black' : 'hover:bg-slate-100'}`}
-                    >
-                      <RefreshCw size={16} />
-                    </button>
-                  </div>
-
-                  {positions.length === 0 ? (
-                    <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
-                      No open positions
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {positions.map((pos) => (
-                        <div
-                          key={pos.ticket}
-                          className={`flex items-center justify-between p-3 rounded-xl ${
-                            isDarkMode ? 'bg-black' : 'bg-slate-50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className={`font-medium ${pos.type === 'BUY' ? 'text-green-500' : 'text-rose-500'}`}>
-                              {pos.type}
-                            </span>
-                            <span className="font-medium">{pos.symbol}</span>
-                            <span className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
-                              {pos.volume}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="text-right">
-                              <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
-                                {pos.price_open.toFixed(5)}
-                              </p>
-                              <p className={`font-medium ${pos.profit >= 0 ? 'text-green-500' : 'text-rose-500'}`}>
-                                ${pos.profit.toFixed(2)}
-                              </p>
-                            </div>
-                            <button
-                              onClick={() => handleClosePosition(pos.ticket)}
-                              disabled={!!orderSuccess || !!orderError}
-                              className="p-2 rounded-lg bg-rose-500/20 text-rose-500 hover:bg-rose-500/30 disabled:opacity-50"
-                            >
-                              <X size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Sync Tab */}
-            {activeTab === 'connect' && (
-              <div className="space-y-4">
-                <button
-                  onClick={handleSync}
-                  disabled={syncing}
-                  className="w-full py-3 px-6 rounded-xl bg-[#FF4F01] text-white font-semibold hover:bg-[#FF4F01]/90 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} />
-                  {syncing ? 'Syncing...' : 'Sync Trades'}
-                </button>
-
-                <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-black' : 'bg-slate-50'}`}>
-                  <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
-                    <strong>Note:</strong> MT5 terminal must remain running with your account logged in.
-                    Trades are automatically synced when you click "Sync Trades" or you can setup periodic sync in settings.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {renderContent()}
       </div>
     </div>
   );
