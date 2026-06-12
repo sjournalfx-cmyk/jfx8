@@ -30,6 +30,7 @@ import { Agentation, type Annotation } from "agentation";
 import { getSafePnL } from './lib/trade-normalization';
 import { normalizeThemePreference } from './lib/theme';
 import { demoDailyBias, demoEASession, demoNotes, demoTrades, getDemoProfile } from './lib/demoData';
+import { Analytics as VercelAnalytics } from '@vercel/analytics/react';
 
 // Lazy load heavy components for performance
 const Analytics = lazy(() => import('./components/Analytics'));
@@ -1145,6 +1146,7 @@ const App: React.FC = () => {
   return (
     <ToastProvider>
       <AppContent />
+      <VercelAnalytics />
       {import.meta.env.DEV && (
         <Agentation 
           onAnnotationAdd={handleAnnotationAdd}
