@@ -127,7 +127,7 @@ const Rules: React.FC<RulesProps> = ({ isDarkMode, ruleSections, onUpdateSection
                );
              })}
              
-             {/* New Section Button Placeholder */}
+
              <button className={`w-full mt-2 border border-dashed rounded-xl p-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wide opacity-50 hover:opacity-100 transition-opacity ${isDarkMode ? 'border-zinc-700 text-zinc-500' : 'border-slate-300 text-slate-500'}`}>
                  <Plus size={14} /> Draft New Article
              </button>

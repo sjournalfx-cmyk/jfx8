@@ -13,6 +13,7 @@ import { DrawingLayer } from './backtest/DrawingLayer';
 import { Drawing, Point, ToolType } from './backtest/types';
 import { useMT5Bridge } from '../hooks/useMT5Bridge';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { MT5_BRIDGE_URL } from '../lib/constants';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
 import { UserProfile, BacktestSession, Trade, BacktestTrade } from '../types';
 import { dataService } from '../services/dataService';
@@ -98,6 +99,8 @@ const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'none'>('
     })();
 
     const [showWelcome, setShowWelcome] = useState(!hasCachedData);
+    const sourceLabel = dataSource === 'live' ? 'Live sync' : dataSource === 'cache' ? 'Cached replay' : 'No source selected';
+    const shortcutHint = 'M magnet / Shift+L lock / Ctrl+Z undo / Ctrl+Y redo';
 
     // Load cached chart data when dataSource is cache
     useEffect(() => {
@@ -125,7 +128,7 @@ const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'none'>('
         const checkBridge = async () => {
             setBridgeError(null);
             try {
-                const res = await fetch('http://localhost:5001/ping');
+                const res = await fetch(`${MT5_BRIDGE_URL}/ping`);
                 if (res.ok) {
                     setBridgeStatus('online');
                     setBridgeError(null);
@@ -1141,7 +1144,7 @@ setAllData(validData);
         setIsAnalyzing(true);
         try {
             // Suggestion: Link to the geminiService from Pro lab if needed
-            // For now, we'll simulate or placeholder this
+
             setTimeout(() => {
                 setAnalysisResult({
                     trend: allData[currentIndex].close > allData[Math.max(0, currentIndex - 10)].close ? 'BULLISH' : 'BEARISH',
@@ -1264,10 +1267,14 @@ setAllData(validData);
                     )}
                     <div className="flex flex-col justify-center">
                         <h2 className={`text-base font-black uppercase tracking-tight leading-none ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Backtest Lab</h2>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                             <p className={`text-[9px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Pro Canvas Engine</p>
+                            <span className={`px-1.5 py-0.5 rounded border text-[8px] font-black uppercase tracking-[0.18em] ${dataSource === 'live' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : dataSource === 'cache' ? 'border-blue-500/30 text-blue-400 bg-blue-500/10' : isDarkMode ? 'border-zinc-700 text-zinc-500 bg-black' : 'border-slate-200 text-slate-500 bg-white'}`}>
+                                {sourceLabel}
+                            </span>
                         </div>
+                        <p className={`mt-1 text-[9px] uppercase tracking-[0.16em] ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>{shortcutHint}</p>
                     </div>
                 </div>
 
@@ -1450,6 +1457,7 @@ setAllData(validData);
                                             <RefreshCw size={48} className={isFetching ? 'animate-spin' : ''} />
                                         </div>
                                         <div className="text-center space-y-2">
+                                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>Live Source</p>
                                             <h3 className={`text-xl font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Live MT5 Sync</h3>
                                             <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Requires JournalFX Bridge to be running<br />Connects directly to your MT5 Terminal</p>
                                         </div>
@@ -1472,6 +1480,7 @@ setAllData(validData);
                                             <FileUp size={48} />
                                         </div>
                                         <div className="text-center space-y-2">
+                                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-[#FF4F01]' : 'text-[#FF4F01]'}`}>Cache File</p>
                                             <h3 className={`text-xl font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Import JSON File</h3>
                                             <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Upload an MT5 Export JSON<br />Array of OHLC objects</p>
                                         </div>
@@ -1489,6 +1498,7 @@ setAllData(validData);
                                                 <Database size={48} />
                                             </div>
                                             <div className="text-center space-y-2">
+                                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>Saved Sessions</p>
                                                 <h3 className={`text-xl font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Recent Sessions</h3>
                                                 <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Continue where you left off<br />Saved to your JFX Cloud</p>
                                             </div>

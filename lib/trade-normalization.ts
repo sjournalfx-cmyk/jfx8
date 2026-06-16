@@ -114,12 +114,20 @@ export const normalizeTrade = (
   const calculatedPnl = getSafePnL(calculatePnL(tradeForCalc));
   const explicitPnl = toOptionalFiniteNumber(trade.pnl, toOptionalFiniteNumber(fallback.pnl));
   const shouldPreserveExplicitPnl = options.preserveProvidedPnl !== false;
-  const pnl = shouldPreserveExplicitPnl && explicitPnl !== undefined ? explicitPnl : calculatedPnl;
+  const rawPnl = shouldPreserveExplicitPnl && explicitPnl !== undefined ? explicitPnl : calculatedPnl;
 
   const explicitResult = normalizeResult(trade.result) ?? normalizeResult(fallback.result);
   const result = explicitResult === 'Pending' && hasExitContext(tradeForCalc)
-    ? deriveResult(tradeForCalc, pnl)
-    : explicitResult ?? deriveResult(tradeForCalc, pnl);
+    ? deriveResult(tradeForCalc, rawPnl)
+    : explicitResult ?? deriveResult(tradeForCalc, rawPnl);
+
+  // Sync PNL sign with outcome result (WIN/LOSS)
+  let pnl = rawPnl;
+  if (result === 'Loss') {
+    pnl = -Math.abs(rawPnl);
+  } else if (result === 'Win') {
+    pnl = Math.abs(rawPnl);
+  }
 
   const rrMetrics = calculateRiskReward({
     entryPrice,

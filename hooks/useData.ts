@@ -5,7 +5,7 @@ import { dataService, mapTradeFromDB, mapCashTransactionFromDB } from '../servic
 import { supabase } from '../lib/supabase';
 import { useToast } from '../components/ui/Toast';
 import { getSASTDateTime } from '../lib/timeUtils';
-import { APP_CONSTANTS, PLAN_FEATURES } from '../lib/constants';
+
 import { useLocalStorage } from './useLocalStorage';
 
 export const useData = (userId: string | null, userProfile: UserProfile | null) => {

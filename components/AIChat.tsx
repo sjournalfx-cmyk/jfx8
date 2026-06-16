@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trade, UserProfile, DailyBias, EASession, FirehoseEvent } from '../types';
+import { Trade, UserProfile, DailyBias, EASession, FirehoseEvent, Note } from '../types';
 import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary } from '../services/nvidiaAiService';
 import { browserSpeechService } from '../services/voiceInputService';
 import { calculateStats } from '../lib/statsUtils';
@@ -499,7 +499,7 @@ interface AIChatProps {
   userProfile: UserProfile | null;
   dailyBias?: DailyBias[];
   eaSession?: EASession | null;
-  onAddNote?: (note: any) => Promise<any>;
+  onAddNote?: (note: Note) => Promise<Note | undefined>;
   onUpdateTrade?: (trade: Trade) => Promise<void>;
   onOpenSettings?: () => void;
 }
@@ -569,20 +569,30 @@ interface MessageRowProps {
   renderMessageContent: (message: Message) => React.ReactNode;
   renderSectionCards: (sections: Record<string, string>, message: Message) => React.ReactNode;
   assistantIcon: React.ElementType;
+  onSaveAsNote?: (message: Message) => Promise<void>;
 }
 
-const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessageContent, renderSectionCards, assistantIcon: AssistantIcon }: MessageRowProps) => {
+const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessageContent, renderSectionCards, assistantIcon: AssistantIcon, onSaveAsNote }: MessageRowProps) => {
   const [copied, setCopied] = useState(false);
+  const [savedAsNote, setSavedAsNote] = useState(false);
   const [hovered, setHovered] = useState(false);
   const isUser = message.role === 'user';
   const isCompactAudioMessage = isUser && Boolean(message.audioAttachment) && (!message.content || message.content === '[Voice recording]');
   const isMarketDataAssistantMessage = !isUser && /^## .+ — (Stock Quote|Company Profile|Key Metrics|Ratios & Growth|Price Change|DCF Valuation|Financial Statements|Insider Transactions|Analyst Recommendations|Earnings Surprises|Recent News)/.test(message.content || '');
+  const modeLabel = message.contextSummary?.mode === 'research' ? 'Public research' : 'Journal data';
 
   const handleCopy = () => {
     const cleanContentText = stripStructuredBlocks(message.content || '').trim();
     navigator.clipboard?.writeText(cleanContentText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveAsNote = async () => {
+    if (!onSaveAsNote) return;
+    await onSaveAsNote(message);
+    setSavedAsNote(true);
+    window.setTimeout(() => setSavedAsNote(false), 2000);
   };
 
   return (
@@ -625,6 +635,18 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
                 }`}>
                   AI
                 </span>
+                {!isUser && message.contextSummary && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                      message.contextSummary.privateDataAllowed
+                        ? isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
+                        : isDarkMode ? 'bg-zinc-800 text-zinc-300' : 'bg-slate-100 text-slate-600'
+                    }`}
+                    title={message.contextSummary.promptScope}
+                  >
+                    {modeLabel}
+                  </span>
+                )}
                 {message.kind === 'strategy' && (
                   <motion.span
                     initial={{ opacity: 0, scale: 0.8 }}
@@ -759,6 +781,17 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
                   >
                     <ThumbsDown size={14} />
                   </button>
+                  {onSaveAsNote && (
+                    <button
+                      onClick={handleSaveAsNote}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500'
+                      }`}
+                      title="Save as note"
+                    >
+                      {savedAsNote ? <Check size={14} /> : <StickyNote size={14} />}
+                    </button>
+                  )}
                 </>
               )}
             </motion.div>
@@ -1803,6 +1836,36 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     };
   }, []);
 
+  const handleSaveMessageAsNote = useCallback(async (message: Message) => {
+    if (!onAddNote || message.role !== 'assistant') return;
+
+    const rawContent = stripStructuredBlocks(cleanThinkingTags(message.content || '')).trim();
+    const noteBody = rawContent || 'Saved from AI Chat.';
+    const firstLine = noteBody.split('\n').map(line => line.trim()).find(Boolean) || 'AI Chat Note';
+    const title = firstLine.replace(/^#+\s*/, '').slice(0, 60);
+
+    const note: Note = {
+      id: `${Date.now()}`,
+      title,
+      content: noteBody,
+      date: new Date().toISOString().slice(0, 10),
+      tags: [message.contextSummary?.mode === 'research' ? 'research' : 'mentor', 'ai-chat'],
+      color: '#FF4F00',
+      isPinned: false,
+      isArchived: false,
+      isTrashed: false,
+      isList: false,
+      position: 0,
+    };
+
+    await onAddNote(note);
+    addToast({
+      type: 'success',
+      title: 'Note saved',
+      message: 'Assistant response added to Notes.'
+    });
+  }, [addToast, onAddNote]);
+
   const getCurrentCreditLabel = useCallback(() => {
     const remaining = isResearchMode ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining;
     return `AI credit ${remaining}/${DAILY_CREDIT_MAX}`;
@@ -2257,6 +2320,16 @@ ${strategyProfile.whyITrade}`;
         strong: ({ children }) => <strong className="ai-md-strong">{children}</strong>,
         em: ({ children }) => <em className="ai-md-em">{children}</em>,
         blockquote: ({ children }) => <blockquote className="ai-md-blockquote">{children}</blockquote>,
+        table: ({ children }) => (
+          <div className="my-4 overflow-x-auto rounded-2xl border border-white/10">
+            <table className="ai-md-table">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="ai-md-thead">{children}</thead>,
+        tbody: ({ children }) => <tbody className="ai-md-tbody">{children}</tbody>,
+        tr: ({ children }) => <tr className="ai-md-tr">{children}</tr>,
+        th: ({ children }) => <th className="ai-md-th">{children}</th>,
+        td: ({ children }) => <td className="ai-md-td">{children}</td>,
         hr: () => <hr className="ai-md-hr" />,
         a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="ai-md-link">{children}</a>,
         code: ({ children, className, ...props }: any) => props.inline
@@ -2491,9 +2564,14 @@ ${strategyProfile.whyITrade}`;
             <div className="w-8 h-8 rounded-full bg-black dark:bg-black flex items-center justify-center shadow-lg shadow-black/20">
               <AssistantIcon size={16} className="text-white" />
             </div>
-            <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-              {assistantLabel}
-            </h2>
+            <div className="flex flex-col">
+              <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                {assistantLabel}
+              </h2>
+              <span className={`text-[10px] uppercase tracking-[0.16em] ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                {isResearchMode ? 'Public research only' : 'Private journal context'}
+              </span>
+            </div>
           </div>
         </div>
         
@@ -3058,6 +3136,7 @@ ${strategyProfile.whyITrade}`;
                   renderMessageContent={renderMessageContent} 
                   renderSectionCards={renderSectionCards}
                   assistantIcon={AssistantIcon}
+                  onSaveAsNote={m.role === 'assistant' ? handleSaveMessageAsNote : undefined}
                 />
               ))}
             </div>
@@ -3398,8 +3477,8 @@ ${strategyProfile.whyITrade}`;
                       ? (isDarkMode ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-emerald-200 text-emerald-700 bg-emerald-50')
                       : (isDarkMode ? 'border-zinc-700 text-zinc-300 hover:bg-black' : 'border-slate-200 text-slate-700 hover:bg-slate-50')
                   } disabled:opacity-50`}
-                  title={isTranscribing ? "Processing recording..." : (isRecording ? "Stop recording" : "Start recording")}
-                  aria-label={isTranscribing ? "Processing recording" : (isRecording ? "Stop recording" : "Start recording")}
+                  title={isTranscribing ? "Processing voice note..." : (isRecording ? "Stop voice note recording" : "Record a voice note")}
+                  aria-label={isTranscribing ? "Processing voice note" : (isRecording ? "Stop voice note recording" : "Record a voice note")}
                 >
                   {isTranscribing ? <Loader2 size={16} className="animate-spin" /> : <Mic size={16} />}
                 </motion.button>
@@ -3476,9 +3555,10 @@ ${strategyProfile.whyITrade}`;
                 <div className={`text-xs font-medium ${isCreditWarning ? 'text-red-500' : isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
                   {getCurrentCreditLabel()}
                 </div>
-                <p className={`text-right text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                  AI can make mistakes. Please verify important information.
-                </p>
+                <div className={`text-right text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                  <p>{isResearchMode ? 'Research mode uses public context only.' : 'Mentor mode can use your journal, trade, and account context.'}</p>
+                  <p>AI can make mistakes. Verify important information before acting on it.</p>
+                </div>
               </div>
             </div>
         </div>

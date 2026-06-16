@@ -402,7 +402,7 @@ const Notes: React.FC<NotesProps> = ({
                         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
                             <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">Reminders</p>
                             <p className="text-xs opacity-60 mt-1 leading-relaxed">
-                                Reminder data is not stored in the current notebook model yet. The bell actions are left intentionally as a placeholder until a reminder schema is added.
+                                Reminder notifications are not yet available. This feature will be enabled when the reminder schema is added.
                             </p>
                         </div>
                     )}

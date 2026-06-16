@@ -72,7 +72,7 @@ const FloatingTextNode: React.FC<NodeViewProps> = (props) => {
           <NodeViewContent className="outline-none min-h-[1em]" />
         </div>
 
-        {/* Empty Placeholder Hint */}
+
         {node.content.size === 0 && (
           <div className="absolute inset-0 pointer-events-none flex items-center px-1 opacity-30 text-xs italic">
             Type something...

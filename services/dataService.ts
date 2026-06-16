@@ -367,7 +367,7 @@ export const dataService = {
         user_id: user.id,
         action,
         details,
-        ip_address: 'client-side', // Placeholder
+        ip_address: 'client-side',
         user_agent: navigator.userAgent
       });
     } catch (err) {

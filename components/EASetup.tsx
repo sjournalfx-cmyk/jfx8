@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Download, Copy, Check, Info, AlertCircle,
     Terminal, Shield, Cpu, ArrowRight, Loader2,
@@ -14,8 +14,10 @@ import { UserProfile, Trade, EASession, EADeal, EAPosition } from '../types';
 import OpenPositions from './OpenPositions';
 import BrokerConnect from './BrokerConnect';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { EA_BRIDGE_URL } from '../lib/constants';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
+import { parseMTTradeCSV } from '../lib/trade-import';
 
 interface BridgeProps {
     isDarkMode: boolean;
@@ -25,11 +27,12 @@ interface BridgeProps {
     onTradeAdded?: (trade: Trade) => void;
     onEditTrade?: (trade: Trade) => void;
     onAddOffline?: (trade: Trade) => void;
+    onImportTrades?: (trades: Trade[]) => Promise<void>;
     trades: Trade[];
     userId: string;
 }
 
-const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, trades, userId }) => {
+const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
     const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | null>(null);
@@ -106,7 +109,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
     }
 
     if (!connectionMode) {
-        return <MethodChoice onSelect={setConnectionMode} isDarkMode={isDarkMode} />;
+        return <MethodChoice onSelect={setConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} />;
     }
 
     if (isInternalConnected) {
@@ -152,10 +155,12 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
 /* --- SUB-COMPONENT: METHOD CHOICE SCREEN --- */
 interface MethodChoiceProps {
     onSelect: (mode: 'bridge' | 'broker') => void;
+    onImportTrades?: (trades: Trade[]) => Promise<void>;
     isDarkMode: boolean;
 }
 
-const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, isDarkMode }) => {
+const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, isDarkMode }) => {
+    const csvInputRef = useRef<HTMLInputElement>(null);
     const options = [
         {
             id: 'bridge' as const,
@@ -203,8 +208,56 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, isDarkMode }) => 
             accent: '#22C55E',
             gradient: 'from-[#22C55E]/20 via-transparent to-transparent',
             description: 'Connect directly to your MetaTrader 5 terminal using the MT5 API. Requires Python and the MetaTrader5 library installed.'
+        },
+        {
+            id: 'csv' as const,
+            title: 'Import CSV',
+            subtitle: 'Trade Journal File',
+            icon: (
+                <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 3h8l4 4v14H4V3h4z" />
+                    <path d="M8 3v4h8" />
+                    <path d="M8 11h8" />
+                    <path d="M8 15h8" />
+                </svg>
+            ),
+            features: [
+                'CSV or TXT trade export',
+                'Same MT4/MT5 parser as trade entry',
+                'Bulk import to your journal',
+                'Quick file picker'
+            ],
+            accent: '#8B5CF6',
+            gradient: 'from-[#8B5CF6]/20 via-transparent to-transparent',
+            description: 'Import a CSV export directly into your journal without leaving the connection setup flow.'
         }
     ];
+
+    const handleCardClick = async (opt: typeof options[number]) => {
+        if (opt.id === 'csv') {
+            csvInputRef.current?.click();
+            return;
+        }
+        onSelect(opt.id as 'bridge' | 'broker');
+    };
+
+    const handleCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !onImportTrades) return;
+
+        const reader = new FileReader();
+        reader.onload = async (loadEvent) => {
+            const text = typeof loadEvent.target?.result === 'string' ? loadEvent.target.result : '';
+            if (!text) return;
+
+            const importedTrades = parseMTTradeCSV(text);
+            if (importedTrades.length > 0) {
+                await onImportTrades(importedTrades);
+            }
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+    };
 
     return (
         <div className="w-full h-full overflow-y-auto custom-scrollbar bg-black">
@@ -229,7 +282,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, isDarkMode }) => 
                     {options.map((opt, idx) => (
                         <button
                             key={opt.id}
-                            onClick={() => onSelect(opt.id)}
+                            onClick={() => void handleCardClick(opt)}
                             style={{
                                 animationDelay: `${idx * 150}ms`,
                                 animationFillMode: 'both'
@@ -292,6 +345,14 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, isDarkMode }) => 
                         </button>
                     ))}
                 </div>
+
+                <input
+                    ref={csvInputRef}
+                    type="file"
+                    accept=".csv,.txt"
+                    className="hidden"
+                    onChange={handleCsvImport}
+                />
 
                 {/* Bottom note */}
                 <p className="text-center text-zinc-600 text-xs mt-10">
@@ -377,9 +438,9 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                 const timeoutId = setTimeout(() => controller.abort(), 2000); // Fast timeout
                 
                 const [accountRes, positionsRes, historyRes] = await Promise.all([
-                    fetch('http://localhost:8888/api/account', { signal: controller.signal }),
-                    fetch('http://localhost:8888/api/positions', { signal: controller.signal }),
-                    fetch('http://localhost:8888/api/history', { signal: controller.signal })
+                    fetch(`${EA_BRIDGE_URL}/api/account`, { signal: controller.signal }),
+                    fetch(`${EA_BRIDGE_URL}/api/positions`, { signal: controller.signal }),
+                    fetch(`${EA_BRIDGE_URL}/api/history`, { signal: controller.signal })
                 ]);
                 clearTimeout(timeoutId);
 

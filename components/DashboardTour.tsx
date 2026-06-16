@@ -17,13 +17,13 @@ const DashboardTour: React.FC = () => {
 
   const steps: Step[] = [
     {
-      target: '.dashboard-layout-presets', // Placeholder: Needs actual selector for layout presets
+      target: '.dashboard-layout-presets',
       content: 'Explore different dashboard layouts to suit your trading style.',
       placement: 'right',
       title: 'Layout Presets',
     },
     {
-      target: '.ai-assistant-widget', // Placeholder: Needs actual selector for AI Assistant
+      target: '.ai-assistant-widget',
       content: 'Leverage our AI Assistant for insights, trade analysis, and more.',
       placement: 'bottom',
       title: 'AI Assistant',

@@ -411,6 +411,45 @@ canvas, svg {
   border-radius: 0.75rem;
 }
 
+.ai-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.ai-md-thead {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.ai-md-th,
+.ai-md-td {
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  vertical-align: top;
+}
+
+.ai-md-th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+
+.ai-markdown-dark .ai-md-th,
+.ai-markdown-dark .ai-md-td {
+  color: #e4e4e7;
+}
+
+.ai-markdown-light .ai-md-th,
+.ai-markdown-light .ai-md-td {
+  color: #0f172a;
+}
+
+.ai-md-tr:last-child .ai-md-td {
+  border-bottom: 0;
+}
+
 .ai-markdown-dark .ai-md-blockquote {
   color: #e4e4e7;
 }

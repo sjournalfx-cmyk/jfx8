@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, TrendingDown, Hash, Clock, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Hash, Clock, CheckCircle2, XCircle, MinusCircle, AlertTriangle } from 'lucide-react';
 import { Input } from '../ui/Input';
 import { cn } from '../../lib/utils';
 
@@ -16,6 +16,28 @@ export const TradeFormStep2: React.FC<TradeFormStep2Props> = ({
     isDarkMode,
     isDesktopBridgeTrade = false,
 }) => {
+    const entry = parseFloat(formData.entryPrice);
+    const exit = parseFloat(formData.exitPrice);
+    const direction = formData.direction;
+    const result = formData.result;
+
+    const hasWarning = React.useMemo(() => {
+        if (isNaN(entry) || isNaN(exit) || !direction || !result) return null;
+        if (result !== 'Win' && result !== 'Loss') return null;
+
+        const isLong = direction === 'Long';
+        const isWinPrice = isLong ? exit > entry : exit < entry;
+        const isLossPrice = isLong ? exit < entry : exit > entry;
+
+        if (isWinPrice && result === 'Loss') {
+            return "Based on entry and exit prices, this is a winning trade, but you selected 'Loss'. Saving will sync the PNL sign to negative.";
+        }
+        if (isLossPrice && result === 'Win') {
+            return "Based on entry and exit prices, this is a losing trade, but you selected 'Win'. Saving will sync the PNL sign to positive.";
+        }
+        return null;
+    }, [entry, exit, direction, result]);
+
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="grid grid-cols-2 gap-6">
@@ -145,6 +167,20 @@ export const TradeFormStep2: React.FC<TradeFormStep2Props> = ({
                     <p className="mt-3 text-[10px] font-bold uppercase tracking-widest text-amber-500">
                         Trade outcome is locked for desktop bridge trades
                     </p>
+                )}
+                {hasWarning && (
+                    <div className={cn(
+                        "mt-4 p-3.5 rounded-xl border flex items-start gap-3 text-xs font-medium",
+                        isDarkMode 
+                            ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' 
+                            : 'bg-amber-50 border-amber-200 text-amber-700'
+                    )}>
+                        <AlertTriangle size={16} className="shrink-0 mt-0.5 text-amber-500" />
+                        <div>
+                            <p className="font-bold mb-0.5">Outcome Mismatch</p>
+                            <p className="opacity-90">{hasWarning}</p>
+                        </div>
+                    </div>
                 )}
             </div>
         </div>

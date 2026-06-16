@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { MT5_BRIDGE_URL } from '../lib/constants';
 
 export const useMT5Bridge = (initialSymbol: string, initialTimeframe: string) => {
     const [symbol, setSymbol] = useState(initialSymbol);
@@ -12,7 +13,7 @@ export const useMT5Bridge = (initialSymbol: string, initialTimeframe: string) =>
         const activeSymbol = overrideSymbol || symbol;
         const activeTF = overrideTimeframe || timeframe;
         try {
-            const response = await fetch(`http://localhost:5001/data?symbol=${activeSymbol}&tf=${activeTF}&count=1000`).catch(() => {
+            const response = await fetch(`${MT5_BRIDGE_URL}/data?symbol=${activeSymbol}&tf=${activeTF}&count=1000`).catch(() => {
                 throw new Error('MT5 Bridge disconnected. Please launch and start the JournalFX Bridge app.');
             });
             if (!response.ok) throw new Error('Bridge returned an error. Ensure MT5 is open.');

@@ -42,7 +42,6 @@ export const ExecutionPerformanceTable: React.FC<ExecutionPerformanceTableProps>
             };
 
             await dataService.updateTrade(updatedTrade);
-            console.log("Successfully saved trade update:", updatedTrade);
             setEditingTrade(null);
         } catch (error) {
             console.error("Error saving trade update:", error);

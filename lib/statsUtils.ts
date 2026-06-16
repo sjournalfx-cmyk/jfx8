@@ -206,7 +206,6 @@ export const calculateStats = (trades: Trade[]) => {
     bestPair,
     worstPair,
     
-    // Placeholder for R-Multiples (need to ensure rr is populated)
     avgPlannedR: totalCount > 0 ? safeTrades.reduce((acc, t) => acc + toFiniteNumber(t.rr, 0), 0) / totalCount : 0,
     avgRealizedR: (() => {
       const realizedRs = safeTrades

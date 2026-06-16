@@ -6,8 +6,8 @@ import Journal from './components/Journal';
 import Auth from './components/Auth';
 import BetaSplash from './components/BetaSplash';
 
-import { PartyPopper, MessageSquare, Activity, CheckCircle2, Loader2 } from 'lucide-react';
-import { Trade, Note, DailyBias, FirehoseEvent } from './types';
+import { PartyPopper, MessageSquare } from 'lucide-react';
+import { Trade, Note, DailyBias } from './types';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
 import EASetup from './components/EASetup';
@@ -47,7 +47,6 @@ const AppContent: React.FC = () => {
   const [isDemoMode, setIsDemoMode] = useLocalStorage<boolean>('jfx_demo_mode', false);
   const [showBetaSplash, setShowBetaSplash] = useState(true);
 
-  // Mock for current migration version - In a real app, this would be fetched from the backend.
   const [currentMigrationVersion] = useState('v20250201.1');
 
   const {
@@ -974,6 +973,7 @@ const onLogout = async () => {
                 key={editingTrade?.id || 'new-trade'}
                 isDarkMode={isDarkMode}
                 onSave={handleAddTrade}
+                onBatchSave={handleBatchAddTrades}
                 onCancel={() => setCurrentView('dashboard')}
                 initialTrade={editingTrade}
                 currencySymbol={activeUserProfile.currencySymbol}
@@ -1060,6 +1060,7 @@ const onLogout = async () => {
                 }}
                 onEditTrade={handleEditTrade}
                 onAddOffline={addToOfflineQueue}
+                onImportTrades={handleBatchAddTrades}
                 trades={activeTrades}
                 userId={userId}
               />
@@ -1158,14 +1159,7 @@ const onLogout = async () => {
 };
 
 const App: React.FC = () => {
-  const handleAnnotationAdd = (annotation: Annotation) => {
-    console.group(`🎯 UI Annotation: ${annotation.element}`);
-    console.log(`💬 Comment: ${annotation.comment}`);
-    console.log(`📍 Path: ${annotation.elementPath}`);
-    console.log(`⏰ Time: ${new Date(annotation.timestamp).toLocaleString()}`);
-    if (annotation.selectedText) console.log(`🔍 Selected: "${annotation.selectedText}"`);
-    console.groupEnd();
-  };
+  const handleAnnotationAdd = (_annotation: Annotation) => {};
 
   return (
     <ToastProvider>
@@ -1173,8 +1167,8 @@ const App: React.FC = () => {
       {import.meta.env.DEV && (
         <Agentation 
           onAnnotationAdd={handleAnnotationAdd}
-          onAnnotationUpdate={(a) => console.log("📝 Annotation updated:", a.id)}
-          onAnnotationDelete={(a) => console.log("🗑️ Annotation removed:", a.id)}
+          onAnnotationUpdate={() => {}}
+          onAnnotationDelete={() => {}}
         />
       )}
     </ToastProvider>

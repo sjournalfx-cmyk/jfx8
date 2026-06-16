@@ -1020,7 +1020,7 @@ export const PerformanceSequence: React.FC = () => {
           <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold tracking-[0.12em] uppercase text-white/70">
             {activePerformanceCopy?.title}
           </div>
-          <div className="text-[11px] font-medium text-white/40">Canvas placeholder</div>
+          <div className="text-[11px] font-medium text-white/40">Canvas</div>
         </div>
         <div className="flex-1 bg-[#101013] p-5 sm:p-6 flex items-center justify-center">
           <div className="relative w-full h-full max-h-[560px] rounded-[22px] border border-dashed border-white/10 bg-[radial-gradient(circle_at_top,rgba(255,79,1,0.08),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0))] overflow-hidden">

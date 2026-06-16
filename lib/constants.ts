@@ -38,6 +38,10 @@ export const APP_CONSTANTS = {
   ]
 };
 
+// Bridge & API URLs
+export const MT5_BRIDGE_URL = 'http://localhost:5001';
+export const EA_BRIDGE_URL = 'http://localhost:8888';
+
 const PLAN_NORMALIZATION_MAP: Record<string, string> = {
   [APP_CONSTANTS.PLANS.FREE.toLowerCase()]: APP_CONSTANTS.PLANS.FREE,
   free: APP_CONSTANTS.PLANS.FREE,

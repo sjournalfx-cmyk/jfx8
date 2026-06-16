@@ -52,4 +52,40 @@ describe('normalizeTrade', () => {
     expect(normalized.pnl).toBe(-7.5);
     expect(normalized.result).toBe('BE');
   });
+
+  it('corrects and syncs pnl sign based on outcome', () => {
+    // A trade with positive PNL but a result of Loss should have its PNL corrected to negative
+    const normalizedLoss = normalizeTrade({
+      id: '3',
+      pair: 'EURUSD',
+      assetType: 'Forex',
+      date: '2026-04-21',
+      time: '10:00',
+      direction: 'Long',
+      entryPrice: 1.1,
+      exitPrice: 1.101,
+      lots: 1,
+      result: 'Loss',
+      pnl: 100,
+    });
+    expect(normalizedLoss.result).toBe('Loss');
+    expect(normalizedLoss.pnl).toBe(-100);
+
+    // A trade with negative PNL but a result of Win should have its PNL corrected to positive
+    const normalizedWin = normalizeTrade({
+      id: '4',
+      pair: 'EURUSD',
+      assetType: 'Forex',
+      date: '2026-04-21',
+      time: '10:00',
+      direction: 'Long',
+      entryPrice: 1.1,
+      exitPrice: 1.099,
+      lots: 1,
+      result: 'Win',
+      pnl: -100,
+    });
+    expect(normalizedWin.result).toBe('Win');
+    expect(normalizedWin.pnl).toBe(100);
+  });
 });

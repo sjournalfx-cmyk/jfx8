@@ -1,9 +1,7 @@
 import { DailyBias, EASession, Note, Trade, UserProfile } from '../types';
 
-const demoTrade = (trade: Trade): Trade => trade;
-
 export const demoTrades: Trade[] = [
-  demoTrade({
+  {
     id: 'demo-trade-001',
     pair: 'EURUSD',
     assetType: 'Forex',
@@ -31,8 +29,8 @@ export const demoTrades: Trade[] = [
     setupName: 'EURUSD London Sweep',
     openTime: '2026-01-05T08:12:00+02:00',
     closeTime: '2026-01-05T10:41:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-002',
     pair: 'GBPUSD',
     assetType: 'Forex',
@@ -58,8 +56,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Minor Deviation',
     openTime: '2026-01-09T13:26:00+02:00',
     closeTime: '2026-01-09T13:58:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-003',
     pair: 'XAUUSD',
     assetType: 'Commodities',
@@ -85,8 +83,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Followed Exactly',
     openTime: '2026-01-14T09:03:00+02:00',
     closeTime: '2026-01-14T11:27:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-004',
     pair: 'NAS100',
     assetType: 'Indices',
@@ -112,8 +110,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Minor Deviation',
     openTime: '2026-01-18T15:11:00+02:00',
     closeTime: '2026-01-18T16:02:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-005',
     pair: 'USDJPY',
     assetType: 'Forex',
@@ -139,8 +137,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Major Deviation',
     openTime: '2026-01-23T07:42:00+02:00',
     closeTime: '2026-01-23T08:15:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-006',
     pair: 'EURUSD',
     assetType: 'Forex',
@@ -168,8 +166,8 @@ export const demoTrades: Trade[] = [
     closeTime: '2026-01-28T16:19:00+02:00',
     setupId: 'demo-eur-breakout',
     setupName: 'EURUSD London Sweep',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-007',
     pair: 'XAUUSD',
     assetType: 'Commodities',
@@ -197,8 +195,8 @@ export const demoTrades: Trade[] = [
     closeTime: '2026-02-03T11:03:00+02:00',
     setupId: 'demo-gold-sweep',
     setupName: 'Gold Sweep Reversal',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-008',
     pair: 'GBPUSD',
     assetType: 'Forex',
@@ -224,8 +222,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Major Deviation',
     openTime: '2026-02-07T12:18:00+02:00',
     closeTime: '2026-02-07T12:56:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-009',
     pair: 'NAS100',
     assetType: 'Indices',
@@ -253,8 +251,8 @@ export const demoTrades: Trade[] = [
     closeTime: '2026-02-12T10:31:00+02:00',
     setupId: 'demo-nas-momentum',
     setupName: 'NAS100 Momentum Sequence',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-010',
     pair: 'NAS100',
     assetType: 'Indices',
@@ -282,8 +280,8 @@ export const demoTrades: Trade[] = [
     closeTime: '2026-02-13T10:04:00+02:00',
     setupId: 'demo-nas-momentum',
     setupName: 'NAS100 Momentum Sequence',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-011',
     pair: 'NAS100',
     assetType: 'Indices',
@@ -311,8 +309,8 @@ export const demoTrades: Trade[] = [
     closeTime: '2026-02-16T15:11:00+02:00',
     setupId: 'demo-nas-momentum',
     setupName: 'NAS100 Momentum Sequence',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-012',
     pair: 'EURUSD',
     assetType: 'Forex',
@@ -338,8 +336,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Followed Exactly',
     openTime: '2026-02-26T07:54:00+02:00',
     closeTime: '2026-02-26T09:48:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-013',
     pair: 'XAUUSD',
     assetType: 'Commodities',
@@ -365,8 +363,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Minor Deviation',
     openTime: '2026-03-04T10:16:00+02:00',
     closeTime: '2026-03-04T10:48:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-014',
     pair: 'USDJPY',
     assetType: 'Forex',
@@ -392,8 +390,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Minor Deviation',
     openTime: '2026-03-08T06:59:00+02:00',
     closeTime: '2026-03-08T07:42:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-015',
     pair: 'GBPUSD',
     assetType: 'Forex',
@@ -419,8 +417,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Followed Exactly',
     openTime: '2026-03-13T13:04:00+02:00',
     closeTime: '2026-03-13T15:36:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-016',
     pair: 'NAS100',
     assetType: 'Indices',
@@ -446,8 +444,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Major Deviation',
     openTime: '2026-03-18T09:41:00+02:00',
     closeTime: '2026-03-18T10:05:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-017',
     pair: 'EURUSD',
     assetType: 'Forex',
@@ -473,8 +471,8 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Followed Exactly',
     openTime: '2026-03-24T08:09:00+02:00',
     closeTime: '2026-03-24T09:56:00+02:00',
-  }),
-  demoTrade({
+  },
+  {
     id: 'demo-trade-018',
     pair: 'US30',
     assetType: 'Indices',
@@ -500,7 +498,7 @@ export const demoTrades: Trade[] = [
     planAdherence: 'Followed Exactly',
     openTime: '2026-03-27T14:52:00+02:00',
     closeTime: '2026-03-27T16:18:00+02:00',
-  }),
+  },
 ];
 
 export const demoNotes: Note[] = [
