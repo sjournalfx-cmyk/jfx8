@@ -1,9 +1,10 @@
 
 import React, { useMemo, useState } from 'react';
 import { Trade } from '../../types';
-import { Clock, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { Clock, TrendingUp, TrendingDown, AlertCircle, HelpCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 import { getTimezoneLabel, getSastHourFromTrade, getSastWeekdayFromDate } from '../../lib/timeUtils';
+import { Tooltip } from '../ui/Tooltip';
 
 interface TimeAnalysisMatrixProps {
   trades: Trade[];
@@ -124,7 +125,12 @@ export const TimeAnalysisMatrixWidget: React.FC<TimeAnalysisMatrixProps> = ({ tr
             <Clock size={22} />
           </div>
           <div>
-            <h3 className="text-lg font-bold tracking-tight italic uppercase">Time-of-Day Performance</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-bold tracking-tight italic uppercase">Time-of-Day Performance</h3>
+              <Tooltip content="Heatmap showing net P&L for each day-and-hour combination. Green = profitable slot, Red = loss-making slot." isDarkMode={isDarkMode}>
+                <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
+              </Tooltip>
+            </div>
             <p className="text-[10px] uppercase font-black tracking-widest opacity-40">Day vs Hour Heatmap</p>
           </div>
         </div>

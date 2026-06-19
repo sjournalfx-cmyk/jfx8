@@ -131,11 +131,14 @@ export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode,
       "bg-[#000000] border-zinc-900 shadow-xl"
     )}>
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div className="flex items-center gap-2">
           <h3 className="text-lg font-black tracking-tight italic flex items-center gap-2 uppercase">
             <Sunrise size={20} className="text-brand" />
             Market Sessions
           </h3>
+          <InfoTooltip content="Performance breakdown categorized by major global market trading sessions (Asian, London, London/New York Overlap, and New York)." isDarkMode={isDarkMode}>
+            <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
+          </InfoTooltip>
         </div>
         <div className="text-[10px] font-black uppercase tracking-widest opacity-50 text-right">
           Timezone: {getTimezoneLabel()}
@@ -269,11 +272,14 @@ export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkM
       "bg-[#000000] border-zinc-900 shadow-xl"
     )}>
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div className="flex items-center gap-2">
           <h3 className="text-lg font-black tracking-tight italic flex items-center gap-2 uppercase">
             <Clock size={20} className="text-brand" />
             Hourly Performance
           </h3>
+          <InfoTooltip content="Analysis of trade duration and performance structured by hour of day (SAST timezone)." isDarkMode={isDarkMode}>
+            <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
+          </InfoTooltip>
         </div>
         <div className="text-[10px] font-black uppercase tracking-widest opacity-50 text-right">
           Timezone: {getTimezoneLabel()}

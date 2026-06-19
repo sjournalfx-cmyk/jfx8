@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Trade } from '../../types';
-import { Star } from 'lucide-react';
+import { Star, HelpCircle } from 'lucide-react';
+import { Tooltip } from '../ui/Tooltip';
 
 interface TradeGradeDistributionProps {
     trades: Trade[];
@@ -29,6 +30,9 @@ export const TradeGradeDistributionWidget: React.FC<TradeGradeDistributionProps>
             <div className="flex items-center gap-2 mb-6">
                 <Star size={16} className="text-amber-500 opacity-80" />
                 <h3 className="text-sm font-black uppercase tracking-widest opacity-80">Trade Grade Distribution</h3>
+                <Tooltip content="Distribution of your self-rated trade quality scores from 1 to 5 stars." isDarkMode={isDarkMode}>
+                    <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
+                </Tooltip>
             </div>
 
             <div className="flex-1 flex flex-col justify-between gap-3">
@@ -43,15 +47,15 @@ export const TradeGradeDistributionWidget: React.FC<TradeGradeDistributionProps>
                             <span className="opacity-60">{d.count} Trades</span>
                         </div>
                         <div className="h-2 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
-                            <div 
-                                className="h-full bg-amber-500" 
-                                style={{ width: `${d.percentage}%` }} 
+                            <div
+                                className="h-full bg-amber-500"
+                                style={{ width: `${d.percentage}%` }}
                             />
                         </div>
                     </div>
                 ))}
             </div>
-            
+
             {trades.length === 0 && (
                 <div className="absolute inset-0 flex items-center justify-center bg-inherit rounded-[32px] opacity-20 text-[10px] font-black uppercase tracking-widest">
                     No Ratings Found

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, LineChart as LineIcon, TriangleAlert } from "lucide-react"
+import { AlertTriangle, LineChart as LineIcon, TriangleAlert, HelpCircle } from "lucide-react"
 import { Line, LineChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { Trade } from "../../types"
 
@@ -18,6 +18,7 @@ import {
   ChartTooltip,
   type ChartConfig,
 } from "../ui/chart"
+import { Tooltip } from "../ui/Tooltip"
 
 interface TradingMistakesBarChartWidgetProps {
   trades: Trade[]
@@ -177,7 +178,12 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
           <LineIcon size={16} className="text-rose-500" />
         </div>
         <div className="min-w-0 flex-1">
-          <CardTitle className="text-base tracking-tight">Trading Mistakes</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-base tracking-tight">Trading Mistakes</CardTitle>
+            <Tooltip content="Tracks the frequency and accumulation of self-reported trading mistakes over time. Click legend items to toggle lines." isDarkMode={isDarkMode}>
+              <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
+            </Tooltip>
+          </div>
           <CardDescription className="mt-1 max-w-[24rem] text-sm">
             Patterns that keep repeating in your journal
           </CardDescription>

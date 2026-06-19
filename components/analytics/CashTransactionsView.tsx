@@ -13,7 +13,8 @@ import {
   Trash2,
   Edit3,
   Coins,
-  Sparkles
+  Sparkles,
+  HelpCircle
 } from 'lucide-react';
 import {
   XAxis,
@@ -26,6 +27,7 @@ import {
 } from 'recharts';
 import { CashTransaction, CashTransactionType, UserProfile } from '../../types';
 import { clsx } from 'clsx';
+import { Tooltip as InfoTooltip } from '../ui/Tooltip';
 
 interface CashTransactionsViewProps {
   isDarkMode: boolean;
@@ -281,7 +283,12 @@ const chartData = useMemo(() => {
       {/* Header & Local Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
-          <h2 className="text-xl font-black tracking-tight">Cash Transactions</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-black tracking-tight">Cash Transactions</h2>
+            <InfoTooltip content="A log of non-trade capital events that impact your overall trading account balance." isDarkMode={isDarkMode}>
+              <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
+            </InfoTooltip>
+          </div>
           <p className={clsx("text-xs font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-zinc-500" : "text-slate-500")}>
             Track deposits, withdrawals, interest, fees, and transfers
           </p>
@@ -501,7 +508,12 @@ const chartData = useMemo(() => {
             )}>
               <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between mb-6">
                 <div>
-                  <h3 className="text-xl font-black tracking-tight italic">TRANSACTION MOMENTUM</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl font-black tracking-tight italic uppercase">TRANSACTION MOMENTUM</h3>
+                    <InfoTooltip content="A visual representation of your cumulative net capital flow or monthly flows over time." isDarkMode={isDarkMode}>
+                      <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
+                    </InfoTooltip>
+                  </div>
                   <p className="text-xs opacity-40 font-bold uppercase tracking-[0.2em] mt-1">Net capital flow over time</p>
                 </div>
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg border self-start md:self-auto bg-black/50 border-zinc-800">

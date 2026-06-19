@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import { Trade } from '../../types';
+import { HelpCircle } from 'lucide-react';
+import { Tooltip } from '../ui/Tooltip';
 
 interface MomentumStreakWidgetProps {
     trades: Trade[];
@@ -81,6 +83,9 @@ export const MomentumStreakWidget: React.FC<MomentumStreakWidgetProps> = ({ trad
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Streak</span>
+                    <Tooltip content="Shows your current win/loss streak and your all-time longest winning and losing runs." isDarkMode={isDarkMode}>
+                        <HelpCircle size={12} className="opacity-40 cursor-help hover:opacity-100" />
+                    </Tooltip>
                 </div>
                 <div className="flex gap-3 text-[9px] font-bold uppercase tracking-wider">
                     <span className="opacity-40">Max</span>

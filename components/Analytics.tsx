@@ -2,8 +2,10 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Trade, UserProfile, EASession, CashTransaction } from '../types';
 import {
     TrendingUp, Info, Activity,
-    Target, LineChart, Shield, X, Printer, Gauge, Zap, TrendingDown, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw
+    Target, LineChart, Shield, X, Printer, Gauge, Zap, TrendingDown, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle
 } from 'lucide-react';
+import { Tooltip } from './ui/Tooltip';
+
 
 import {
     BarChart,
@@ -441,7 +443,12 @@ const renderPsychologyLayout = () => (
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,2.05fr)]">
                 <section className="flex min-h-[380px] flex-col rounded-[20px] border border-[#1f1f1f] bg-[#000000] px-7 py-7 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
                     <div className="flex items-center justify-between">
-                        <h2 className="text-[18px] font-bold text-white">{scoreToggled ? 'Performance Radar' : 'Tilt Score'}</h2>
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-[18px] font-bold text-white">{scoreToggled ? 'Performance Radar' : 'Tilt Score'}</h2>
+                            <Tooltip content={scoreToggled ? 'Radar chart showing your average P/L by trading mindset, normalized for comparison.' : 'Your discipline score based on plan adherence across all trades. Higher is better.'} isDarkMode={true}>
+                                <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
+                            </Tooltip>
+                        </div>
                         <div
                             className="inline-flex rounded-[8px] border border-[#2a2a2a] bg-[#0a0a0a] p-1 shadow-[0_1px_0_rgba(255,255,255,0.03)]"
                             role="tablist"
@@ -518,7 +525,12 @@ const renderPsychologyLayout = () => (
 
                 <section className="flex min-h-[220px] flex-col rounded-[14px] border border-[#1f1f1f] bg-[#000000] p-4.5 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
                     <div className="mb-3.5 flex items-start justify-between gap-4">
-                        <h2 className="text-[18px] font-bold text-white">Key Insights & Warnings</h2>
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-[18px] font-bold text-white">Key Insights & Warnings</h2>
+                            <Tooltip content="AI-generated breakdown of your cognitive strengths, warning patterns, and suggested improvements based on your trade psychology." isDarkMode={true}>
+                                <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
+                            </Tooltip>
+                        </div>
                         <button
                             type="button"
                             onClick={onRefreshPsychologyInsights}
@@ -595,10 +607,42 @@ const renderPsychologyLayout = () => (
 
     const renderWidget = (id: string) => {
         switch (id) {
-            case 'winRate': return <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}><span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center gap-2"><Target size={14} className="text-indigo-500" /> Win Rate</span><div className="text-2xl font-black">{Number(stats.winRate).toFixed(1)}%</div></div>;
-            case 'profitFactor': return <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}><span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center gap-2"><Gauge size={14} className="text-indigo-500" /> Profit Factor</span><div className="text-2xl font-black">{Number(stats.profitFactor).toFixed(1)}</div></div>;
-            case 'grossProfit': return <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}><span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center gap-2"><TrendingUp size={14} className="text-emerald-500" /> Gross Profit</span><div className="text-2xl font-black text-emerald-500">+{currencySymbol}{stats.grossProfit.toLocaleString()}</div></div>;
-            case 'grossLoss': return <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}><span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center gap-2"><TrendingDown size={14} className="text-rose-500" /> Gross Loss</span><div className="text-2xl font-black text-rose-500">-{currencySymbol}{stats.grossLoss.toLocaleString()}</div></div>;
+            case 'winRate': return (
+                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
+                        <span className="flex items-center gap-2"><Target size={14} className="text-indigo-500" /> Win Rate</span>
+                        <Tooltip content="The percentage of closed trades that resulted in a profit." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                    </span>
+                    <div className="text-2xl font-black">{Number(stats.winRate).toFixed(1)}%</div>
+                </div>
+            );
+            case 'profitFactor': return (
+                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
+                        <span className="flex items-center gap-2"><Gauge size={14} className="text-indigo-500" /> Profit Factor</span>
+                        <Tooltip content="Gross Profit divided by Gross Loss. A value above 1.0 means the system is profitable." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                    </span>
+                    <div className="text-2xl font-black">{Number(stats.profitFactor).toFixed(1)}</div>
+                </div>
+            );
+            case 'grossProfit': return (
+                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
+                        <span className="flex items-center gap-2"><TrendingUp size={14} className="text-emerald-500" /> Gross Profit</span>
+                        <Tooltip content="Total profit summed from all winning closed trades." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                    </span>
+                    <div className="text-2xl font-black text-emerald-500">+{currencySymbol}{stats.grossProfit.toLocaleString()}</div>
+                </div>
+            );
+            case 'grossLoss': return (
+                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
+                        <span className="flex items-center gap-2"><TrendingDown size={14} className="text-rose-500" /> Gross Loss</span>
+                        <Tooltip content="Total loss summed from all losing closed trades." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                    </span>
+                    <div className="text-2xl font-black text-rose-500">-{currencySymbol}{stats.grossLoss.toLocaleString()}</div>
+                </div>
+            );
             case 'equityCurve': return <EquityCurveWidget trades={completedTrades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
             case 'drawdown': return <DrawdownOverTimeWidget trades={completedTrades} isDarkMode={isDarkMode} userProfile={userProfile} startingBalance={effectiveInitialBalance} />;
             case 'streakMomentum': return <MomentumStreakWidget trades={completedTrades} isDarkMode={isDarkMode} />;
@@ -607,7 +651,15 @@ const renderPsychologyLayout = () => (
             case 'currencyStrength': return <CurrencyStrengthMeter isDarkMode={isDarkMode} trades={completedTrades} />;
             case 'outcomeDist': return <OutcomeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} />;
             case 'tiltScore': return null;
-            case 'riskReward': return <div className={`h-full p-8 rounded-[32px] border ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}><h3 className="font-bold text-lg mb-6 flex items-center gap-2"><Activity size={20} className="text-indigo-500" /> Risk/Reward</h3><div className="space-y-6"><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Win</span><span className="text-xl font-black text-emerald-500">{currencySymbol}{Math.round(stats.avgWin).toLocaleString()}</span></div><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Loss</span><span className="text-xl font-black text-rose-500">{currencySymbol}{Math.round(stats.avgLoss).toLocaleString()}</span></div></div></div>;
+            case 'riskReward': return (
+                <div className={`h-full p-8 rounded-[32px] border ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                    <h3 className="font-bold text-lg mb-6 flex items-center justify-between">
+                        <span className="flex items-center gap-2"><Activity size={20} className="text-indigo-500" /> Risk/Reward</span>
+                        <Tooltip content="Compares average winning trade size vs average losing trade size. Higher is better." isDarkMode={isDarkMode}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
+                    </h3>
+                    <div className="space-y-6"><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Win</span><span className="text-xl font-black text-emerald-500">{currencySymbol}{Math.round(stats.avgWin).toLocaleString()}</span></div><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Loss</span><span className="text-xl font-black text-rose-500">{currencySymbol}{Math.round(stats.avgLoss).toLocaleString()}</span></div></div>
+                </div>
+            );
             case 'plMindset': return null;
             case 'plAdherence': return null;
             case 'matrix': return <PerformanceMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
@@ -691,13 +743,19 @@ const renderPsychologyLayout = () => (
                 ))}
                 <div className="min-h-[90px]">
                     <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
-                        <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center gap-1.5"><TrendingUp size={12} className="text-emerald-500" /> Total P&L</span>
+                        <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
+                            <span className="flex items-center gap-1.5"><TrendingUp size={12} className="text-emerald-500" /> Total P&L</span>
+                            <Tooltip content="Net realized profit or loss from all closed trades." isDarkMode={isDarkMode}><HelpCircle size={10} className="cursor-help hover:opacity-100" /></Tooltip>
+                        </span>
                         <div className="text-xl font-black text-emerald-500">{currencySymbol}{stats.netProfit.toLocaleString()}</div>
                     </div>
                 </div>
                 <div className="min-h-[90px]">
                     <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
-                        <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center gap-1.5"><Activity size={12} className="text-indigo-500" /> Risk/Reward</span>
+                        <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
+                            <span className="flex items-center gap-1.5"><Activity size={12} className="text-indigo-500" /> Risk/Reward</span>
+                            <Tooltip content="Average winning trade amount divided by average losing trade amount." isDarkMode={isDarkMode}><HelpCircle size={10} className="cursor-help hover:opacity-100" /></Tooltip>
+                        </span>
                         <div className="text-xl font-black">{stats.avgWin > 0 && stats.avgLoss < 0 ? (Math.abs(stats.avgWin) / Math.abs(stats.avgLoss)).toFixed(2) : '0.00'}</div>
                     </div>
                 </div>
@@ -794,7 +852,12 @@ const renderPsychologyLayout = () => (
             {activeTab === 'comparison' && (
                 <div className="space-y-8 pb-20">
                     <div className="flex justify-between items-center">
-                        <h2 className="text-xl font-bold">Detailed Performance Report</h2>
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-xl font-bold">Detailed Performance Report</h2>
+                            <Tooltip content="A comprehensive breakdown of all key performance metrics, trading days, and drawdowns." isDarkMode={isDarkMode}>
+                                <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
+                            </Tooltip>
+                        </div>
                         <button
                             disabled
                             aria-disabled="true"

@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Download, Copy, Check, Info, AlertCircle,
     Terminal, Shield, Cpu, ArrowRight, Loader2,
-    Play, Command, Code, Zap, Globe, Link, X,
+    Play, Command, Code, Zap, Globe, X,
     Power, ExternalLink, Activity, Clock, PlusCircle, CheckCircle2,
-    Settings, LayoutDashboard, ChevronDown, Wifi, WifiOff,
+    ChevronDown, Wifi, WifiOff,
     TrendingUp, TrendingDown, DollarSign, BarChart3,
     RefreshCw, Trash2, Edit3, Eye, EyeOff
 } from 'lucide-react';
@@ -35,7 +35,10 @@ interface BridgeProps {
 const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
-    const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | null>(null);
+    const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | null>(
+        userProfile.eaConnected ? 'bridge' : 
+        userProfile.mt_terminal_status === 'connected' ? 'broker' : null
+    );
     
     // Persistent cache for bridge data
     const [liveData, setLiveData] = useLocalStorage<any>(`jfx_bridge_live_data_${userId}`, eaSession?.data || null);
@@ -91,7 +94,11 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             <>
                 <div className="relative mb-6 flex items-center gap-3">
                     <button
-                        onClick={() => setConnectionMode(null)}
+                        onClick={async () => {
+                            const updated = { ...userProfile, mt_terminal_status: '' };
+                            await onUpdateProfile(updated);
+                            setConnectionMode(null);
+                        }}
                         className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
                     >
                         <ArrowRight size={12} className="rotate-180" />
@@ -103,6 +110,11 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
                     userProfile={userProfile}
                     onUpdateProfile={onUpdateProfile}
                     embedded
+                    autoConnect={connectionMode === 'broker'}
+                    onDisconnect={async () => {
+                        const updated = { ...userProfile, mt_terminal_status: '' };
+                        await onUpdateProfile(updated);
+                    }}
                 />
             </>
         );
@@ -278,26 +290,29 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                 </div>
 
                 {/* Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {options.map((opt, idx) => (
                         <button
                             key={opt.id}
+                            disabled={opt.id === 'csv'}
                             onClick={() => void handleCardClick(opt)}
                             style={{
                                 animationDelay: `${idx * 150}ms`,
                                 animationFillMode: 'both'
                             } as React.CSSProperties}
-                            className={`group relative text-left w-full rounded-3xl border bg-black/60 backdrop-blur-xl p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 ${
+                            className={`group relative text-left w-full rounded-3xl border bg-black/60 backdrop-blur-xl p-6 lg:p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 ${
                                 opt.id === 'bridge'
                                     ? 'border-white/10 hover:border-[#FF4F01]/40'
-                                    : 'border-white/10 hover:border-[#22C55E]/40'
-                            }`}
+                                    : opt.id === 'broker'
+                                    ? 'border-white/10 hover:border-[#22C55E]/40'
+                                    : 'border-white/10 hover:border-[#8B5CF6]/40'
+                            } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-white/10`}
                         >
                             {/* Content */}
                             <div className="relative z-10">
                                 {/* Icon */}
                                 <div
-                                    className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6"
+                                    className="w-12 h-12 lg:w-14 lg:h-14 rounded-2xl flex items-center justify-center mb-4 lg:mb-6"
                                     style={{
                                         backgroundColor: `${opt.accent}15`,
                                         color: opt.accent,
@@ -308,18 +323,18 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                                 </div>
 
                                 {/* Title */}
-                                <h2 className="text-2xl font-black tracking-tight text-white mb-1">
+                                <h2 className="text-xl lg:text-2xl font-black tracking-tight text-white mb-1">
                                     {opt.title}
                                 </h2>
-                                <p className="text-xs font-medium uppercase tracking-widest mb-4" style={{ color: opt.accent }}>
+                                <p className="text-xs font-medium uppercase tracking-widest mb-3 lg:mb-4" style={{ color: opt.accent }}>
                                     {opt.subtitle}
                                 </p>
-                                <p className="text-zinc-400 text-sm leading-relaxed mb-6">
+                                <p className="text-zinc-400 text-xs lg:text-sm leading-relaxed mb-4 lg:mb-6">
                                     {opt.description}
                                 </p>
 
                                 {/* Features */}
-                                <ul className="space-y-2 mb-8">
+                                <ul className="space-y-2 mb-6 lg:mb-8">
                                     {opt.features.map((f, i) => (
                                         <li key={i} className="flex items-center gap-2.5 text-zinc-500 text-xs">
                                             <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: opt.accent }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -332,8 +347,12 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
 
                                 {/* CTA */}
                                 <div
-                                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-300 group-hover:gap-3"
-                                    style={{ backgroundColor: opt.accent }}
+                                    className={`inline-flex items-center gap-2 px-4 py-2 lg:px-5 lg:py-2.5 rounded-xl text-xs lg:text-sm font-semibold transition-all duration-300 ${
+                                        opt.id === 'csv'
+                                            ? 'bg-white/5 text-zinc-500 border border-white/5 cursor-not-allowed'
+                                            : 'text-white group-hover:gap-3'
+                                    }`}
+                                    style={opt.id !== 'csv' ? { backgroundColor: opt.accent } : undefined}
                                 >
                                     Get Started
                                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -353,11 +372,6 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                     className="hidden"
                     onChange={handleCsvImport}
                 />
-
-                {/* Bottom note */}
-                <p className="text-center text-zinc-600 text-xs mt-10">
-                    Both methods require an active MetaTrader 5 terminal running on your computer.
-                </p>
             </div>
         </div>
     );
@@ -381,10 +395,8 @@ interface BridgeMonitorProps {
 }
 
 const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, liveData, lastHeartbeat, isHeartbeat, syncKey, syncLog, onDisconnect, onTradeAdded, onEditTrade, onAddOffline, trades, userId }) => {
-    const [activeTab, setActiveTab] = useState<'monitor' | 'settings'>('monitor');
     const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
     const [autoLog, setAutoLog] = useLocalStorage('bridge_auto_log', false);
-    const [activeSetup, setActiveSetup] = useState<{ id: string, name: string } | null>(null);
     const [now, setNow] = useState(new Date());
     const [isSavingTrade, setIsSavingTrade] = useState<string | null>(null); // Track specific trade being saved
     const [copied, setCopied] = useState(false);
@@ -396,23 +408,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
     // Ã¢Å“â€¦ SUGGESTION 3: Equity Sparkline History (last 20 points)
     const [equityHistory, setEquityHistory] = useState<number[]>([]);
 
-    // Derive unique setups for the selector
-    const recentSetups = useMemo(() => {
-        const setups: { id: string, pair: string, name: string }[] = [];
-        const seenIds = new Set();
-        [...trades].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).forEach(t => {
-            if (t.setupId && !seenIds.has(t.setupId)) {
-                setups.push({
-                    id: t.setupId,
-                    pair: t.pair,
-                    name: t.setupName || `${t.pair} Cluster`
-                });
-                seenIds.add(t.setupId);
-            }
-        });
-        return setups.slice(0, 8);
-    }, [trades]);
-
+    
     // Ã¢Å“â€¦ FIX: cardStyle defined here Ã¢â‚¬â€ used throughout the component
     // Obsidian Black theme: deeper blacks and subtle borders
     const cardStyle = 'bg-[#000000]/80 border border-white/5 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)]';
@@ -571,7 +567,6 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                 planAdherence: 'No Plan',
                 tradingMistake: 'None',
                 mindset: 'Neutral',
-                setupId: activeSetup?.id
             });
 
             if (!autoLog && onEditTrade) {
@@ -623,10 +618,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
               {localHeadlessData && (
                 <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 text-[9px] font-black tracking-widest uppercase border border-indigo-500/20">Headless</span>
               )}
-              <div className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 border ${isOnline ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-                {isOnline ? `Live Â· ${timeAgo}s ago` : 'Offline'}
-              </div>
+
             </div>
             <p className="text-[10px] text-slate-500 font-medium mt-0.5">{effectiveLiveData?.account?.server || 'MetaTrader 5 Terminal'}</p>
           </div>
@@ -634,22 +626,13 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className="p-1 rounded-xl flex items-center border border-white/5 bg-slate-900/40 backdrop-blur-md">
-                            <button onClick={() => setActiveTab('monitor')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${activeTab === 'monitor' ? 'bg-amber-500 text-slate-900 shadow-lg shadow-amber-500/20' : 'text-slate-500 hover:text-slate-300'}`}>
-                                <LayoutDashboard size={12} strokeWidth={2.5} /> Monitor
-                            </button>
-                            <button onClick={() => setActiveTab('settings')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${activeTab === 'settings' ? 'bg-amber-500 text-slate-900 shadow-lg shadow-amber-500/20' : 'text-slate-500 hover:text-slate-300'}`}>
-                                <Settings size={12} strokeWidth={2.5} /> Settings
-                            </button>
-                        </div>
-                        <button onClick={onDisconnect} className="h-10 px-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest hover:bg-rose-500 hover:text-white transition-all flex items-center gap-2">
+                    <button onClick={onDisconnect} className="h-10 px-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest hover:bg-rose-500 hover:text-white transition-all flex items-center gap-2">
                             <Power size={12} strokeWidth={3} /> Disconnect
                         </button>
                     </div>
                 </div>
 
-                {activeTab === 'monitor' ? (
-                    <div className="grid grid-cols-12 gap-4">
+<div className="grid grid-cols-12 gap-4">
 
                         {/* Ã¢â€¢ÂÃ¢â€¢Â ROW 1 Ã¢â‚¬â€ Hero Metric Bento Cells Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â Ã¢â€¢Â */}
 
@@ -786,52 +769,22 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                         {/* Right column Ã¢â‚¬â€ Setup Linker + Journal Queue */}
                         <div className="col-span-12 lg:col-span-4 flex flex-col gap-4">
 
-                            {/* Setup Intelligence */}
+                        {/* Automation */}
                             <div className={`${cardStyle} rounded-3xl p-5`}>
-                                <div className="flex items-center gap-3 mb-4">
-                                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${activeSetup ? 'bg-amber-500 text-slate-900' : 'bg-slate-800 text-slate-500'}`}>
-                                        <Link size={17} strokeWidth={2.5} />
-                                    </div>
+                                <h3 className="font-black mb-5 flex items-center gap-2 text-white uppercase tracking-widest text-sm"><Zap size={16} className="text-amber-500" /> Automation</h3>
+                                <div className="flex items-center justify-between gap-4">
                                     <div>
-                                        <h3 className="text-[11px] font-black uppercase tracking-widest text-white leading-none">Setup Linker</h3>
-                                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">Cluster Engine</p>
+                                        <div className="font-bold text-sm text-slate-200">Auto-Log Trades</div>
+                                        <div className="text-[10px] text-slate-500 max-w-[200px] leading-tight mt-1">Automatically add closed trades without manual confirmation.</div>
                                     </div>
-                                </div>
-                                <div className="relative">
-                                    <select
-                                        id="setup-linker"
-                                        className="w-full pl-4 pr-9 py-3 rounded-2xl border border-slate-800 text-[10px] font-black uppercase tracking-wider outline-none appearance-none cursor-pointer transition-all bg-slate-900 text-slate-300 focus:border-amber-500/50"
-                                        value={activeSetup?.id || ''}
-                                        onChange={(e) => {
-                                            const id = e.target.value;
-                                            if (!id) setActiveSetup(null);
-                                            else {
-                                                const s = recentSetups.find(rs => rs.id === id);
-                                                if (s) setActiveSetup({ id: s.id, name: s.name || `Setup Cluster (${s.pair})` });
-                                            }
-                                        }}
-                                    >
-                                        <option value="">Standalone Mode</option>
-                                        {recentSetups.map(s => (
-                                            <option key={s.id} value={s.id}>{s.name}</option>
-                                        ))}
-                                    </select>
-                                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-                                </div>
-                                {recentSetups.length === 0 && (
-                                    <p className="mt-3 text-[10px] font-medium text-slate-500 leading-relaxed">
-                                        Link trades in Trade History to create reusable setup clusters here.
-                                    </p>
-                                )}
-                                {activeSetup && (
-                                    <button onClick={() => setActiveSetup(null)} className="mt-3 w-full py-2.5 rounded-2xl bg-rose-500/10 text-rose-400 text-[10px] font-black uppercase tracking-widest hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center gap-2 border border-rose-500/20">
-                                        <X size={12} strokeWidth={3} /> Clear Link
+                                    <button onClick={() => setAutoLog(!autoLog)} className={`w-12 h-6 rounded-full transition-all relative shrink-0 ${autoLog ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 'bg-slate-800'}`}>
+                                        <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${autoLog ? 'left-7' : 'left-1'}`} />
                                     </button>
-                                )}
+                                </div>
                             </div>
 
                             {/* Journal Queue */}
-                            <div className={`${cardStyle} rounded-3xl p-5 flex-1 flex flex-col`} style={{ minHeight: '220px' }}>
+                            <div className={`${cardStyle} rounded-3xl p-5 flex flex-col h-[220px]`}>
                                 <div className="flex items-center justify-between mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className="w-14 h-14 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
@@ -899,81 +852,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                             </div>
                         </div>
 
-                        {/* Ã¢â€¢ÂÃ¢â€¢Â ROW 3 Ã¢â‚¬â€ Telemetry + Margin Level Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
-
                     </div>
-                ) : (
-                    /* Ã¢â€â‚¬Ã¢â€â‚¬ SETTINGS TAB Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
-                    <div className="grid grid-cols-12 gap-4">
-
-                        {/* Connection Diagnostics */}
-                        <div className={`col-span-12 ${cardStyle} rounded-3xl p-6 relative overflow-hidden`}>
-                            <div className="flex flex-col md:flex-row items-start justify-between gap-6 relative z-10">
-                                <div className="space-y-4 flex-1">
-                                    <div>
-                                        <h3 className="text-lg font-black mb-1 text-white uppercase tracking-wider">Connection Diagnostics</h3>
-                                        <p className="text-sm text-slate-400 max-w-2xl whitespace-normal break-normal">Technical details about your current bridge session. Ensure the JournalFX Bridge app is running.</p>
-                                    </div>
-                                    <div className="flex flex-wrap gap-3">
-                                        <div className="px-4 py-3 rounded-2xl bg-slate-900 border border-slate-800">
-                                            <div className="text-[9px] font-black uppercase tracking-tighter text-slate-500 mb-1">Last Heartbeat</div>
-                                            <div className="text-sm font-mono font-bold text-white">
-                                                {effectiveLastHeartbeat ? effectiveLastHeartbeat.toLocaleTimeString() : 'Never'}
-                                                <span className="ml-2 text-[10px] text-slate-500">({timeAgo !== null ? `${timeAgo}s ago` : 'â€”'})</span>
-                                            </div>
-                                        </div>
-                                        <div className="px-4 py-3 rounded-2xl bg-slate-900 border border-slate-800">
-                                            <div className="text-[9px] font-black uppercase tracking-tighter text-slate-500 mb-1">Session ID</div>
-                                        <div className="text-sm font-mono font-bold text-slate-300">{(syncKey || 'real-sync-key').substring(0, 8)}...</div>
-                                        </div>
-                                        <div className="px-4 py-3 rounded-2xl bg-slate-900 border border-slate-800">
-                                            <div className="text-[9px] font-black uppercase tracking-tighter text-slate-500 mb-1">Stream Source</div>
-                                            <div className="text-sm font-mono font-bold text-indigo-400">{localHeadlessData ? 'Local :8888' : 'Supabase Cloud'}</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className={`hidden md:flex w-24 h-24 rounded-full border-8 items-center justify-center shrink-0 transition-colors duration-500 ${isOnline ? 'border-emerald-500/30' : 'border-rose-500/30'}`}>
-                                    <Activity size={36} className={isOnline ? 'text-emerald-500 animate-pulse' : 'text-rose-500'} />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Automation */}
-                        <div className={`col-span-12 md:col-span-4 ${cardStyle} rounded-3xl p-6`}>
-                            <h3 className="font-black mb-5 flex items-center gap-2 text-white uppercase tracking-widest text-sm"><Zap size={16} className="text-amber-500" /> Automation</h3>
-                            <div className="flex items-center justify-between gap-4">
-                                <div>
-                                    <div className="font-bold text-sm text-slate-200">Auto-Log Trades</div>
-                                    <div className="text-[10px] text-slate-500 max-w-[200px] leading-tight mt-1">Automatically add closed trades without manual confirmation.</div>
-                                </div>
-                                <button onClick={() => setAutoLog(!autoLog)} className={`w-12 h-6 rounded-full transition-all relative shrink-0 ${autoLog ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 'bg-slate-800'}`}>
-                                    <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${autoLog ? 'left-7' : 'left-1'}`} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Bridge Security */}
-                        <div className={`col-span-12 md:col-span-4 ${cardStyle} rounded-3xl p-6`}>
-                            <h3 className="font-black mb-5 flex items-center gap-2 text-white uppercase tracking-widest text-sm"><Shield size={16} className="text-indigo-400" /> Bridge Security</h3>
-                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">Active Sync Key</label>
-                            <div className="flex items-center gap-2">
-                                <div className="flex-1 p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-sm font-bold text-amber-500 truncate">{syncKey || 'real-sync-key'}</div>
-                                <button onClick={() => handleCopy(syncKey || 'real-sync-key')} className={`p-3 rounded-xl transition-all shrink-0 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'}`}>
-                                    {copied ? <Check size={16} strokeWidth={3} /> : <Copy size={16} />}
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Danger Zone */}
-                        <div className="col-span-12 md:col-span-4 p-6 rounded-3xl border border-rose-500/20 bg-rose-500/5">
-                            <h3 className="font-black mb-3 flex items-center gap-2 text-rose-400 uppercase tracking-widest text-sm"><AlertCircle size={16} /> Danger Zone</h3>
-                            <p className="text-sm text-slate-400 mb-5 leading-relaxed">Disconnecting stops all real-time streaming. You'll need the setup wizard to reconnect.</p>
-                            <button onClick={onDisconnect} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 font-black uppercase tracking-widest text-xs hover:bg-rose-500 hover:text-white transition-all">
-          <Power size={16} strokeWidth={3} /> Disconnect System
-        </button>
-      </div>
-    </div>
-  )}
 </div>
 );
 };

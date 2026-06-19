@@ -21,6 +21,8 @@ interface BrokerConnectProps {
   userProfile: UserProfile;
   onUpdateProfile: (profile: UserProfile) => Promise<void>;
   embedded?: boolean;
+  autoConnect?: boolean;
+  onDisconnect?: () => void;
 }
 
 interface BrokerStatus {
@@ -44,7 +46,7 @@ interface Position {
   tp: number;
 }
 
-const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, embedded }) => {
+const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, onUpdateProfile, embedded, autoConnect, onDisconnect }) => {
   const [server, setServer] = useState(userProfile?.broker_server || '');
   const [login, setLogin] = useState(userProfile?.broker_login || '');
   const [password, setPassword] = useState('');
@@ -61,6 +63,25 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
   const [orderError, setOrderError] = useState('');
   const [orderSuccess, setOrderSuccess] = useState('');
   const intervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (autoConnect && !status.connected && userProfile.broker_server && userProfile.broker_login) {
+      fetch('/api/mt5/status')
+        .then(res => res.json())
+        .then(data => {
+          if (data.connected) {
+            setStatus({
+              connected: true,
+              balance: data.balance,
+              equity: data.equity,
+              server: data.server,
+              login: String(data.login)
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   const attemptAutoLogin = async (pwd: string) => {
     if (!server || !login || !pwd) return;
@@ -227,6 +248,7 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
     setStatus({ connected: false });
     setPassword('');
     setPositions([]);
+    onDisconnect?.();
   };
 
   const handleOpenPosition = async (direction: 'BUY' | 'SELL') => {

@@ -6,8 +6,9 @@ import { Select } from '../Select';
 import { Card } from '../ui/Card';
 import { 
     Coins, Target, Clock, BarChart3, Crown, 
-    ArrowUpRight, ArrowDownRight 
+    ArrowUpRight, ArrowDownRight, HelpCircle
 } from 'lucide-react';
+import { Tooltip as InfoTooltip } from '../ui/Tooltip';
 
 interface ComparisonViewProps {
     trades: Trade[];
@@ -412,7 +413,12 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isD
 
             <Card isDarkMode={isDarkMode} padding="lg" className={`rounded-[32px] !bg-[#000000] ${isDarkMode ? '!border-zinc-800' : '!border-slate-200'}`}>
                 <div className="flex items-center justify-between mb-8">
-                    <h3 className="text-xl font-bold tracking-tight">Comparative Equity Curve</h3>
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-bold tracking-tight">Comparative Equity Curve</h3>
+                        <InfoTooltip content="A direct overlay comparing the cumulative profit/loss progression over time for both selected metrics." isDarkMode={isDarkMode}>
+                            <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
+                        </InfoTooltip>
+                    </div>
                     <div className="flex gap-3">
                         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${isDarkMode ? 'bg-black/50 border border-zinc-700' : 'bg-slate-100 border border-slate-200'} ${isDarkMode ? 'shadow-zinc-900/50' : ''}`}>
                             <div className={`w-2 h-2 rounded-full ${isDarkMode ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]' : 'bg-indigo-600'}`} />

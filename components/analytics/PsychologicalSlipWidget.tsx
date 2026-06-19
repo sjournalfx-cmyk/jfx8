@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Trade } from '../../types';
-import { Brain, Activity } from 'lucide-react';
+import { Brain, Activity, HelpCircle } from 'lucide-react';
+import { Tooltip } from '../ui/Tooltip';
 
 interface PsychologicalSlipProps {
     trades: Trade[];
@@ -52,6 +53,9 @@ export const PsychologicalSlipWidget: React.FC<PsychologicalSlipProps> = ({ trad
                     <h3 className="text-xl font-bold tracking-tight flex items-center gap-2">
                         <Brain size={20} className="text-violet-500" />
                         Psychological Slip
+                        <Tooltip content="Overlays your equity growth line against your discipline/plan-adherence score to reveal where emotional slippage hurt performance." isDarkMode={isDarkMode}>
+                            <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
+                        </Tooltip>
                     </h3>
                     <p className="text-[10px] uppercase font-bold tracking-widest opacity-40 mt-1">Equity Growth vs Rule Adherence</p>
                 </div>
@@ -131,7 +135,7 @@ export const PsychologicalSlipWidget: React.FC<PsychologicalSlipProps> = ({ trad
                     <div className="h-full flex items-center justify-center opacity-10 text-sm font-black uppercase tracking-widest">Insufficient Data</div>
                 )}
 
-                {/* Tooltip */}
+                {/* Hover Tooltip */}
                 {hoverIndex !== null && data[hoverIndex] && (
                     <div 
                         className={`absolute z-50 pointer-events-none p-3 rounded-2xl border shadow-xl ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}

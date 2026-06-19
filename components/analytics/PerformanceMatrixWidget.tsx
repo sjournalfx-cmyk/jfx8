@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Trade } from '../../types';
-import { Table, LayoutGrid, Calendar } from 'lucide-react';
+import { Table, LayoutGrid, Calendar, HelpCircle } from 'lucide-react';
+import { Tooltip } from '../ui/Tooltip';
 
 interface PerformanceMatrixWidgetProps {
     trades: Trade[];
@@ -83,7 +84,12 @@ export const PerformanceMatrixWidget: React.FC<PerformanceMatrixWidgetProps> = (
                         <Table size={20} />
                     </div>
                     <div>
-                        <h3 className="text-lg font-bold tracking-tight">Symbol Performance Matrix</h3>
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-lg font-bold tracking-tight">Symbol Performance Matrix</h3>
+                            <Tooltip content="Monthly or weekly P/L breakdown per symbol. Green = profitable period, Red = losing period." isDarkMode={isDarkMode}>
+                                <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
+                            </Tooltip>
+                        </div>
                         <p className="text-[10px] uppercase font-black tracking-widest opacity-40">
                             {viewMode === 'monthly' ? 'Monthly Breakdown' : 'Weekly Breakdown'} - {currentYear}
                         </p>

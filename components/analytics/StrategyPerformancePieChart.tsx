@@ -4,6 +4,7 @@ import * as React from "react"
 import { Label, Pie, PieChart, Sector } from "recharts"
 import { PieSectorShapeProps } from "recharts/types/polar/Pie"
 import { Trade } from "../../types"
+import { HelpCircle } from "lucide-react"
 
 import {
   Card,
@@ -20,6 +21,7 @@ import {
   type ChartConfig,
 } from "../ui/chart"
 import { Select } from "../Select"
+import { Tooltip } from "../ui/Tooltip"
 
 interface StrategyEfficiencyMinimalProps {
   trades: Trade[]
@@ -201,7 +203,12 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
     <Card data-chart={id} className="flex h-full min-h-[320px] flex-col border border-zinc-900 bg-[#000000]" isDarkMode={isDarkMode}>
       <CardHeader className="flex-row items-start space-y-0 pb-0">
         <div className="grid gap-1">
-          <CardTitle>Strategy Distribution</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle>Strategy Distribution</CardTitle>
+            <Tooltip content="Breaks down your trade count and cumulative P/L by trading strategy tag. Click a slice or use the dropdown to focus." isDarkMode={isDarkMode}>
+              <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
+            </Tooltip>
+          </div>
           <CardDescription>Performance by Strategy</CardDescription>
         </div>
         <div className="ml-auto w-[150px]">

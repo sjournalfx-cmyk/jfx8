@@ -18,6 +18,34 @@ const ACCENT = 'text-teal-400';
 const ACCENT_BG = 'bg-teal-500/20';
 
 const BetaSplash: React.FC<BetaSplashProps> = ({ onContinue }) => {
+  const [showTelegram, setShowTelegram] = React.useState(false);
+
+  const handleContinueToApp = () => {
+    try {
+      const promptShown = localStorage.getItem('jfx_telegram_prompt_shown');
+      if (promptShown === 'true') {
+        onContinue();
+      } else {
+        setShowTelegram(true);
+      }
+    } catch (e) {
+      console.warn('LocalStorage access failed, default to showing Telegram step:', e);
+      setShowTelegram(true);
+    }
+  };
+
+  const handleFinalize = (joinLink?: string) => {
+    try {
+      localStorage.setItem('jfx_telegram_prompt_shown', 'true');
+    } catch (e) {
+      console.warn('LocalStorage write failed:', e);
+    }
+    if (joinLink) {
+      window.open(joinLink, '_blank');
+    }
+    onContinue();
+  };
+
   return (
     <div className="relative min-h-dvh w-full bg-[#000000] text-white flex items-center justify-center overflow-hidden">
       {/* Background Effects */}
@@ -64,13 +92,39 @@ const BetaSplash: React.FC<BetaSplashProps> = ({ onContinue }) => {
         </div>
 
         {/* CTA */}
-        <button
-          onClick={onContinue}
-          className="inline-flex items-center gap-3 px-12 py-5 bg-[#FF4F01] hover:bg-[#E64601] text-white rounded-2xl font-black text-[16px] shadow-xl shadow-[#FF4F01]/25 transition-all hover:scale-[1.03] hover:shadow-[#FF4F01]/40 active:scale-[0.97]"
-        >
-          Continue to App
-          <ArrowRight size={24} />
-        </button>
+        {!showTelegram ? (
+          <button
+            onClick={handleContinueToApp}
+            className="inline-flex items-center gap-3 px-12 py-5 bg-[#FF4F01] hover:bg-[#E64601] text-white rounded-2xl font-black text-[16px] shadow-xl shadow-[#FF4F01]/25 transition-all hover:scale-[1.03] hover:shadow-[#FF4F01]/40 active:scale-[0.97]"
+          >
+            Continue to App
+            <ArrowRight size={24} />
+          </button>
+        ) : (
+          <div className="flex flex-col items-center gap-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
+            <button
+              onClick={() => handleFinalize('https://t.me/+w_KvKM5HESYyMTdk')}
+              className="inline-flex items-center gap-3 px-12 py-5 bg-[#0088cc] hover:bg-[#0077b3] text-white rounded-2xl font-black text-[16px] shadow-xl shadow-[#0088cc]/25 transition-all hover:scale-[1.03] hover:shadow-[#0088cc]/40 active:scale-[0.97]"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="shrink-0"
+              >
+                <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.578.192l-8.533 7.701-.33 4.955c.488 0 .702-.223.974-.485l2.338-2.27 4.861 3.59c.896.494 1.54.24 1.763-.829l3.185-15.01c.326-1.309-.5-1.902-1.356-1.513z" />
+              </svg>
+              Join Telegram Channel
+            </button>
+            <button
+              onClick={() => handleFinalize()}
+              className="text-[13px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-widest cursor-pointer underline underline-offset-4"
+            >
+              Skip
+            </button>
+          </div>
+        )}
 
       </div>
     </div>

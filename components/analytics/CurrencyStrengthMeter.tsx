@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Trade } from '../../types';
-import { Coins } from 'lucide-react';
+import { Coins, HelpCircle } from 'lucide-react';
+import { Tooltip } from '../ui/Tooltip';
 
 interface CurrencyStrengthMeterProps {
     isDarkMode: boolean;
@@ -99,6 +100,9 @@ export const CurrencyStrengthMeter: React.FC<CurrencyStrengthMeterProps> = ({ is
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                     <h3 className="text-sm font-bold tracking-tight">Currency Strength</h3>
+                    <Tooltip content="Ranks currencies by their aggregate P/L impact across all your trades. Green = stronger, Red = weaker." isDarkMode={isDarkMode}>
+                        <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
+                    </Tooltip>
                 </div>
             </div>
 

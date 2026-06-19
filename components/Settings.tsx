@@ -341,9 +341,29 @@ const Settings: React.FC<SettingsProps> = ({
                   <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#FF4F01]">{currentTab.label}</p>
                   <h2 className="mt-1 text-2xl font-black tracking-tight">{currentTab.label}</h2>
                 </div>
-                <p className={`max-w-2xl text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
-                  {currentTab.desc}
-                </p>
+                {activeTab === 'help' ? (
+                  <a
+                    href="https://t.me/+w_KvKM5HESYyMTdk"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl border border-[#0088cc]/30 bg-[#0088cc]/10 px-4 py-2 text-xs font-bold text-[#0088cc] hover:bg-[#0088cc]/20 transition-all hover:scale-[1.02] shadow-sm shadow-[#0088cc]/10 cursor-pointer"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      className="shrink-0"
+                    >
+                      <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.578.192l-8.533 7.701-.33 4.955c.488 0 .702-.223.974-.485l2.338-2.27 4.861 3.59c.896.494 1.763-.829l3.185-15.01c.326-1.309-.5-1.902-1.356-1.513z" />
+                    </svg>
+                    Join us in Telegram
+                  </a>
+                ) : (
+                  <p className={`max-w-2xl text-sm ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
+                    {currentTab.desc}
+                  </p>
+                )}
               </div>
             </div>
 

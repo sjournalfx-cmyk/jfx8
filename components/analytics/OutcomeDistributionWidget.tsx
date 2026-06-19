@@ -8,8 +8,9 @@ import {
   ChartTooltipContent, 
   type ChartConfig 
 } from "../ui/chart"
-import { PieChart as PieChartIcon } from "lucide-react"
+import { PieChart as PieChartIcon, HelpCircle } from "lucide-react"
 import { clsx } from "clsx"
+import { Tooltip } from "../ui/Tooltip"
 
 interface OutcomeDistributionWidgetProps {
   trades: Trade[]
@@ -58,7 +59,12 @@ export const OutcomeDistributionWidget: React.FC<OutcomeDistributionWidgetProps>
           <PieChartIcon size={20} className="text-teal-500" />
         </div>
         <div>
-          <h3 className="text-lg font-black tracking-tight italic uppercase">Outcome Distribution</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-black tracking-tight italic uppercase">Outcome Distribution</h3>
+            <Tooltip content="Pie chart showing the proportion of Wins, Losses, and Break-Even trades across your journal." isDarkMode={isDarkMode}>
+              <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
+            </Tooltip>
+          </div>
           <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest mt-0.5">Trade Result Mix</p>
         </div>
       </div>
