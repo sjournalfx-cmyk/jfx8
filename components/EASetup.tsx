@@ -37,7 +37,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
     const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | null>(
         userProfile.eaConnected ? 'bridge' : 
-        userProfile.mt_terminal_status === 'connected' ? 'broker' : null
+        ['connected', 'credentials_stored', 'auth_failed'].includes(userProfile.mt_terminal_status || '') ? 'broker' : null
     );
     
     // Persistent cache for bridge data
@@ -114,7 +114,9 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
                     onDisconnect={async () => {
                         const updated = { ...userProfile, mt_terminal_status: '' };
                         await onUpdateProfile(updated);
+                        setConnectionMode(null);
                     }}
+                    userId={userId}
                 />
             </>
         );
@@ -201,7 +203,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
         {
             id: 'broker' as const,
             title: 'Broker Direct',
-            subtitle: 'MT5 API Connection',
+            subtitle: 'VPS Auto-Sync',
             icon: (
                 <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" />
@@ -212,14 +214,14 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                 </svg>
             ),
             features: [
-                'Direct MT5 terminal connection',
-                'Python/MetaTrader5 backend',
-                'Open & close positions',
-                'Manual trade sync'
+                'VPS-hosted broker bridge',
+                'Auto-sync every 6 hours',
+                'Encrypted credentials',
+                'Manual sync anytime'
             ],
             accent: '#22C55E',
             gradient: 'from-[#22C55E]/20 via-transparent to-transparent',
-            description: 'Connect directly to your MetaTrader 5 terminal using the MT5 API. Requires Python and the MetaTrader5 library installed.'
+            description: 'Connect your MT5 account via the JournalFX VPS bridge. Your credentials are encrypted, and trades are synced automatically every 6 hours.'
         },
         {
             id: 'csv' as const,
