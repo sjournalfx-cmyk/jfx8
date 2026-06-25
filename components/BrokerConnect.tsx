@@ -56,17 +56,26 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
 
   const fetchStatus = async () => {
     try {
-      const [vpsRes, sessionRes] = await Promise.all([
+      const [vpsRes, sessionRes, loginSessionRes] = await Promise.all([
         fetch(`${VPS_API_URL}/api/broker/status/${userId}`, {
           headers: { 'X-API-Key': VPS_API_KEY }
         }),
-        supabase.from('ea_sessions').select('data').eq('sync_key', userProfile.syncKey || '').maybeSingle()
+        supabase.from('ea_sessions').select('data').eq('sync_key', userProfile.syncKey || '').maybeSingle(),
+        supabase.from('ea_sessions').select('sync_key,data,last_updated').order('last_updated', { ascending: false }).limit(10)
       ]);
 
       if (!vpsRes.ok) return;
       const data = await vpsRes.json();
+      const vpsLogin = data.broker_login || '';
 
-      const accountData = sessionRes.data?.data?.account;
+      // Find best account data: try current sync_key first, then any session matching this broker_login
+      let accountData = sessionRes.data?.data?.account;
+      if (!accountData?.balance || accountData.balance === 10000) {
+        const match = (loginSessionRes.data || []).find(
+          (s: any) => String(s.data?.account?.login) === vpsLogin
+        );
+        if (match) accountData = match.data.account;
+      }
       const balance = accountData?.balance ?? accountData?.Balance;
       const equity = accountData?.equity ?? accountData?.Equity;
       const currency = accountData?.currency ?? accountData?.Currency;
