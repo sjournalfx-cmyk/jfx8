@@ -24,6 +24,9 @@ interface BrokerStatus {
   login?: string;
   lastSync?: string;
   error?: string;
+  balance?: number;
+  equity?: number;
+  currency?: string;
 }
 
 const generateSyncKey = () =>
@@ -53,11 +56,20 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`${VPS_API_URL}/api/broker/status/${userId}`, {
-        headers: { 'X-API-Key': VPS_API_KEY }
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const [vpsRes, sessionRes] = await Promise.all([
+        fetch(`${VPS_API_URL}/api/broker/status/${userId}`, {
+          headers: { 'X-API-Key': VPS_API_KEY }
+        }),
+        supabase.from('ea_sessions').select('data').eq('sync_key', userProfile.syncKey || '').maybeSingle()
+      ]);
+
+      if (!vpsRes.ok) return;
+      const data = await vpsRes.json();
+
+      const accountData = sessionRes.data?.data?.account;
+      const balance = accountData?.balance ?? accountData?.Balance;
+      const equity = accountData?.equity ?? accountData?.Equity;
+      const currency = accountData?.currency ?? accountData?.Currency;
 
       if (data.mt_terminal_status === 'auth_failed') {
         setStatus({ connected: false, authFailed: true, error: 'Invalid credentials. Please re-enter your password.' });
@@ -66,7 +78,10 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
           connected: true,
           server: data.broker_server,
           login: data.broker_login,
-          lastSync: data.last_sync_at
+          lastSync: data.last_sync_at,
+          balance: balance !== undefined ? Number(balance) : undefined,
+          equity: equity !== undefined ? Number(equity) : undefined,
+          currency
         });
         updateLastSyncAgo(data.last_sync_at);
       }
@@ -144,6 +159,8 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
         broker_login: login,
         mt_terminal_status: 'connected'
       });
+
+      setTimeout(fetchStatus, 3000);
     } catch (err: any) {
       setError(err.message || 'Connection failed');
       setStatus({ connected: false, error: err.message });
@@ -168,6 +185,7 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
         const now = new Date().toISOString();
         setStatus(prev => ({ ...prev, lastSync: now }));
         updateLastSyncAgo(now);
+        setTimeout(fetchStatus, 3000);
       } else {
         const errData = await res.json().catch(() => ({}));
         setError(errData.detail || 'Sync request failed');
@@ -328,6 +346,26 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
           </div>
 
           <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] px-5 py-4">
+              <p className="text-xs text-zinc-500 mb-1">Balance</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-white">
+                  {status.balance !== undefined
+                    ? `${(status.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${status.currency || ''}`
+                    : '—'}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] px-5 py-4">
+              <p className="text-xs text-zinc-500 mb-1">Equity</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-white">
+                  {status.equity !== undefined
+                    ? `${(status.equity).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${status.currency || ''}`
+                    : '—'}
+                </p>
+              </div>
+            </div>
             <div className="rounded-xl border border-white/5 bg-white/[0.02] px-5 py-4">
               <p className="text-xs text-zinc-500 mb-1">Auto-Sync</p>
               <div className="flex items-center gap-2">
