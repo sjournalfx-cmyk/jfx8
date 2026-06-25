@@ -511,19 +511,10 @@ const CustomChart: React.FC<CustomChartProps> = ({
         // Fill
         ctx.fillStyle = isDarkMode ? 'rgba(38, 166, 154, 0.25)' : 'rgba(38, 166, 154, 0.15)';
         ctx.fillRect(left, profitTop, w, Math.max(profitH, 1));
-        // Border
-        ctx.strokeStyle = '#26a69a';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(left, profitTop, w, Math.max(profitH, 1));
-
         // --- Loss zone ---
         // Fill
         ctx.fillStyle = isDarkMode ? 'rgba(239, 83, 80, 0.25)' : 'rgba(239, 83, 80, 0.15)';
         ctx.fillRect(left, lossTop, w, Math.max(lossH, 1));
-        // Border
-        ctx.strokeStyle = '#ef5350';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(left, lossTop, w, Math.max(lossH, 1));
 
         // --- Entry line ---
         ctx.strokeStyle = isDarkMode ? '#b2b5be' : '#555555';
@@ -534,7 +525,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
         ctx.stroke();
 
         // --- Center RR Text Tag (TradingView Style) ---
-        const rrText = `Risk/Reward Ratio: ${rr.toFixed(2)}`;
+        const rrText = rr.toFixed(2);
         ctx.font = 'bold 9px sans-serif';
         const txtWidth = ctx.measureText(rrText).width;
         // Background for text

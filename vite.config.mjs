@@ -4,6 +4,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { fetchPublicEconomicCalendar } from './lib/economicCalendar.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -137,6 +138,43 @@ const mt5PythonPlugin = () => {
       server.middlewares.use('/api/fmp/financial-growth', makeFmpHandler('https://financialmodelingprep.com/stable/financial-growth'));
       server.middlewares.use('/api/fmp/price-change', makeFmpHandler('https://financialmodelingprep.com/stable/stock-price-change'));
       server.middlewares.use('/api/fmp/dcf', makeFmpHandler('https://financialmodelingprep.com/stable/discounted-cash-flow'));
+
+      server.middlewares.use('/api/economic-calendar', async (req, res) => {
+        try {
+          if (req.method !== 'GET' && req.method !== 'OPTIONS') {
+            res.setHeader('Content-Type', 'application/json');
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: 'Method not allowed' }));
+            return;
+          }
+
+          if (req.method === 'OPTIONS') {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+            res.statusCode = 204;
+            res.end();
+            return;
+          }
+
+          const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
+          const from = requestUrl.searchParams.get('from') || undefined;
+          const to = requestUrl.searchParams.get('to') || undefined;
+          const payload = await fetchPublicEconomicCalendar({ from, to });
+
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Content-Type', 'application/json');
+          res.statusCode = 200;
+          res.end(JSON.stringify(payload));
+        } catch (error) {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Content-Type', 'application/json');
+          res.statusCode = 500;
+          res.end(JSON.stringify({
+            error: error instanceof Error ? error.message : 'Failed to fetch economic calendar data',
+          }));
+        }
+      });
 
       // Finnhub Data Tools routes
       const getFinnhubErrorMessage = (status) => {

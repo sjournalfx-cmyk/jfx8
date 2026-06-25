@@ -15,7 +15,6 @@ import { TiltScoreWidget } from './TiltScoreWidget';
 import { PLByMindsetWidget } from './PLByMindsetWidget';
 import { PLByPlanAdherenceWidget } from './PLByPlanAdherenceWidget';
 import { StrategyPerformancePieChart } from './StrategyPerformancePieChart';
-import { PerformanceMatrixWidget } from './PerformanceMatrixWidget';
 import { OutcomeDistributionWidget } from './OutcomeDistributionWidget';
 import { DetailedStatistics } from './DetailedStatistics';
 
@@ -220,17 +219,6 @@ export const ReportView: React.FC<ReportViewProps> = ({
                         </h3>
                         <div className="p-2 border-2 border-black rounded-[32px] overflow-hidden">
                             <PerformanceBySession trades={trades} isDarkMode={false} currencySymbol={currencySymbol} />
-                        </div>
-                    </div>
-                )}
-
-                {isVisible('performanceMatrix') && (
-                    <div className="avoid-break pt-8 border-t border-black/10">
-                        <h3 className="text-xl font-black uppercase tracking-widest mb-6 flex items-center gap-3">
-                            <Table size={24} strokeWidth={3} /> Symbol Performance Matrix
-                        </h3>
-                        <div className="p-2 border-2 border-black rounded-[32px] overflow-hidden">
-                            <PerformanceMatrixWidget trades={trades} isDarkMode={false} currencySymbol={currencySymbol} />
                         </div>
                     </div>
                 )}

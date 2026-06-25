@@ -124,9 +124,6 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     if (cellColorPickerRef.current && !cellColorPickerRef.current.contains(e.target as Node)) {
       setShowCellColorOptions(false);
     }
-    if (composeMenuRef.current && !composeMenuRef.current.contains(e.target as Node)) {
-      setShowComposeMenu(false);
-    }
   };
 
   useEffect(() => {
@@ -210,127 +207,6 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
       };
       reader.readAsDataURL(file);
     }
-  };
-
-  const handleNotebookCompose = async (preset: NotebookPromptPreset = selectedPreset) => {
-    if (isGenerating) return;
-    if (!content.trim() && !title.trim() && listItems.length === 0 && !tableData) {
-      addToast({
-        type: 'warning',
-        title: 'Nothing to write from',
-        message: 'Add some note content first, then use Help me write.',
-      });
-      return;
-    }
-
-    if (!import.meta.env.VITE_NVIDIA_API_KEY) {
-      addToast({
-        type: 'error',
-        title: 'AI not configured',
-        message: 'Add the NVIDIA API key to use Help me write.',
-      });
-      return;
-    }
-
-    setIsGenerating(true);
-    setShowComposeMenu(false);
-    try {
-      const shouldReplace = shouldReplaceNotebookContent(preset);
-      const generated = await generateNotebookDraft({
-        preset,
-        title,
-        currentContent: [title, content].filter(Boolean).join('\n\n'),
-        isList,
-        listItems,
-        tableData,
-      });
-
-      if (isList) {
-        const lines = splitNotebookLines(generated);
-        const newItems = lines.map((line) => ({
-          id: genId(),
-          text: line,
-          checked: false,
-          indentLevel: 0,
-        }));
-        setListItems((prev) => (shouldReplace ? newItems : [...prev, ...newItems]));
-      } else {
-        if (shouldReplace) {
-          setContent(generated);
-        } else {
-          const inserted = insertTextAtSelection(textareaRef.current, content, generated);
-          setContent(inserted.nextValue);
-          setTimeout(() => {
-            if (textareaRef.current) {
-              textareaRef.current.style.height = 'auto';
-              textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-              textareaRef.current.selectionStart = inserted.nextSelectionStart;
-              textareaRef.current.selectionEnd = inserted.nextSelectionEnd;
-            }
-          }, 10);
-        }
-        setTimeout(() => {
-          if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-          }
-        }, 10);
-      }
-    } catch (e: any) {
-      console.error(e);
-      addToast({
-        type: 'error',
-        title: 'Help me write failed',
-        message: e?.message?.includes('configured')
-          ? 'Add the NVIDIA API key to continue.'
-          : e?.message || 'Could not generate notebook content.',
-      });
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleMagicComposeLegacy = async () => {
-    if (!content.trim() && !title.trim() && listItems.length === 0 && !tableData) return;
-    setIsGenerating(true);
-    try {
-        let prompt = '';
-        if (isList) {
-            const listText = listItems.map(i => i.text).join(', ');
-            prompt = `Create a checklist based on: ${title}. Context: ${listText}`;
-        } else if (tableData) {
-            const colHeaders = tableData.rows[0].map(c => c.text).join(', ');
-            prompt = `Provide data for this table about: ${title}. Columns: ${colHeaders}`;
-        } else {
-            prompt = title ? `Write a detailed note about: ${title}. ${content}` : `Elaborate on this note: ${content}`;
-        }
-        
-        const generated = await generateNoteContent(prompt);
-        
-        if (isList) {
-            const lines = generated.split('\n').filter(l => l.trim());
-            const newItems = lines.map(line => ({
-                id: genId(),
-                text: line.replace(/^[-*•]\s*/, '').trim(), 
-                checked: false,
-                indentLevel: 0
-            }));
-            setListItems(prev => [...prev, ...newItems]);
-        } else {
-            setContent(prev => prev ? `${prev}\n\n${generated}` : generated);
-            setTimeout(() => {
-                if(textareaRef.current) {
-                    textareaRef.current.style.height = 'auto';
-                    textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-                }
-            }, 10);
-        }
-    } catch (e) { console.error(e); } finally { setIsGenerating(false); }
-  };
-
-  const handleMagicCompose = () => {
-    if (isGenerating) return;
-    setShowComposeMenu((prev) => !prev);
   };
 
   const toggleListMode = () => {
@@ -632,28 +508,6 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
                  <ToolbarButton icon={<Plus className="w-4 h-4" />} title="Increase canvas width" onClick={() => adjustWidth(true)} />
                  <div className="h-4 w-[1px] bg-[var(--notebook-divider)] mx-1" />
 
-                 <div className="relative inline-flex flex-col items-start" ref={composeMenuRef}>
-                   <ToolbarButton onClick={handleMagicCompose} icon={isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-blue-300" /> : <Sparkles className="w-4 h-4 text-blue-300" />} disabled={isGenerating} />
-                   {showComposeMenu && (
-                     <div className="absolute left-0 top-full z-50 mt-3 w-64 overflow-hidden rounded-xl border border-[var(--notebook-divider)] bg-[var(--note-default-bg)] py-1 shadow-2xl">
-                       {NOTEBOOK_PROMPT_PRESETS.map((preset) => (
-                         <button
-                           key={preset.id}
-                           type="button"
-                           onClick={() => {
-                             setSelectedPreset(preset.id);
-                             setShowComposeMenu(false);
-                             void handleNotebookCompose(preset.id);
-                           }}
-                           className={`w-full px-4 py-2.5 text-left transition-colors hover:bg-[var(--notebook-hover)] ${selectedPreset === preset.id ? 'text-[var(--notebook-text)]' : 'text-[var(--notebook-muted)]'}`}
-                         >
-                           <div className="text-sm font-semibold">{preset.label}</div>
-                           <div className="mt-0.5 text-[11px] leading-snug opacity-70">{preset.description}</div>
-                         </button>
-                       ))}
-                     </div>
-                   )}
-                 </div>
                  <ToolbarButton icon={<RotateCcw className="w-4 h-4" />} title="Undo" disabled />
                  <ToolbarButton icon={<RotateCw className="w-4 h-4" />} title="Redo" disabled />
               </div>

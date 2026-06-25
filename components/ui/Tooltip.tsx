@@ -6,9 +6,10 @@ interface TooltipProps {
   children?: React.ReactNode;
   isDarkMode: boolean;
   position?: 'top' | 'bottom' | 'left' | 'right';
+  compact?: boolean;
 }
 
-export const Tooltip: React.FC<TooltipProps> = ({ content, children, isDarkMode, position = 'top' }) => {
+export const Tooltip: React.FC<TooltipProps> = ({ content, children, isDarkMode, position = 'top', compact = false }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [showTimeout, setShowTimeout] = useState<NodeJS.Timeout | null>(null);
 
@@ -40,7 +41,7 @@ export const Tooltip: React.FC<TooltipProps> = ({ content, children, isDarkMode,
       {children || <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 transition-opacity" />}
       
       {isVisible && (
-        <div className={`absolute z-[500] w-72 p-3 rounded-xl text-[10px] font-bold leading-relaxed shadow-2xl border backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 ${positionClasses[position]} ${
+        <div className={`absolute z-[500] ${compact ? 'w-56 p-2 rounded-lg text-[9px] font-semibold leading-snug' : 'w-72 p-3 rounded-xl text-[10px] font-bold leading-relaxed'} shadow-2xl border backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 ${positionClasses[position]} ${
           isDarkMode ? 'bg-[#000000]/95 border-zinc-800 text-zinc-300' : 'bg-white/95 border-slate-200 text-slate-600'
         }`}>
           {content}

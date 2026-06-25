@@ -508,6 +508,10 @@ export const dataService = {
       currentTrade?.ticketId ||
       currentTrade?.tags?.some(tag => /MT[45]_Auto_Journal|Imported/i.test(tag))
     );
+    const hasOwnProperty = (key: keyof Pick<Trade, 'beforeScreenshot' | 'afterScreenshot'>) =>
+      Object.prototype.hasOwnProperty.call(trade, key);
+    const beforeScreenshotCleared = hasOwnProperty('beforeScreenshot') && !trade.beforeScreenshot;
+    const afterScreenshotCleared = hasOwnProperty('afterScreenshot') && !trade.afterScreenshot;
 
     const tradeForSave = isBridgeManagedTrade && currentTrade
       ? {
@@ -547,6 +551,12 @@ export const dataService = {
     };
 
     let updateData = buildTradeDbPayload(tradeToUpdate, user.id, currentTrade || trade);
+    if (beforeScreenshotCleared) {
+      (updateData as any).before_screenshot = null;
+    }
+    if (afterScreenshotCleared) {
+      (updateData as any).after_screenshot = null;
+    }
     
     // Recursive update function to handle missing columns
     const performUpdate = async (data: Partial<DBTrade>): Promise<void> => {

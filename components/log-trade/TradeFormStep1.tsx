@@ -120,7 +120,8 @@ export const TradeFormStep1: React.FC<TradeFormStep1Props> = ({
                     error={pairError || undefined}
                     isDarkMode={isDarkMode}
                     autoFocus
-                    className="uppercase placeholder:normal-case"
+                    disabled={isDesktopBridgeTrade}
+                    className={cn("uppercase placeholder:normal-case", isDesktopBridgeTrade && "cursor-not-allowed opacity-60")}
                 />
             </div>
             <div className="col-span-2 md:col-span-1">
@@ -130,6 +131,7 @@ export const TradeFormStep1: React.FC<TradeFormStep1Props> = ({
                     icon={Target}
                     value={formData.assetType}
                     onChange={(val) => handleInputChange('assetType', val)}
+                    disabled={isDesktopBridgeTrade}
                     options={[
                         { value: 'Forex', label: 'Forex' },
                         { value: 'Indices', label: 'Indices' },

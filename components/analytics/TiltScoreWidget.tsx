@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Trade } from '../../types';
+import { calculateDisciplineScore, getDisciplineScoreLabel } from '../../lib/disciplineScore';
 
 interface TiltScoreWidgetProps {
     trades: Trade[];
@@ -9,7 +10,8 @@ interface TiltScoreWidgetProps {
 
 export const TiltScoreWidget: React.FC<TiltScoreWidgetProps> = ({ trades = [], isDarkMode }) => {
     const scoreData = useMemo(() => {
-        if (!trades.length) {
+        const score = calculateDisciplineScore(trades);
+        if (score === null) {
             return {
                 score: 78,
                 label: 'Good',
@@ -17,23 +19,7 @@ export const TiltScoreWidget: React.FC<TiltScoreWidgetProps> = ({ trades = [], i
             };
         }
 
-        const total = trades.reduce((sum, trade) => {
-            switch (trade.planAdherence) {
-                case 'Followed Exactly':
-                    return sum + 100;
-                case 'Minor Deviation':
-                    return sum + 78;
-                case 'Major Deviation':
-                    return sum + 32;
-                case 'No Plan':
-                    return sum + 10;
-                default:
-                    return sum + 55;
-            }
-        }, 0);
-
-        const score = Math.round(total / trades.length);
-        let label = 'Good';
+        let label = getDisciplineScoreLabel(score);
         let message = 'Your discipline is developing well. Focus on maintaining consistency in your trading approach.';
 
         if (score >= 90) {

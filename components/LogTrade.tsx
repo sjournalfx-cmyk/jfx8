@@ -109,11 +109,11 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
         time: initialTrade?.time || sast.time,
         session: initialTrade?.session || getSessionFromTime(sast.time),
         direction: initialTrade?.direction || 'Long' as 'Long' | 'Short',
-        entryPrice: initialTrade?.entryPrice?.toString() || '',
-        exitPrice: initialTrade?.exitPrice?.toString() || '',
-        stopLoss: initialTrade?.stopLoss?.toString() || '',
-        takeProfit: initialTrade?.takeProfit?.toString() || '',
-        lots: initialTrade?.lots?.toString() || '1.00',
+        entryPrice: (initialTrade?.entryPrice !== undefined && initialTrade?.entryPrice !== null) ? initialTrade.entryPrice.toString() : '',
+        exitPrice: (initialTrade?.exitPrice !== undefined && initialTrade?.exitPrice !== null) ? initialTrade.exitPrice.toString() : '',
+        stopLoss: (initialTrade?.stopLoss !== undefined && initialTrade?.stopLoss !== null) ? initialTrade.stopLoss.toString() : '',
+        takeProfit: (initialTrade?.takeProfit !== undefined && initialTrade?.takeProfit !== null) ? initialTrade.takeProfit.toString() : '',
+        lots: (initialTrade?.lots !== undefined && initialTrade?.lots !== null) ? initialTrade.lots.toString() : '1.00',
         result: initialTrade?.result || 'Pending' as 'Win' | 'Loss' | 'BE' | 'Pending',
         rating: initialTrade?.rating || 0,
         emotions: initialTrade?.emotions || [] as string[],
@@ -279,6 +279,9 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
     const lockedTrade = isDesktopBridgeTrade && initialTrade
       ? {
           ...normalizedTrade,
+          pair: initialTrade.pair,
+          assetType: initialTrade.assetType,
+          direction: initialTrade.direction,
           date: initialTrade.date,
           time: initialTrade.time,
           entryPrice: initialTrade.entryPrice,
@@ -341,6 +344,30 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                 {step < 3 ? <Button variant="primary" onClick={nextStep} rightIcon={<ChevronRight size={16} />} className="px-8">Continue</Button> : <div className="w-24" />}
             </div>
             {confirmModal.isOpen && <ConfirmationModal {...confirmModal} onCancel={() => setConfirmModal(p => ({ ...p, isOpen: false }))} isDarkMode={isDarkMode} />}
+
+            {previewImage && (
+                <div 
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+                    onClick={() => setPreviewImage(null)}
+                >
+                    <div className="absolute top-4 right-4 text-white hover:text-zinc-300 cursor-pointer">
+                        <X size={24} />
+                    </div>
+                    <div 
+                        className="relative max-w-5xl max-h-[85vh] w-full h-full flex flex-col items-center justify-center"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 className="font-bold mb-4 text-white text-lg tracking-tight">{previewImage.title}</h3>
+                        <div className="relative w-full h-full flex items-center justify-center overflow-hidden rounded-xl border border-zinc-700 bg-black/40">
+                            <img 
+                                src={previewImage.url} 
+                                alt={previewImage.title} 
+                                className="max-w-full max-h-full object-contain rounded-lg"
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

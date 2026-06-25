@@ -1,6 +1,5 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, UserCircle, Wallet, Layout, Cpu, ArrowRight, Lock, Info, X, ChevronDown, CheckCircle2, Gauge, HelpCircle } from 'lucide-react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, HelpCircle, CalendarDays, AlertTriangle } from 'lucide-react';
 import {
     DndContext,
     closestCenter,
@@ -37,6 +36,19 @@ const safePnL = (value: unknown): number => {
     const n = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(n) ? n : 0;
 };
+
+type EconomicCalendarItem = {
+    category?: string;
+    country?: string;
+    date: string;
+    detail?: string;
+    endDate?: string;
+    impact?: string;
+    source: 'BLS' | 'Fed' | string;
+    time?: string;
+    title: string;
+};
+
 interface DashboardProps {
     isDarkMode: boolean;
     trades: Trade[];
@@ -45,6 +57,8 @@ interface DashboardProps {
     userProfile: UserProfile;
     onViewChange: (view: string) => void;
     eaSession?: EASession | null;
+    lastKnownBridgeBalance?: number | null;
+    isBridgeOnline?: boolean;
     isLoading?: boolean;
     offlineQueue?: Trade[];
     isDemoMode?: boolean;
@@ -142,45 +156,233 @@ const StatCard = ({ label, value, subtext, trend, isDarkMode, icon: Icon, colorC
     </div>
 );
 
-const RecentTrades = ({ isDarkMode, trades, symbol, offlineQueue = [] }: { isDarkMode: boolean, trades: Trade[], symbol: string, offlineQueue?: Trade[] }) => (
-    <div className={`h-full p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
-        <h3 className="font-bold mb-4">Recent Activity</h3>
-        <div className="space-y-3 flex-1 overflow-auto custom-scrollbar pr-2">
-            {offlineQueue.map(trade => (
-                <div key={`pending-${trade.ticketId || Math.random()}`} className="flex items-center justify-between p-2.5 rounded-lg bg-indigo-500/5 border border-dashed border-indigo-500/20 animate-pulse">
-                    <div className="flex items-center gap-3">
-                        <div className="w-1.5 h-8 rounded-full bg-indigo-500" />
-                        <div>
-                            <p className="font-bold text-xs">{trade.pair}</p>
-                            <p className="text-[10px] text-indigo-500 font-black uppercase">Syncing...</p>
-                        </div>
-                    </div>
-                    <span className="font-mono text-xs font-bold opacity-50">
-                        {symbol}{safePnL(trade.pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
+const formatDateLabel = (value?: string) => {
+    if (!value) return 'TBA';
+
+    const date = new Date(`${value}T12:00:00Z`);
+    if (Number.isNaN(date.getTime())) return value;
+
+    return new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+    }).format(date);
+};
+
+const formatEventDateRange = (start?: string, end?: string, time?: string) => {
+    const startLabel = formatDateLabel(start);
+    const endLabel = end && end !== start ? formatDateLabel(end) : '';
+    const dateLabel = endLabel ? `${startLabel} - ${endLabel}` : startLabel;
+    return time ? `${dateLabel} | ${time}` : dateLabel;
+};
+
+const impactStyleMap: Record<string, { pill: string; dot: string }> = {
+    high: { pill: 'bg-rose-500/10 text-rose-500 border-rose-500/20', dot: 'bg-rose-500' },
+    medium: { pill: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-400' },
+    low: { pill: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20', dot: 'bg-emerald-500' },
+};
+
+const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
+    const [events, setEvents] = useState<EconomicCalendarItem[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+    const mountedRef = useRef(true);
+    const hasEventsRef = useRef(false);
+
+    const loadCalendar = useCallback(async (options?: { silent?: boolean }) => {
+        const silent = options?.silent ?? false;
+        const hasExistingEvents = hasEventsRef.current;
+
+        if (!silent) {
+            if (!hasExistingEvents) {
+                setIsLoading(true);
+            } else {
+                setIsRefreshing(true);
+            }
+        }
+
+        setError(null);
+
+        try {
+            const now = new Date();
+            const from = new Date(now.getTime() - 14 * 86400000).toISOString().split('T')[0];
+            const to = new Date(now.getTime() + 60 * 86400000).toISOString().split('T')[0];
+            const response = await fetch(`/api/economic-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+            const payload = await response.json().catch(() => ({}));
+
+            if (!mountedRef.current) return;
+
+            if (!response.ok) {
+                setError(payload?.error || 'The economic calendar service did not return data.');
+                setEvents([]);
+                hasEventsRef.current = false;
+                return;
+            }
+
+            const rawEvents = Array.isArray(payload?.data) ? payload.data : [];
+            const normalizedEvents = rawEvents
+                .filter((item: EconomicCalendarItem) => item && item.title && item.date)
+                .slice()
+                .sort((a: EconomicCalendarItem, b: EconomicCalendarItem) => {
+                    const aTs = Date.parse(`${a.date}T00:00:00Z`);
+                    const bTs = Date.parse(`${b.date}T00:00:00Z`);
+                    if (aTs !== bTs) return aTs - bTs;
+                    if (a.source !== b.source) return a.source.localeCompare(b.source);
+                    return a.title.localeCompare(b.title);
+                });
+
+            setEvents(normalizedEvents);
+            hasEventsRef.current = normalizedEvents.length > 0;
+            setLastUpdated(new Date().toISOString());
+        } catch (fetchError) {
+            if (!mountedRef.current) return;
+            setError(fetchError instanceof Error ? fetchError.message : 'Failed to fetch economic calendar data.');
+            setEvents([]);
+            hasEventsRef.current = false;
+        } finally {
+            if (mountedRef.current) {
+                setIsLoading(false);
+                setIsRefreshing(false);
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        let cancelled = false;
+        void loadCalendar();
+
+        const refresh = () => {
+            if (!cancelled) void loadCalendar({ silent: true });
+        };
+
+        const intervalId = window.setInterval(refresh, 30 * 60 * 1000);
+        const onFocus = () => refresh();
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') refresh();
+        };
+
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        return () => {
+            cancelled = true;
+            mountedRef.current = false;
+            window.clearInterval(intervalId);
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, []);
+
+    const visibleEvents = events.slice(0, 6);
+
+    return (
+        <div className={`h-full p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
+            <div className="flex items-start justify-between gap-4 mb-2">
+                <div>
+                    <h3 className="font-bold flex items-center gap-2">
+                        <CalendarDays size={18} className="text-sky-500" />
+                        Economic Calendar
+                    </h3>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                        Recent and upcoming macro events
+                    </p>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDarkMode ? 'text-zinc-600' : 'text-slate-300'}`}>
+                        Auto-refresh every 30 minutes{lastUpdated ? ` • updated ${new Date(lastUpdated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
+                    </p>
                 </div>
-            ))}
-            {trades.slice(0, 5 - offlineQueue.length).map(trade => (
-                <div key={trade.id} className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-50 dark:bg-black/50">
-                    <div className="flex items-center gap-3">
-                        <div className={`w-1.5 h-8 rounded-full ${trade.result === 'Win' ? 'bg-teal-500' : trade.result === 'Loss' ? 'bg-rose-500' : 'bg-gray-400'}`} />
-                        <div>
-                            <p className="font-bold text-xs">{trade.pair}</p>
-                            <p className="text-[10px] opacity-60 uppercase">{trade.direction}</p>
-                        </div>
-                    </div>
-                    <span className={`font-mono text-xs font-bold ${safePnL(trade.pnl) > 0 ? 'text-teal-500' : safePnL(trade.pnl) < 0 ? 'text-rose-500' : 'text-gray-500'}`}>
-                        {safePnL(trade.pnl) > 0 ? '+' : ''}{symbol}{safePnL(trade.pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {isRefreshing && (
+                    <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${isDarkMode ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>
+                        Refreshing
                     </span>
+                )}
+            </div>
+
+            {isLoading ? (
+                <div className="space-y-3 flex-1 overflow-hidden">
+                    {[1, 2, 3, 4].map((index) => (
+                        <div key={index} className={`p-3 rounded-xl border ${isDarkMode ? 'border-[#27272a] bg-white/[0.02]' : 'border-slate-100 bg-slate-50'}`}>
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                                <div className="h-4 w-28 rounded bg-black/10 dark:bg-white/10" />
+                                <div className="h-5 w-16 rounded-full bg-black/10 dark:bg-white/10" />
+                            </div>
+                            <div className="h-3 w-full rounded bg-black/10 dark:bg-white/10 mb-2" />
+                            <div className="h-3 w-2/3 rounded bg-black/10 dark:bg-white/10" />
+                        </div>
+                    ))}
                 </div>
-            ))}
-            {trades.length === 0 && (
-                <div className="flex items-center justify-center h-full opacity-30 text-xs">No recent trades</div>
+            ) : error ? (
+                <div className={`flex-1 rounded-2xl border border-dashed p-4 flex items-center gap-3 ${isDarkMode ? 'border-rose-500/20 bg-rose-500/5 text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+                    <AlertTriangle size={18} className="shrink-0" />
+                    <div className="min-w-0">
+                        <p className="text-sm font-bold">Could not load calendar</p>
+                        <p className="text-xs opacity-80 truncate">{error}</p>
+                    </div>
+                </div>
+            ) : visibleEvents.length === 0 ? (
+                <div className={`flex-1 rounded-2xl border border-dashed flex items-center justify-center text-center px-6 ${isDarkMode ? 'border-zinc-800 text-zinc-500' : 'border-slate-200 text-slate-400'}`}>
+                    <div>
+                        <p className="text-sm font-bold">No economic events in this window</p>
+                        <p className="text-xs mt-1">BLS and Fed returned no scheduled events for the selected window.</p>
+                    </div>
+                </div>
+            ) : (
+                <div className="space-y-3 flex-1 overflow-auto custom-scrollbar pr-2">
+                    {visibleEvents.map((event, index) => {
+                        const impactKey = (event.impact || '').toLowerCase();
+                        const impactStyle = impactStyleMap[impactKey] || {
+                            pill: isDarkMode ? 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' : 'bg-slate-100 text-slate-500 border-slate-200',
+                            dot: 'bg-zinc-400',
+                        };
+                        const sourceStyle = event.source === 'Fed'
+                            ? (isDarkMode ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-amber-50 text-amber-700 border-amber-200')
+                            : (isDarkMode ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-sky-50 text-sky-700 border-sky-200');
+
+                        return (
+                            <div key={`${event.source}-${event.date}-${event.title}-${index}`} className={`p-3 rounded-xl border ${isDarkMode ? 'border-[#27272a] bg-white/[0.02]' : 'border-slate-100 bg-slate-50'}`}>
+                                <div className="flex items-start justify-between gap-3 mb-2">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <div className={`w-2 h-2 rounded-full ${impactStyle.dot}`} />
+                                            <p className="text-sm font-bold truncate">{event.title || 'Unnamed event'}</p>
+                                        </div>
+                                        <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                                            {formatEventDateRange(event.date, event.endDate, event.time)} | {event.country || 'United States'}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-2 shrink-0">
+                                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${sourceStyle}`}>
+                                            {event.source}
+                                        </span>
+                                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${impactStyle.pill}`}>
+                                            {impactKey || 'unknown'} impact
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-[11px]">
+                                    <div className={`rounded-lg px-2 py-1.5 ${isDarkMode ? 'bg-black/30 text-zinc-300' : 'bg-white text-slate-600'}`}>
+                                        <div className="opacity-50 uppercase tracking-widest font-bold">Source</div>
+                                        <div className="font-bold mt-0.5">{event.source}</div>
+                                    </div>
+                                    <div className={`rounded-lg px-2 py-1.5 ${isDarkMode ? 'bg-black/30 text-zinc-300' : 'bg-white text-slate-600'}`}>
+                                        <div className="opacity-50 uppercase tracking-widest font-bold">Type</div>
+                                        <div className="font-bold mt-0.5">{event.category || 'Scheduled release'}</div>
+                                    </div>
+                                    <div className={`rounded-lg px-2 py-1.5 ${isDarkMode ? 'bg-black/30 text-zinc-300' : 'bg-white text-slate-600'}`}>
+                                        <div className="opacity-50 uppercase tracking-widest font-bold">Detail</div>
+                                        <div className="font-bold mt-0.5">{event.detail || 'Scheduled release'}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
             )}
         </div>
-    </div>
-);
-
+    );
+};
 const DailyBiasWidget = React.memo(({ isDarkMode, dailyBias, onUpdateBias, onInfoClick, isDemoMode = false }: { isDarkMode: boolean, dailyBias: DailyBias[], onUpdateBias: (b: DailyBias) => void, onInfoClick?: () => void, isDemoMode?: boolean }) => {
     const days = useMemo(() => {
         if (isDemoMode) {
@@ -278,27 +480,13 @@ const DASHBOARD_PRESETS = {
     ANALYTICS: ['equityCurve', 'recentTrades', 'dailyBias', 'openPositions']
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, onUpdateBias, userProfile, onViewChange, eaSession, isLoading, offlineQueue = [], isDemoMode = false }) => {
+const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, onUpdateBias, userProfile, onViewChange, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, isLoading, offlineQueue = [], isDemoMode = false }) => {
     // Robust free tier check
     const currentPlan = normalizePlan(userProfile?.plan);
     const isFreeTier = !userProfile || currentPlan === APP_CONSTANTS.PLANS.FREE;
     const [activeInfo, setActiveInfo] = useState<{ title: string, content: string } | null>(null);
-    const [showPresetMenu, setShowPresetMenu] = useState(false);
-
     // Widgets State for Reordering
     const [widgetOrder, setWidgetOrder] = useLocalStorage('dashboard_widget_order', DASHBOARD_PRESETS.STANDARD);
-
-    const handleApplyPreset = (preset: keyof typeof DASHBOARD_PRESETS) => {
-        setWidgetOrder(DASHBOARD_PRESETS[preset]);
-        setShowPresetMenu(false);
-    };
-
-    const activePreset = useMemo(() => {
-        if (JSON.stringify(widgetOrder) === JSON.stringify(DASHBOARD_PRESETS.STANDARD)) return 'Standard';
-        if (JSON.stringify(widgetOrder) === JSON.stringify(DASHBOARD_PRESETS.EXECUTION)) return 'Execution';
-        if (JSON.stringify(widgetOrder) === JSON.stringify(DASHBOARD_PRESETS.ANALYTICS)) return 'Analytics';
-        return 'Custom';
-    }, [widgetOrder]);
 
     // Ensure new widgets are added to existing layouts
     useEffect(() => {
@@ -330,20 +518,6 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
     const totalFloatingPnL = useMemo(() => {
         return (eaSession?.data?.openPositions || []).reduce((sum: number, pos: any) => sum + Number(pos.profit || 0), 0);
     }, [eaSession]);
-
-    const planBadge = useMemo(() => {
-        const plan = normalizePlan(userProfile?.plan);
-        if (plan === APP_CONSTANTS.PLANS.FREE) {
-            return { label: 'FREE', color: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20' };
-        }
-        if (plan === APP_CONSTANTS.PLANS.HOBBY) {
-            return { label: 'PRO', color: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' };
-        }
-        if (plan === APP_CONSTANTS.PLANS.STANDARD) {
-            return { label: 'ELITE', color: 'bg-[#FF4F01]/10 text-[#FF4F01] border-[#FF4F01]/20' };
-        }
-        return null;
-    }, [userProfile?.plan]);
 
     const InfoPanel = ({ info, onClose }: { info: { title: string, content: string }, onClose: () => void }) => (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 sm:p-12 animate-in fade-in duration-300">
@@ -406,12 +580,6 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
   const totalPnL = trades.reduce((acc, t) => acc + (Number.isFinite(Number(t.pnl)) ? Number(t.pnl) : 0), 0);
     const isPro = currentPlan === APP_CONSTANTS.PLANS.HOBBY;
     
-    // Determine the source of truth for current balance
-    // If user is on EA Connect, the bridge balance is the absolute source of truth
-    const currentBalance = (userProfile.syncMethod === 'EA_CONNECT' && eaSession?.data?.account?.balance !== undefined)
-        ? eaSession.data.account.balance
-        : (userProfile.initialBalance + totalPnL);
-
     const wins = trades.filter(t => t.result === 'Win');
     const losses = trades.filter(t => t.result === 'Loss');
     const winRate = trades.length > 0 ? ((wins.length / trades.length) * 100).toFixed(1) : 0;
@@ -464,7 +632,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
                     })}
                 />;
             case 'recentTrades':
-                return <RecentTrades isDarkMode={isDarkMode} trades={trades} symbol={userProfile.currencySymbol} offlineQueue={offlineQueue} />;
+                return <EconomicCalendarWidget isDarkMode={isDarkMode} />;
             case 'equityCurve':
                 return <EquityCurveWidget trades={trades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={userProfile.currencySymbol} isLoading={isLoading} />;
             case 'openPositions':
@@ -518,7 +686,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
 
     return (
         <div className={`w-full h-full overflow-y-auto p-8 font-sans ${isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-slate-50 text-slate-900'}`}>
-            <header className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <header className="mb-6 flex flex-col md:flex-row md:items-center justify-start gap-6">
                 <div>
                     <div className="flex items-center gap-3 mb-1">
                         <h1 className="text-3xl font-bold tracking-tight">{userProfile.accountName || 'Trading Dashboard'}</h1>
@@ -536,100 +704,6 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
                     </p>
                 </div>
 
-                <div className="flex items-center gap-4">
-                    <div className="relative">
-                        <button 
-                            onClick={() => setShowPresetMenu(!showPresetMenu)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold transition-all ${isDarkMode ? 'bg-[#000000] border-zinc-800 text-zinc-400 hover:text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm'}`}
-                        >
-                            <Layout size={16} />
-                            <span className="hidden sm:inline">Layout: {activePreset}</span>
-                            <ChevronDown size={14} className={`transition-transform duration-300 ${showPresetMenu ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        <AnimatePresence>
-                            {showPresetMenu && (
-                                <motion.div 
-                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                    className={`absolute top-full right-0 mt-2 w-56 rounded-2xl border shadow-2xl z-[100] overflow-hidden ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200'}`}
-                                >
-                                    <div className="p-2 space-y-1">
-                                        <button 
-                                            onClick={() => handleApplyPreset('STANDARD')}
-                                            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-left text-xs font-bold transition-all ${activePreset === 'Standard' ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'text-zinc-400 hover:bg-white/5' : 'text-slate-600 hover:bg-slate-50'}`}
-                                        >
-                                            Standard View {activePreset === 'Standard' && <CheckCircle2 size={14} />}
-                                        </button>
-                                        <button 
-                                            onClick={() => handleApplyPreset('EXECUTION')}
-                                            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-left text-xs font-bold transition-all ${activePreset === 'Execution' ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'text-zinc-400 hover:bg-white/5' : 'text-slate-600 hover:bg-slate-50'}`}
-                                        >
-                                            Execution Focused {activePreset === 'Execution' && <CheckCircle2 size={14} />}
-                                        </button>
-                                        <button 
-                                            onClick={() => handleApplyPreset('ANALYTICS')}
-                                            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-left text-xs font-bold transition-all ${activePreset === 'Analytics' ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'text-zinc-400 hover:bg-white/5' : 'text-slate-600 hover:bg-slate-50'}`}
-                                        >
-                                            Analytics Focused {activePreset === 'Analytics' && <CheckCircle2 size={14} />}
-                                        </button>
-                                    </div>
-                                    <div className={`p-3 border-t text-[9px] font-bold uppercase tracking-widest opacity-40 text-center ${isDarkMode ? 'border-zinc-800' : 'border-slate-100'}`}>
-                                        Presets overwrite custom order
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
-
-                    <div className={`flex items-center gap-6 p-4 rounded-3xl border ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
-                    <div className="flex items-center gap-3 border-r pr-6 border-zinc-800/50">
-                        <div className="w-10 h-10 rounded-2xl bg-[#FF4F01]/10 flex items-center justify-center text-[#FF4F01] shadow-lg">
-                            <Wallet size={20} />
-                        </div>
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <div className="text-[10px] font-bold opacity-40 uppercase tracking-widest leading-none mb-1">Account Balance</div>
-                                {eaSession?.data?.account?.is_demo !== undefined && (
-                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border ${eaSession.data.account.is_demo ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'}`}>
-                                        {eaSession.data.account.is_demo ? 'Demo' : 'Real'}
-                                    </span>
-                                )}
-                                {eaSession && (
-                                    <Tooltip content={`Last Synced: ${new Date(eaSession.last_updated).toLocaleString()}`} isDarkMode={isDarkMode}>
-                                        <div className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-500 border border-zinc-500/20">
-                                            <div className="w-1 h-1 rounded-full bg-zinc-500" />
-                                            <span className="text-[8px] font-black uppercase tracking-widest">Cached</span>
-                                        </div>
-                                    </Tooltip>
-                                )}
-                            </div>
-                            <div className="text-xl font-black font-mono tracking-tighter leading-none">{userProfile.currencySymbol}{currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <div className="hidden sm:block text-right">
-                            <div className="text-xs font-black uppercase tracking-wider">{userProfile.name}</div>
-                            <div className="text-[10px] opacity-40 font-bold uppercase">{userProfile.tradingStyle}</div>
-                        </div>
-                        <div className="flex flex-col items-center gap-1.5">
-                            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-xl overflow-hidden">
-                                {userProfile.avatarUrl ? (
-                                    <img src={userProfile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                                ) : (
-                                    <UserCircle size={28} />
-                                )}
-                            </div>
-                            {planBadge && (
-                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border ${planBadge.color}`}>
-                                    {planBadge.label}
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </div>
         </header>
 
             {/* EA Setup Prompt (For new EA users) */}

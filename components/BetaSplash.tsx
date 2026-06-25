@@ -1,45 +1,18 @@
 import React from 'react';
-import { ArrowRight, Wrench, Monitor, Clock, Zap, Mail, Bug } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 interface BetaSplashProps {
   onContinue: () => void;
 }
 
-const items = [
-  { icon: Wrench, label: 'Active Development' },
-  { icon: Monitor, label: 'Desktop Only' },
-  { icon: Mail, label: 'Email Feedback' },
-  { icon: Clock, label: 'Data May Change' },
-  { icon: Bug, label: 'Report Bug' },
-  { icon: Zap, label: 'Free During Beta' },
-];
-
-const ACCENT = 'text-teal-400';
-const ACCENT_BG = 'bg-teal-500/20';
-
 const BetaSplash: React.FC<BetaSplashProps> = ({ onContinue }) => {
   const [showTelegram, setShowTelegram] = React.useState(false);
 
   const handleContinueToApp = () => {
-    try {
-      const promptShown = localStorage.getItem('jfx_telegram_prompt_shown');
-      if (promptShown === 'true') {
-        onContinue();
-      } else {
-        setShowTelegram(true);
-      }
-    } catch (e) {
-      console.warn('LocalStorage access failed, default to showing Telegram step:', e);
-      setShowTelegram(true);
-    }
+    setShowTelegram(true);
   };
 
   const handleFinalize = (joinLink?: string) => {
-    try {
-      localStorage.setItem('jfx_telegram_prompt_shown', 'true');
-    } catch (e) {
-      console.warn('LocalStorage write failed:', e);
-    }
     if (joinLink) {
       window.open(joinLink, '_blank');
     }
@@ -69,27 +42,9 @@ const BetaSplash: React.FC<BetaSplashProps> = ({ onContinue }) => {
         </h1>
 
         {/* Hero Message — one concise line */}
-        <p className="text-[23px] sm:text-[28px] font-semibold text-zinc-100 max-w-3xl leading-snug mb-14">
+        <p className="text-[23px] sm:text-[28px] font-semibold text-zinc-100 max-w-3xl leading-snug mb-16">
           Your early feedback shapes what this tool becomes.
         </p>
-
-        {/* Info Grid — 2-column grid, readable on small screens */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-5 mb-14">
-          {items.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div
-                key={item.label}
-                className="flex items-center gap-3 justify-center sm:justify-start"
-              >
-                <div className={`w-8 h-8 rounded-lg ${ACCENT_BG} flex items-center justify-center shrink-0`}>
-                  <Icon size={16} className={ACCENT} />
-                </div>
-                <span className="text-[14px] font-bold text-zinc-300 whitespace-nowrap">{item.label}</span>
-              </div>
-            );
-          })}
-        </div>
 
         {/* CTA */}
         {!showTelegram ? (

@@ -499,6 +499,8 @@ interface AIChatProps {
   userProfile: UserProfile | null;
   dailyBias?: DailyBias[];
   eaSession?: EASession | null;
+  lastKnownBridgeBalance?: number | null;
+  isBridgeOnline?: boolean;
   onAddNote?: (note: Note) => Promise<Note | undefined>;
   onUpdateTrade?: (trade: Trade) => Promise<void>;
   onOpenSettings?: () => void;
@@ -951,7 +953,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { cmd: '/status', kind: 'market-status', source: 'finnhub', label: 'Market Status', needsSymbol: false, desc: 'Open/closed & holidays' },
 ];
 
-const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, onAddNote, onUpdateTrade, onOpenSettings }) => {
+const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, onAddNote, onUpdateTrade, onOpenSettings }) => {
   const safePnL = (value: unknown): number => {
     const n = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -988,8 +990,8 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
 
   const trades = useMemo(() => [...rawTrades].sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime()), [rawTrades]);
   const analyticsSnapshot = useMemo(
-    () => buildAnalyticsAiSnapshot(trades, userProfile, dailyBias, eaSession),
-    [trades, userProfile, dailyBias, eaSession]
+    () => buildAnalyticsAiSnapshot(trades, userProfile, dailyBias, eaSession, lastKnownBridgeBalance, isBridgeOnline),
+    [trades, userProfile, dailyBias, eaSession, lastKnownBridgeBalance, isBridgeOnline]
   );
   const preferredPairOptions = useMemo(() => {
     const pairs = Array.from(new Set(rawTrades.map((trade) => trade.pair).filter(Boolean)));

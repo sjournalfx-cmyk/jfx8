@@ -271,10 +271,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
           {step === 3 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
               <h1 className="text-5xl font-bold tracking-tight mb-4">Terms of Service & Privacy Policy</h1>
-              <p className={`text-lg mb-10 ${subTextColor}`}>Please review and accept our terms and privacy policy to continue.</p>
+              <p className={`text-lg mb-8 ${subTextColor}`}>Please review and accept our terms and privacy policy to continue.</p>
 
-              <div className="space-y-6">
-                <div className={`p-8 rounded-xl border h-96 overflow-y-auto custom-scrollbar leading-relaxed text-sm ${isDarkMode ? 'bg-[#111] border-zinc-800 text-zinc-400' : 'bg-white border-zinc-200 text-zinc-600'}`} ref={scrollRef} onScroll={handleScroll}>
+              <div className="space-y-4">
+                <div className={`p-8 rounded-xl border h-80 overflow-y-auto custom-scrollbar leading-relaxed text-sm ${isDarkMode ? 'bg-[#111] border-zinc-800 text-zinc-400' : 'bg-white border-zinc-200 text-zinc-600'}`} ref={scrollRef} onScroll={handleScroll}>
                   <h3 className="font-bold text-zinc-800 dark:text-zinc-200 mb-4 uppercase text-xs tracking-widest">Terms of Use / Service Agreement</h3>
                   <p className="mb-4">Date of last revision: October 24, 2024</p>
                   <p className="mb-6">This agreement is between JournalFX Technologies ("the Company") and the user. By using this software, you acknowledge that trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors.</p>
@@ -283,7 +283,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
                   <div className="h-20" />
                 </div>
 
-                <div className="space-y-4 pt-4">
+                <div className="space-y-4 pt-2">
                   <div className="flex items-center justify-between py-4 border-b border-zinc-200 dark:border-zinc-800">
                     <span className="text-sm font-bold opacity-80">I agree to JournalFX's <span className="underline cursor-pointer">Terms of Service</span> and <span className="underline cursor-pointer">Privacy Policy</span>.</span>
                     <div className="flex items-center gap-4">
@@ -596,7 +596,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
         </div>
 
         {/* Sticky Footer */}
-        <div className="mt-12 lg:mt-24 pt-10 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between">
+        <div className="mt-8 lg:mt-16 pt-8 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between">
           <button
             onClick={prevStep}
             className={`flex items-center gap-2 px-8 py-3 rounded-xl font-bold text-sm transition-all border ${step === 1 ? 'opacity-0 pointer-events-none' : isDarkMode ? 'border-zinc-800 hover:bg-black text-zinc-400' : 'border-zinc-200 hover:bg-zinc-100 text-zinc-600'

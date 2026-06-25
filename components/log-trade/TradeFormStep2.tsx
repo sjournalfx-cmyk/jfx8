@@ -10,6 +10,13 @@ interface TradeFormStep2Props {
     isDesktopBridgeTrade?: boolean;
 }
 
+const resultColorMap: Record<string, string> = {
+    Win: 'bg-teal-500/10 border-teal-500 text-teal-600 dark:text-teal-400',
+    Loss: 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400',
+    BE: 'bg-violet-500/10 border-violet-500 text-violet-600 dark:text-violet-400',
+    Pending: 'bg-violet-500/10 border-violet-500 text-violet-600 dark:text-violet-400',
+};
+
 export const TradeFormStep2: React.FC<TradeFormStep2Props> = ({
     formData,
     handleInputChange,
@@ -51,9 +58,11 @@ export const TradeFormStep2: React.FC<TradeFormStep2Props> = ({
                     )}>
                         <button
                             type="button"
+                            disabled={isDesktopBridgeTrade}
                             onClick={() => handleInputChange('direction', 'Long')}
                             className={cn(
                                 "flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all",
+                                isDesktopBridgeTrade && "cursor-not-allowed opacity-60",
                                 formData.direction === 'Long' ? 'bg-teal-500 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'
                             )}
                         >
@@ -61,9 +70,11 @@ export const TradeFormStep2: React.FC<TradeFormStep2Props> = ({
                         </button>
                         <button
                             type="button"
+                            disabled={isDesktopBridgeTrade}
                             onClick={() => handleInputChange('direction', 'Short')}
                             className={cn(
                                 "flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all",
+                                isDesktopBridgeTrade && "cursor-not-allowed opacity-60",
                                 formData.direction === 'Short' ? 'bg-rose-500 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'
                             )}
                         >
@@ -144,7 +155,7 @@ export const TradeFormStep2: React.FC<TradeFormStep2Props> = ({
                         { id: 'Loss', icon: XCircle, color: 'rose' },
                         { id: 'BE', icon: MinusCircle, color: 'violet' },
                         { id: 'Pending', icon: Clock, color: 'violet' }
-                    ].map(({ id, icon: Icon, color }) => (
+                    ].map(({ id, icon: Icon }) => (
                         <button
                             key={id}
                             type="button"
@@ -154,7 +165,7 @@ export const TradeFormStep2: React.FC<TradeFormStep2Props> = ({
                                 "py-4 px-2 rounded-xl border font-bold text-sm transition-all flex flex-col items-center gap-2",
                                 isDesktopBridgeTrade && "cursor-not-allowed opacity-60",
                                 formData.result === id
-                                    ? `bg-${color}-500/10 border-${color}-500 text-${color}-600 dark:text-${color}-400`
+                                    ? resultColorMap[id]
                                     : `border-transparent ${isDarkMode ? 'bg-[#000000] text-zinc-500 hover:bg-[#27272a]' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`
                             )}
                         >

@@ -38,7 +38,6 @@ import { StrategyPerformancePieChart } from './analytics/StrategyPerformancePieC
 import { TradingMistakesBarChartWidget } from './analytics/TradingMistakesBarChartWidget';
 import { OutcomeDistributionWidget } from './analytics/OutcomeDistributionWidget';
 import { RobustnessLab } from './analytics/RobustnessLab';
-import { PerformanceMatrixWidget } from './analytics/PerformanceMatrixWidget';
 import { ComparisonView } from './analytics/ComparisonView';
 import { TradeGradeDistributionWidget } from './analytics/TradeGradeDistributionWidget';
 import { PsychologicalSlipWidget } from './analytics/PsychologicalSlipWidget';
@@ -46,9 +45,9 @@ import { TimeAnalysisMatrixWidget } from './analytics/TimeAnalysisMatrixWidget';
 import { DetailedStatistics } from './analytics/DetailedStatistics';
 import { PLByPlanAdherenceWidget } from './analytics/PLByPlanAdherenceWidget';
 import { CashTransactionsView } from './analytics/CashTransactionsView';
-import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
+import { resolveBridgeBackedInitialBalance } from '../lib/bridgeBalance';
+import { calculateDisciplineScore } from '../lib/disciplineScore';
 import { type PsychologyInsightsEntry } from '../lib/psychologyInsights';
-import { getDefaultTimezone } from '../lib/timeUtils';
 
 import {
     DndContext,
@@ -162,6 +161,7 @@ const psychologyCardToneClasses: Record<PsychologyBriefTone, { shell: string; st
     },
 };
 
+
 const renderRadarAngleTick = ({ x, y, payload }: any) => {
     const label = payload?.value;
     const offsets: Record<string, { dx: number; dy: number }> = {
@@ -197,6 +197,14 @@ type BarChartPoint = {
 };
 
 const MINDSETS = ['Confident', 'Neutral', 'Hesitant', 'Anxious', 'FOMO'];
+const radarTooltipContent = (
+    <div className="space-y-0.5">
+        <div className="uppercase tracking-[0.18em] opacity-50 text-[8px]">Mindset</div>
+        <div>Average P/L</div>
+        <div>Trade count</div>
+        <div>Win rate</div>
+    </div>
+);
 
 function DonutChart({ value }: { value: number }) {
     const radius = 55;
@@ -253,13 +261,15 @@ interface AnalyticsProps {
   userProfile: UserProfile;
   onViewChange: (view: string) => void;
   eaSession?: EASession | null;
+  lastKnownBridgeBalance?: number | null;
+  isBridgeOnline?: boolean;
   cashTransactions?: CashTransaction[];
   dailyPsychologyInsights?: PsychologyInsightsEntry | null;
   onRefreshPsychologyInsights?: () => void;
   isRefreshingPsychologyInsights?: boolean;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false }) => {
+const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false }) => {
     const trades = useMemo(() => {
         return sortTradesChronologically(rawTrades);
     }, [rawTrades]);
@@ -279,7 +289,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     const [allWidgetsOrder, setAllWidgetsOrder] = useLocalStorage('analytics_bento_order', [
       'winRate', 'profitFactor', 'grossProfit', 'grossLoss',
       'equityCurve', 'drawdown',
-      'streakMomentum', 'symbolPerformance', 'largestWinLoss', 'currencyStrength', 'matrix', 'tradeExit',
+      'streakMomentum', 'symbolPerformance', 'largestWinLoss', 'currencyStrength', 'tradeExit',
       'outcomeDist', 'tiltScore', 'riskReward', 'plMindset', 'plAdherence', 'tradeGrade', 'psychSlip', 'timeMatrix'
     ]);
 
@@ -287,7 +297,6 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
         return Array.from(new Set([
             ...allWidgetsOrder,
             'timeAnalysis',
-            'performanceMatrix',
             'perfByPair',
             'strategyPerf',
             'executionTable'
@@ -299,15 +308,14 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     }, [trades]);
 
     const effectiveInitialBalance = useMemo(() => {
-        const currentPlan = normalizePlan(userProfile.plan);
-        const isPro = currentPlan === APP_CONSTANTS.PLANS.HOBBY;
-        const isPremium = currentPlan === APP_CONSTANTS.PLANS.STANDARD;
-        if ((isPro || isPremium) && eaSession?.data?.account?.balance !== undefined) {
-             const totalPnL = completedTrades.reduce((acc, t) => acc + safePnL(t.pnl), 0);
-             return eaSession.data.account.balance - totalPnL;
-        }
-        return userProfile?.initialBalance || 0;
-    }, [userProfile, eaSession, completedTrades]);
+        return resolveBridgeBackedInitialBalance({
+            trades: completedTrades,
+            userProfile,
+            eaSession,
+            lastKnownBridgeBalance,
+            isBridgeOnline,
+        });
+    }, [userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline, completedTrades]);
 
     const equityData = useMemo(() => {
         const safeTrades = completedTrades;
@@ -368,24 +376,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     }, [completedTrades]);
 
     const disciplineScore = useMemo(() => {
-        if (!completedTrades.length) return 78;
-
-        const score = completedTrades.reduce((total, trade) => {
-            switch (trade.planAdherence) {
-                case 'Followed Exactly':
-                    return total + 100;
-                case 'Minor Deviation':
-                    return total + 78;
-                case 'Major Deviation':
-                    return total + 30;
-                case 'No Plan':
-                    return total + 10;
-                default:
-                    return total + 55;
-            }
-        }, 0) / completedTrades.length;
-
-        return Math.round(score);
+        return calculateDisciplineScore(completedTrades) ?? 78;
     }, [completedTrades]);
 
     const mindsetChartPoints = useMemo<BarChartPoint[]>(() => {
@@ -445,7 +436,11 @@ const renderPsychologyLayout = () => (
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <h2 className="text-[18px] font-bold text-white">{scoreToggled ? 'Performance Radar' : 'Tilt Score'}</h2>
-                            <Tooltip content={scoreToggled ? 'Radar chart showing your average P/L by trading mindset, normalized for comparison.' : 'Your discipline score based on plan adherence across all trades. Higher is better.'} isDarkMode={true}>
+                            <Tooltip
+                                content={scoreToggled ? radarTooltipContent : 'Your discipline score based on plan adherence across all trades. Higher is better.'}
+                                isDarkMode={true}
+                                compact={scoreToggled}
+                            >
                                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                             </Tooltip>
                         </div>
@@ -483,29 +478,35 @@ const renderPsychologyLayout = () => (
 
                     <div className="flex flex-1 flex-col items-center justify-center gap-6 pt-2">
                         {scoreToggled ? (
-                            <div className="mx-auto flex h-[320px] w-[320px] items-center justify-center">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <RadarChart cx="50%" cy="50%" outerRadius="74%" data={radarData} margin={{ top: 28, right: 28, bottom: 28, left: 28 }}>
-                                        <PolarGrid stroke="#e2e8f0" />
-                                        <PolarAngleAxis dataKey="name" tick={renderRadarAngleTick} />
-                                        <PolarRadiusAxis
-                                            angle={90}
-                                            domain={[-20, 40]}
-                                            tick={false}
-                                            axisLine={false}
-                                        />
-                                        <Radar
-                                            name="Performance"
-                                            dataKey="pl"
-                                            stroke="#4f46e5"
-                                            strokeWidth={2}
-                                            fill="#4f46e5"
-                                            fillOpacity={0.15}
-                                            isAnimationActive={false}
-                                        />
-                                    </RadarChart>
-                                </ResponsiveContainer>
-                            </div>
+                            <Tooltip
+                                content={radarTooltipContent}
+                                isDarkMode={true}
+                                compact
+                            >
+                                <div className="mx-auto h-[320px] w-[320px] cursor-help">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RadarChart cx="50%" cy="50%" outerRadius="74%" data={radarData} margin={{ top: 28, right: 28, bottom: 28, left: 28 }}>
+                                            <PolarGrid stroke="#e2e8f0" />
+                                            <PolarAngleAxis dataKey="name" tick={renderRadarAngleTick} />
+                                            <PolarRadiusAxis
+                                                angle={90}
+                                                domain={[-20, 40]}
+                                                tick={false}
+                                                axisLine={false}
+                                            />
+                                            <Radar
+                                                name="Performance"
+                                                dataKey="pl"
+                                                stroke="#4f46e5"
+                                                strokeWidth={2}
+                                                fill="#4f46e5"
+                                                fillOpacity={0.15}
+                                                isAnimationActive={false}
+                                            />
+                                        </RadarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </Tooltip>
                         ) : (
                             <>
                                 <DonutChart value={disciplineScore} />
@@ -662,7 +663,6 @@ const renderPsychologyLayout = () => (
             );
             case 'plMindset': return null;
             case 'plAdherence': return null;
-            case 'matrix': return <PerformanceMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
             case 'tradeGrade': return <TradeGradeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} />;
             case 'psychSlip': return <PsychologicalSlipWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
             case 'timeMatrix': return <TimeAnalysisMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
@@ -676,7 +676,7 @@ const renderPsychologyLayout = () => (
             case 'drawdown': return 'col-span-12 lg:col-span-4';
             case 'winRate': case 'profitFactor': case 'grossProfit': case 'grossLoss': return 'col-span-12 sm:col-span-6 lg:col-span-3';
             case 'riskReward': case 'tradeGrade': return 'col-span-12 md:col-span-6 lg:col-span-4';
-            case 'matrix': case 'psychSlip': case 'timeMatrix': return 'col-span-12';
+            case 'psychSlip': case 'timeMatrix': return 'col-span-12';
             default: return 'col-span-12 md:col-span-6 lg:col-span-4';
         }
     };
@@ -843,9 +843,6 @@ const renderPsychologyLayout = () => (
                             <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} />
                         </div>
                     </div>
-                    <div className="min-h-[320px]">
-                        <PerformanceMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />
-                    </div>
                 </div>
             )}
 
@@ -912,12 +909,6 @@ const renderPsychologyLayout = () => (
                         isDarkMode={isDarkMode} 
                         currencySymbol={currencySymbol} 
                     />
-
-                    <div className="flex justify-center pt-8 border-t border-zinc-500/10">
-                        <p className="text-xs font-bold opacity-30 uppercase tracking-[0.2em] italic">
-                            All times are calculated in {getDefaultTimezone()}
-                        </p>
-                    </div>
                 </div>
             )}
         </div>

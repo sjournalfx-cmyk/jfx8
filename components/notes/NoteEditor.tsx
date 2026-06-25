@@ -823,32 +823,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
                         <ToolbarButton icon={<Plus className="w-4 h-4" />} title="Increase canvas width" onClick={() => adjustWidth(true)} />
                         <div className="h-4 w-[1px] bg-[var(--notebook-divider)] mx-1" />
 
-                        <div className="relative inline-flex flex-col items-start" ref={composeMenuRef}>
-                          <ToolbarButton 
-                              onClick={handleMagicCompose}
-                              icon={isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-blue-300" /> : <Sparkles className="w-4 h-4 text-blue-300" />}
-                              disabled={isGenerating}
-                          />
-                          {showComposeMenu && (
-                            <div className="absolute left-0 top-full z-50 mt-3 w-64 overflow-hidden rounded-xl border border-[var(--notebook-divider)] bg-[var(--note-default-bg)] py-1 shadow-2xl">
-                              {NOTEBOOK_PROMPT_PRESETS.map((preset) => (
-                                <button
-                                  key={preset.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedPreset(preset.id);
-                                    setShowComposeMenu(false);
-                                    void handleNotebookCompose(preset.id);
-                                  }}
-                                  className={`w-full px-4 py-2.5 text-left transition-colors hover:bg-[var(--notebook-hover)] ${selectedPreset === preset.id ? 'text-[var(--notebook-text)]' : 'text-[var(--notebook-muted)]'}`}
-                                >
-                                  <div className="text-sm font-semibold">{preset.label}</div>
-                                  <div className="mt-0.5 text-[11px] leading-snug opacity-70">{preset.description}</div>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
                         <ToolbarButton icon={<RotateCcw className={`w-4 h-4 ${historyIndex <= 0 ? 'opacity-30' : ''}`} />} title="Undo" onClick={handleUndo} />
                         <ToolbarButton icon={<RotateCw className={`w-4 h-4 ${historyIndex >= history.length - 1 ? 'opacity-30' : ''}`} />} title="Redo" onClick={handleRedo} />
                       </>

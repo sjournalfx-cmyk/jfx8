@@ -32,6 +32,7 @@ import { Agentation, type Annotation } from "agentation";
 import { getSafePnL } from './lib/trade-normalization';
 import { normalizeThemePreference } from './lib/theme';
 import { demoDailyBias, demoEASession, demoNotes, demoTrades, getDemoProfile } from './lib/demoData';
+import { resolveBridgeBackedBalance } from './lib/bridgeBalance';
 
 // Lazy load heavy components for performance
 const Analytics = lazy(() => import('./components/Analytics'));
@@ -87,6 +88,8 @@ const {
     dailyBias,
     cashTransactions,
     eaSession,
+    lastKnownBridgeBalance,
+    isBridgeOnline,
     editingTrade,
     isDataLoading,
     setTrades,
@@ -133,8 +136,8 @@ const {
   }, [isAuthenticated]);
 
   const analyticsSnapshot = useMemo(
-    () => buildAnalyticsAiSnapshot(activeTrades, activeUserProfile, activeDailyBias, activeEaSession),
-    [activeTrades, activeUserProfile, activeDailyBias, activeEaSession]
+    () => buildAnalyticsAiSnapshot(activeTrades, activeUserProfile, activeDailyBias, activeEaSession, lastKnownBridgeBalance, isBridgeOnline),
+    [activeTrades, activeUserProfile, activeDailyBias, activeEaSession, lastKnownBridgeBalance, isBridgeOnline]
   );
   const [psychologyInsightsCache, setPsychologyInsightsCache] = useLocalStorage<PsychologyInsightsCache>(PSYCHOLOGY_INSIGHTS_STORAGE_KEY, {});
   const psychologyInsightsScope = getPsychologyInsightsScopeKey(userId, isDemoMode);
@@ -853,9 +856,17 @@ const onLogout = async () => {
   }
 
   const totalPnL = activeTrades.reduce((acc, t) => acc + getSafePnL(t.pnl), 0);
-  const currentBalance = (activeUserProfile?.syncMethod === 'EA_CONNECT' && activeEaSession?.data?.account?.balance !== undefined)
-    ? activeEaSession.data.account.balance
-    : ((activeUserProfile?.initialBalance || 0) + totalPnL);
+  // Balance priority:
+  //  1. Bridge is live → use live balance from eaSession
+  //  2. Bridge just went offline → show last known synced balance (from localStorage)
+  //  3. Never synced → fall back to initialBalance + PnL
+  const currentBalance = resolveBridgeBackedBalance({
+    userProfile: activeUserProfile,
+    totalPnL,
+    eaSession: activeEaSession,
+    lastKnownBridgeBalance,
+    isBridgeOnline,
+  });
 
   const { date: sastDate } = getSASTDateTime();
   const [year, month] = sastDate.split('-').map(Number);
@@ -951,6 +962,8 @@ const onLogout = async () => {
                 userProfile={activeUserProfile}
                 onViewChange={setCurrentView}
                 eaSession={activeEaSession}
+                lastKnownBridgeBalance={lastKnownBridgeBalance}
+                isBridgeOnline={isBridgeOnline}
                 isLoading={isDataLoading}
                 offlineQueue={offlineQueue}
                 isDemoMode={isDemoMode}
@@ -965,6 +978,8 @@ const onLogout = async () => {
                 onAddNote={handleAddNote}
                 onUpdateTrade={handleUpdateTrade}
                 eaSession={activeEaSession}
+                lastKnownBridgeBalance={lastKnownBridgeBalance}
+                isBridgeOnline={isBridgeOnline}
                 onOpenSettings={() => setCurrentView('settings')}
               />
             )}
@@ -974,7 +989,10 @@ const onLogout = async () => {
                 isDarkMode={isDarkMode}
                 onSave={handleAddTrade}
                 onBatchSave={handleBatchAddTrades}
-                onCancel={() => setCurrentView('dashboard')}
+                onCancel={() => {
+                  setEditingTrade(null);
+                  setCurrentView(editingTrade ? 'history' : 'dashboard');
+                }}
                 initialTrade={editingTrade}
                 currencySymbol={activeUserProfile.currencySymbol}
                 trades={activeTrades}
@@ -1004,6 +1022,8 @@ const onLogout = async () => {
             trades={activeTrades}
             userProfile={activeUserProfile}
             eaSession={activeEaSession}
+            lastKnownBridgeBalance={lastKnownBridgeBalance}
+            isBridgeOnline={isBridgeOnline}
             onViewChange={setCurrentView}
             cashTransactions={cashTransactions}
             dailyPsychologyInsights={dailyPsychologyInsights}

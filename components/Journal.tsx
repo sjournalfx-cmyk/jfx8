@@ -777,6 +777,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                             </button>
                                             <button 
                                                 onClick={() => handleDeleteImage(trade, slot.id as any)}
+                                                type="button"
                                                 className="p-2 bg-rose-500/80 hover:bg-rose-500 text-white rounded-lg transition-all"
                                                 title="Delete Image"
                                             >

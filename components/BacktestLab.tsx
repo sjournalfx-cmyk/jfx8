@@ -99,9 +99,6 @@ const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'none'>('
     })();
 
     const [showWelcome, setShowWelcome] = useState(!hasCachedData);
-    const sourceLabel = dataSource === 'live' ? 'Live sync' : dataSource === 'cache' ? 'Cached replay' : 'No source selected';
-    const shortcutHint = 'M magnet / Shift+L lock / Ctrl+Z undo / Ctrl+Y redo';
-
     // Load cached chart data when dataSource is cache
     useEffect(() => {
         if (dataSource === 'cache') {
@@ -1251,7 +1248,7 @@ setAllData(validData);
     return (
         <div className={`w-full h-full flex flex-col overflow-hidden font-sans ${isDarkMode ? 'bg-black text-zinc-200' : 'bg-white text-slate-900'}`} onMouseUp={handleMouseUp}>
             <div className={`h-16 shrink-0 border-b flex items-center justify-between px-8 z-50 relative shadow-sm ${isDarkMode ? 'border-zinc-800 bg-black/95 backdrop-blur-sm' : 'border-slate-200 bg-white/95 backdrop-blur-sm'}`}>
-                <div className="flex items-center gap-5 w-72">
+                <div className="flex items-center gap-4 w-[18rem]">
                     {(!showWelcome || allData.length > 0) ? (
 <button
                             onClick={() => { setShowWelcome(true); setAllData([]); localStorage.removeItem('jfx_backtest_cached_chart'); localStorage.setItem('jfx_backtest_data_source', 'none'); }}
@@ -1265,16 +1262,11 @@ setAllData(validData);
                             <Zap size={14} fill="currentColor" />
                         </div>
                     )}
-                    <div className="flex flex-col justify-center">
+                    <div className="flex flex-col justify-center min-w-0">
                         <h2 className={`text-base font-black uppercase tracking-tight leading-none ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Backtest Lab</h2>
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            <p className={`text-[9px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Pro Canvas Engine</p>
-                            <span className={`px-1.5 py-0.5 rounded border text-[8px] font-black uppercase tracking-[0.18em] ${dataSource === 'live' ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : dataSource === 'cache' ? 'border-blue-500/30 text-blue-400 bg-blue-500/10' : isDarkMode ? 'border-zinc-700 text-zinc-500 bg-black' : 'border-slate-200 text-slate-500 bg-white'}`}>
-                                {sourceLabel}
-                            </span>
+                        <div className="mt-1 flex items-center gap-2 min-w-0 flex-wrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                         </div>
-                        <p className={`mt-1 text-[9px] uppercase tracking-[0.16em] ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>{shortcutHint}</p>
                     </div>
                 </div>
 

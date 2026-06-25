@@ -15,8 +15,10 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
   const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>([]);
   const [cashTransactionsAvailable, setCashTransactionsAvailable] = useLocalStorage<boolean>('jfx_cash_transactions_available', true);
   const [eaSession, setEASession] = useLocalStorage<EASession | null>(`jfx_ea_session_${userId}`, null);
+  const [lastKnownBridgeBalance, setLastKnownBridgeBalance] = useLocalStorage<number | null>(`jfx_last_bridge_balance_${userId}`, null);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isBridgeOnline, setIsBridgeOnline] = useState(false);
   const [offlineQueue, setOfflineQueue] = useLocalStorage<Trade[]>(`jfx_offline_trades_${userId}`, []);
   const [isSyncing, setIsSyncing] = useState(false);
   const { addToast } = useToast();
@@ -286,12 +288,85 @@ const biasChannel = supabase
     };
   }, [userId, userProfile?.syncKey]);
 
+  // Track bridge online status by checking eaSession freshness (same 15s rule as Sidebar)
+  useEffect(() => {
+    const checkBridgeHealth = () => {
+      if (!userProfile?.eaConnected || !eaSession?.last_updated) {
+        setIsBridgeOnline(false);
+        return;
+      }
+      if (eaSession.data?.isHeartbeat === false) {
+        setIsBridgeOnline(false);
+        return;
+      }
+      const diffSeconds = (Date.now() - new Date(eaSession.last_updated).getTime()) / 1000;
+      setIsBridgeOnline(diffSeconds < 15);
+    };
+
+    checkBridgeHealth();
+    const healthInterval = setInterval(checkBridgeHealth, 2000);
+    return () => clearInterval(healthInterval);
+  }, [eaSession, userProfile?.eaConnected]);
+
+  // Poll the local MQL5 bridge in the background if the bridge connection is active
+  useEffect(() => {
+    if (!userId || !userProfile?.eaConnected) return;
+
+    let isActive = true;
+    const pollLocalBridge = async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        
+        const response = await fetch('http://localhost:8888/api/account', { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const accData = await response.json();
+          if (accData && accData.account && isActive) {
+            // Persist the last known balance so it survives disconnects
+            if (typeof accData.account.balance === 'number') {
+              setLastKnownBridgeBalance(accData.account.balance);
+            }
+            setEASession(prev => {
+              const currentData = prev?.data || {};
+              return {
+                id: prev?.id || 'local-session',
+                sync_key: userProfile.syncKey || '',
+                last_updated: new Date().toISOString(),
+                data: {
+                  ...currentData,
+                  account: {
+                    ...currentData.account,
+                    ...accData.account
+                  }
+                }
+              };
+            });
+          }
+        }
+      } catch (e) {
+        // Ignore fetch errors
+      }
+    };
+
+    const interval = setInterval(pollLocalBridge, 3000);
+    pollLocalBridge();
+
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [userId, userProfile?.eaConnected, userProfile?.syncKey]);
+
   return {
     trades,
     notes,
     dailyBias,
     cashTransactions,
     eaSession,
+    lastKnownBridgeBalance,
+    isBridgeOnline,
     editingTrade,
     isDataLoading,
     setTrades,

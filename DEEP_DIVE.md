@@ -201,7 +201,6 @@ Widgets:
 
 - `Lot Size PnL Distribution` - checks whether bigger size is helping or hurting
 - `Pair Correlation Matrix` - shows relationships between traded symbols
-- `Performance Matrix` - broader performance matrix for pattern discovery
 - `Time Analysis Matrix` - maps results across time buckets
 
 What this section is for:

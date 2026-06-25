@@ -152,12 +152,44 @@ describe('dataService - Trade CRUD', () => {
 
   describe('updateTrade', () => {
     it('should update trade successfully', async () => {
-      // First call for select().single(), second for update().eq()
+      // First call for select().single(), second for update().eq(), third for refresh select().single()
       (supabase.from as any)
         .mockReturnValueOnce(createMockQueryBuilder({ before_screenshot: null, after_screenshot: null }))
-        .mockReturnValueOnce(createMockQueryBuilder({}));
+        .mockReturnValueOnce(createMockQueryBuilder({}))
+        .mockReturnValueOnce(createMockQueryBuilder(mockDbTrade));
 
       await expect(dataService.updateTrade(mockTrade)).resolves.not.toThrow();
+    });
+
+    it('should clear screenshot columns when the trade explicitly removes them', async () => {
+      const selectBuilder = createMockQueryBuilder({
+        ...mockDbTrade,
+        before_screenshot: 'https://old-before.png',
+        after_screenshot: 'https://old-after.png',
+      });
+      const updateBuilder = createMockQueryBuilder({});
+
+      (supabase.from as any)
+        .mockReturnValueOnce(selectBuilder)
+        .mockReturnValueOnce(updateBuilder)
+        .mockReturnValueOnce(createMockQueryBuilder({
+          ...mockDbTrade,
+          before_screenshot: null,
+          after_screenshot: null,
+        }));
+
+      const clearedTrade: Trade = {
+        ...mockTrade,
+        beforeScreenshot: undefined,
+        afterScreenshot: undefined,
+      };
+
+      await expect(dataService.updateTrade(clearedTrade)).resolves.not.toThrow();
+
+      expect(updateBuilder.update).toHaveBeenCalledWith(expect.objectContaining({
+        before_screenshot: null,
+        after_screenshot: null,
+      }));
     });
   });
 

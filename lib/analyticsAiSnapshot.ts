@@ -1,8 +1,9 @@
 import { DailyBias, EASession, Trade, UserProfile } from '../types';
-import { APP_CONSTANTS, normalizePlan } from './constants';
 import { calculateStats } from './statsUtils';
 import { getSafePnL } from './trade-normalization';
 import { getSastHourFromTrade } from './timeUtils';
+import { resolveBridgeBackedInitialBalance } from './bridgeBalance';
+import { calculateDisciplineScore, getDisciplineScoreLabel } from './disciplineScore';
 
 const round = (value: number, decimals = 2) => Number(value.toFixed(decimals));
 
@@ -30,27 +31,32 @@ const stripHtml = (html?: string) => {
   return text || 'All Rules';
 };
 
-const buildEffectiveInitialBalance = (trades: Trade[], userProfile: UserProfile | null, eaSession?: EASession | null) => {
-  const currentPlan = normalizePlan(userProfile?.plan);
-  const isHobby = currentPlan === APP_CONSTANTS.PLANS.HOBBY;
-  const isStandard = currentPlan === APP_CONSTANTS.PLANS.STANDARD;
-  if ((isHobby || isStandard) && eaSession?.data?.account?.balance !== undefined) {
-    const totalPnL = trades.reduce((sum, trade) => sum + getSafePnL(trade.pnl), 0);
-    return eaSession.data.account.balance - totalPnL;
-  }
-  return userProfile?.initialBalance || 0;
-};
+const buildEffectiveInitialBalance = (
+  trades: Trade[],
+  userProfile: UserProfile | null,
+  eaSession?: EASession | null,
+  lastKnownBridgeBalance?: number | null,
+  isBridgeOnline = false
+) => resolveBridgeBackedInitialBalance({
+  trades,
+  userProfile,
+  eaSession,
+  lastKnownBridgeBalance,
+  isBridgeOnline,
+});
 
 export const buildAnalyticsAiSnapshot = (
   rawTrades: Trade[] = [],
   userProfile: UserProfile | null,
   dailyBias: DailyBias[] = [],
-  eaSession?: EASession | null
+  eaSession?: EASession | null,
+  lastKnownBridgeBalance?: number | null,
+  isBridgeOnline = false
 ) => {
   const trades = [...rawTrades].sort((a, b) => getTradeDateTime(a).getTime() - getTradeDateTime(b).getTime());
   const stats = calculateStats(trades);
   const currencySymbol = userProfile?.currencySymbol || '$';
-  const effectiveInitialBalance = buildEffectiveInitialBalance(trades, userProfile, eaSession);
+  const effectiveInitialBalance = buildEffectiveInitialBalance(trades, userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline);
   const currentBalance = round(effectiveInitialBalance + trades.reduce((sum, trade) => sum + getSafePnL(trade.pnl), 0));
 
   let runningBalance = effectiveInitialBalance;
@@ -138,24 +144,17 @@ export const buildAnalyticsAiSnapshot = (
     };
   });
 
-  const disciplineScore = (() => {
-    if (trades.length === 0) return { score: 100, label: 'No Data', message: 'Start logging trades to see your tilt score.' };
-    let totalScore = 0;
-    let count = 0;
-    trades.forEach(trade => {
-      if (trade.planAdherence === 'Followed Exactly') totalScore += 100;
-      else if (trade.planAdherence === 'Minor Deviation') totalScore += 50;
-      else if (trade.planAdherence === 'Major Deviation') totalScore += 0;
-      else if (trade.planAdherence === 'No Plan') totalScore += 20;
-      else return;
-      count += 1;
-    });
-    const score = count > 0 ? Math.round(totalScore / count) : 100;
-    if (score >= 90) return { score, label: 'Elite', message: 'Ice in your veins. Keep it up.' };
-    if (score >= 75) return { score, label: 'Good', message: 'Solid discipline, watch out for small slips.' };
-    if (score >= 60) return { score, label: 'Average', message: 'Inconsistent. Focus on following your plan.' };
-    return { score, label: 'Poor', message: 'Your discipline needs immediate attention.' };
-  })();
+  const disciplineScoreValue = calculateDisciplineScore(trades);
+  const disciplineScore = disciplineScoreValue === null
+    ? { score: 100, label: 'No Data', message: 'Start logging trades to see your tilt score.' }
+    : (() => {
+        const score = disciplineScoreValue;
+        const label = getDisciplineScoreLabel(score);
+        if (score >= 90) return { score, label, message: 'Ice in your veins. Keep it up.' };
+        if (score >= 75) return { score, label, message: 'Solid discipline, watch out for small slips.' };
+        if (score >= 60) return { score, label, message: 'Inconsistent. Focus on following your plan.' };
+        return { score, label, message: 'Your discipline needs immediate attention.' };
+      })();
 
   const momentum = (() => {
     const grouped: { id: string; result: string; pair: string }[] = [];
@@ -358,16 +357,6 @@ export const buildAnalyticsAiSnapshot = (
     }))
     .sort((a, b) => b.pnl - a.pnl);
 
-  const performanceMatrix = pairStats.map(symbol => ({
-    symbol: symbol.pair,
-    months: Array.from({ length: 12 }, (_, monthIndex) => {
-      const pnl = trades
-        .filter(trade => new Date(trade.date).getFullYear() === currentYear && new Date(trade.date).getMonth() === monthIndex && trade.pair.toUpperCase() === symbol.pair)
-        .reduce((sum, trade) => sum + getSafePnL(trade.pnl), 0);
-      return round(pnl);
-    }),
-  }));
-
   const comparisonLeaders = {
     symbols: pairStats.slice(0, 5),
     strategies: strategyEfficiency.slice(0, 5),
@@ -398,7 +387,6 @@ export const buildAnalyticsAiSnapshot = (
       'P/L by Plan Adherence',
       'Pair Distribution Treemap',
       'Strategy Efficiency',
-      'Performance Matrix',
       'Execution Performance Table',
       'Comparison View',
       'Performance By Session',
@@ -462,7 +450,6 @@ export const buildAnalyticsAiSnapshot = (
     },
     advanced: {
       strategyEfficiency,
-      performanceMatrix,
     },
     comparison: comparisonLeaders,
     reports: {
