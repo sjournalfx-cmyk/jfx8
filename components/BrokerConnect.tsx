@@ -26,6 +26,9 @@ interface BrokerStatus {
   error?: string;
 }
 
+const generateSyncKey = () =>
+  `JFX-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
 const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, onUpdateProfile, embedded, autoConnect, onDisconnect, userId }) => {
   const [server, setServer] = useState(userProfile?.broker_server || '');
   const [login, setLogin] = useState(userProfile?.broker_login || '');
@@ -79,6 +82,15 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
     else setLastSyncAgo(`${Math.floor(diff / 86400)}d ago`);
   };
 
+  const ensureSyncKey = async () => {
+    if (!userProfile.syncKey) {
+      const newKey = generateSyncKey();
+      await onUpdateProfile({ ...userProfile, syncKey: newKey });
+      return newKey;
+    }
+    return userProfile.syncKey;
+  };
+
   const handleConnect = async () => {
     if (!server || !login || !password) {
       setError('Please fill in all fields');
@@ -88,6 +100,8 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
     setError('');
 
     try {
+      const syncKey = await ensureSyncKey();
+
       const storeRes = await fetch(`${VPS_API_URL}/api/broker/credentials?user_id=${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': VPS_API_KEY },
@@ -104,7 +118,7 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
         headers: { 'Content-Type': 'application/json', 'X-API-Key': VPS_API_KEY },
         body: JSON.stringify({
           user_id: userId,
-          sync_key: userProfile.syncKey || ''
+          sync_key: syncKey
         })
       });
 
@@ -141,12 +155,13 @@ const BrokerConnect: React.FC<BrokerConnectProps> = ({ isDarkMode, userProfile, 
   const handleSync = async () => {
     setSyncing(true);
     try {
+      const syncKey = await ensureSyncKey();
       const res = await fetch(`${VPS_API_URL}/api/broker/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': VPS_API_KEY },
         body: JSON.stringify({
           user_id: userId,
-          sync_key: userProfile.syncKey || ''
+          sync_key: syncKey
         })
       });
       if (res.ok) {
