@@ -42,11 +42,22 @@ const ChartGrid = lazy(() => import('./components/ChartGrid'));
 const Notes = lazy(() => import('./components/Notes'));
 
 const AppContent: React.FC = () => {
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [currentView, setCurrentView] = useState(() => {
+    return 'dashboard';
+  });
   const [settingsTab, setSettingsTab] = useState<'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'help'>('profile');
   const { addToast } = useToast();
   const [isDemoMode, setIsDemoMode] = useLocalStorage<boolean>('jfx_demo_mode', false);
-  const [showBetaSplash, setShowBetaSplash] = useState(true);
+  const [showBetaSplash, setShowBetaSplash] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      // Suppress splash immediately when returning from cTrader OAuth redirect
+      if (params.has('code') || window.location.search.includes('ctrader_token')) {
+        return false;
+      }
+    }
+    return true;
+  });
 
   const [currentMigrationVersion] = useState('v20250201.1');
 
@@ -74,6 +85,62 @@ const AppContent: React.FC = () => {
       capture_pageview: false,
     });
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (!code || params.has('ctrader_ready')) return;
+
+    // ─── CRITICAL: clear the URL synchronously BEFORE the async import ───────
+    // React 18 StrictMode runs effects twice in dev (mount → unmount → mount).
+    // Clearing the URL here means the second invocation finds no ?code= and
+    // exits via the guard above, so the single-use OAuth code is only sent once.
+    window.history.replaceState({}, '', window.location.pathname);
+
+    // Ensure splash is hidden immediately
+    setShowBetaSplash(false);
+
+    import('./services/ctraderService').then(async ({ exchangeCode }) => {
+      let ok = false;
+      let errDetail = '';
+      try {
+        const result = await exchangeCode(code);
+        if (typeof result === 'object' && result !== null) {
+          ok = (result as any).ok === true;
+          errDetail = (result as any).error || '';
+        } else {
+          ok = (result as unknown) as boolean;
+        }
+      } catch (e: any) {
+        ok = false;
+        errDetail = e?.message || '';
+      }
+
+      if (ok) {
+        // Request storage access first — after OAuth redirect Safari/Firefox may block localStorage
+        try {
+          if (typeof document.requestStorageAccess === 'function') {
+            await document.requestStorageAccess().catch(() => {});
+          }
+        } catch { /* ignore */ }
+        // Set flag BEFORE navigating so Bridge's useState initializer reads it on first mount
+        try { localStorage.setItem('ctrader_just_authorized', 'true'); } catch { /* blocked */ }
+        try { sessionStorage.setItem('ctrader_just_authorized', 'true'); } catch { /* blocked */ }
+        setCurrentView('ea-setup');
+      } else {
+        addToast({
+          type: 'error',
+          title: 'cTrader Auth Failed',
+          message: errDetail
+            ? `Token exchange failed: ${errDetail}`
+            : 'Token exchange failed. Please try connecting again.',
+          duration: 8000,
+        });
+        setCurrentView('ea-setup');
+      }
+    });
+  }, []);
+
 
   // Track view changes as pageviews
   useEffect(() => {
@@ -1099,6 +1166,7 @@ const onLogout = async () => {
                 onDeduplicate={handleDeduplicate}
                 initialTab={settingsTab}
                 migrationVersion={currentMigrationVersion}
+                eaSession={activeEaSession}
               />
             )}
           </Suspense>

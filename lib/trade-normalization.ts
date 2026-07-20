@@ -82,12 +82,48 @@ type NormalizeTradeOptions = {
 
 export const getSafePnL = (value: unknown): number => toFiniteNumber(value, 0);
 
+export const detectAssetType = (symbol: string): AssetType => {
+  if (!symbol) return 'Forex';
+  const sym = symbol.toUpperCase().trim();
+  
+  // Crypto check
+  if (sym.startsWith('BTC') || sym.startsWith('ETH') || sym.startsWith('SOL') || sym.startsWith('XRP') || sym.startsWith('ADA') || sym.startsWith('DOGE') || sym.includes('USD') && (sym.startsWith('LTC') || sym.startsWith('BNB') || sym.startsWith('LINK') || sym.startsWith('DOT'))) {
+    return 'Crypto';
+  }
+  if (sym === 'CRYPTO' || sym.endsWith('USD') && (sym.startsWith('BTC') || sym.startsWith('ETH') || sym.startsWith('SOL'))) {
+    return 'Crypto';
+  }
+
+  // Commodities (Metals, Energy, Softs)
+  const metals = ['XAU', 'XAG', 'XPT', 'XPD', 'GOLD', 'SILVER', 'PLATINUM', 'PALLADIUM', 'COPPER'];
+  if (metals.some(m => sym.includes(m))) return 'Commodities';
+  
+  const energies = ['USOUSD', 'UKOUSD', 'OIL', 'WTI', 'BRENT', 'NATGAS', 'NGAS'];
+  if (energies.some(e => sym.includes(e))) return 'Commodities';
+
+  // Indices
+  const indices = ['US500', 'SPX', 'SPX500', 'US30', 'DJI', 'DOW', 'NAS100', 'NDX', 'USTEC', 'GER30', 'DE30', 'GER40', 'DE40', 'UK100', 'FTSE', 'JPN225', 'N225', 'HK50', 'EUSTX50', 'ESTX50'];
+  if (indices.some(i => sym.includes(i))) return 'Indices';
+
+  // Forex
+  const forexRegex = /^[A-Z]{6}(?:\.[A-Z0-9]+)?$/i;
+  if (forexRegex.test(sym)) {
+    return 'Forex';
+  }
+
+  // Default fallback
+  return 'Forex';
+};
+
 export const normalizeTrade = (
   trade: Partial<Trade>,
   fallback: Partial<Trade> = {},
   options: NormalizeTradeOptions = {}
 ): Trade => {
-  const assetType = normalizeAssetType(trade.assetType, normalizeAssetType(fallback.assetType));
+  let assetType = normalizeAssetType(trade.assetType, normalizeAssetType(fallback.assetType));
+  if (trade.pair) {
+    assetType = detectAssetType(trade.pair);
+  }
   const date = toSafeString(trade.date, toSafeString(fallback.date, DEFAULT_DATE));
   const time = toSafeString(trade.time, toSafeString(fallback.time, DEFAULT_TIME));
   const sessionCandidate = toSafeString(trade.session, toSafeString(fallback.session, ''));

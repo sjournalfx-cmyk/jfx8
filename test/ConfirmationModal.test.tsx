@@ -44,10 +44,12 @@ describe('ConfirmationModal', () => {
     expect(defaultProps.onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('should call onCancel when close button is clicked', () => {
+  it('should call onCancel when Escape key is pressed on the dialog', () => {
     render(<ConfirmationModal {...defaultProps} />);
-    
-    fireEvent.click(screen.getByLabelText('Close dialog'));
+
+    // The modal has no close/X button; Escape is the keyboard dismiss path
+    const dialog = screen.getByRole('dialog');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(defaultProps.onCancel).toHaveBeenCalledTimes(1);
   });
 

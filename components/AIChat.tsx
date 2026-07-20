@@ -71,8 +71,8 @@ type StructuredBlock =
   | { type: 'text'; content: string }
   | { type: 'widget'; widget: StructuredWidget };
 
-const WIDGET_OPEN_REGEX = /\[WIDGET:MERMAID(?::([^\]]+))?\]/g;
-const WIDGET_CLOSE_REGEX = /\[\/WIDGET:MERMAID\]|\[\/WIDGET\]/g;
+const WIDGET_OPEN_REGEX = /\[WIDGET:(MERMAID)(?::([^\]]+))?\]/g;
+const WIDGET_CLOSE_REGEX = /\[\/WIDGET:(MERMAID)\]|\[\/WIDGET\]/g;
 
 const parseChecklistItems = (body: string) => {
   const normalized = body.replace(/\r\n/g, '\n').trim();

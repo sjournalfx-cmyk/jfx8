@@ -228,172 +228,9 @@ Create directories:
 mkdir -p /home/jfxservice/manager
 ```
 
-Create `/home/jfxservice/manager/main.py`:
+Use the enhanced version from `vps-manager-main.py` in the project root (or copy from below).
 
-```python
-"""
-JournalFX MT5 Bridge Manager
-Orchestrates mt5-bridge instances and proxies to JournalFX frontend.
-"""
-
-import os
-import httpx
-from fastapi import FastAPI, HTTPException, Depends, Security
-from fastapi.security import APIKeyHeader
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional
-
-# ============================================================
-# Configuration
-# ============================================================
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
-SYNC_EDGE_FUNCTION = f"{SUPABASE_URL}/functions/v1/sync-trades"
-VPS_API_KEY = os.environ.get("VPS_API_KEY", "change-me")
-MT5_BRIDGE_URL = os.environ.get("MT5_BRIDGE_URL", "http://127.0.0.1:8001")
-
-# ============================================================
-# FastAPI App
-# ============================================================
-app = FastAPI(title="JournalFX MT5 Manager", version="1.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-async def verify_key(api_key: str = Security(api_key_header)):
-    if not api_key or api_key != VPS_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return api_key
-
-# ============================================================
-# Models
-# ============================================================
-class TradeRequest(BaseModel):
-    symbol: str
-    volume: float = 0.01
-    direction: str = "BUY"
-    sl: Optional[float] = 0
-    tp: Optional[float] = 0
-
-class CloseRequest(BaseModel):
-    ticket: int
-
-# ============================================================
-# MT5 Bridge Proxy
-# ============================================================
-async def proxy_to_bridge(path: str, method: str = "GET", body: dict = None):
-    """Proxy request to mt5-bridge."""
-    url = f"{MT5_BRIDGE_URL}{path}"
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            if method == "GET":
-                resp = await client.get(url)
-            elif method == "POST":
-                resp = await client.post(url, json=body)
-            else:
-                raise HTTPException(405, "Method not allowed")
-
-            if resp.status_code >= 400:
-                raise HTTPException(resp.status_code, resp.text)
-            return resp.json()
-        except httpx.RequestError as e:
-            raise HTTPException(503, f"MT5 bridge unreachable: {str(e)}")
-
-@app.get("/health")
-async def health():
-    """Health check."""
-    try:
-        bridge_health = await proxy_to_bridge("/health")
-        return {"status": "ok", "bridge": bridge_health}
-    except:
-        return {"status": "degraded", "bridge": "unreachable"}
-
-@app.get("/api/mt5/account")
-async def get_account(api_key: str = Depends(verify_key)):
-    """Get MT5 account info."""
-    return await proxy_to_bridge("/account")
-
-@app.get("/api/mt5/positions")
-async def get_positions(api_key: str = Depends(verify_key)):
-    """Get open positions."""
-    return await proxy_to_bridge("/positions")
-
-@app.get("/api/mt5/history/{symbol}")
-async def get_history(
-    symbol: str,
-    api_key: str = Depends(verify_key)
-):
-    """Get position history."""
-    return await proxy_to_bridge(f"/history/{symbol}")
-
-@app.get("/api/mt5/rates/{symbol}")
-async def get_rates(
-    symbol: str,
-    timeframe: str = "M1",
-    count: int = 100,
-    api_key: str = Depends(verify_key)
-):
-    """Get historical rates."""
-    return await proxy_to_bridge(f"/rates/{symbol}?timeframe={timeframe}&count={count}")
-
-@app.get("/api/mt5/tick/{symbol}")
-async def get_tick(symbol: str, api_key: str = Depends(verify_key)):
-    """Get latest tick."""
-    return await proxy_to_bridge(f"/tick/{symbol}")
-
-@app.post("/api/mt5/order")
-async def place_order(order: TradeRequest, api_key: str = Depends(verify_key)):
-    """Place a trade order."""
-    return await proxy_to_bridge("/order", "POST", order.model_dump())
-
-@app.post("/api/mt5/close")
-async def close_position(req: CloseRequest, api_key: str = Depends(verify_key)):
-    """Close a position by ticket."""
-    return await proxy_to_bridge("/close", "POST", req.model_dump())
-
-@app.post("/api/mt5/sync")
-async def sync_trades(api_key: str = Depends(verify_key)):
-    """Sync trades from MT5 to Supabase."""
-    account = await proxy_to_bridge("/account")
-    positions = await proxy_to_bridge("/positions")
-
-    payload = {
-        "account": account,
-        "openPositions": positions.get("positions", []),
-        "trades": [],
-        "isHeartbeat": True,
-        "timestamp": None
-    }
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            SYNC_EDGE_FUNCTION,
-            json=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-                "Sync-Key": api_key
-            }
-        )
-
-    return {"synced": resp.status_code == 200, "status": resp.status_code}
-
-@app.on_event("startup")
-async def startup():
-    print("Manager started. MT5 bridge expected at:", MT5_BRIDGE_URL)
-
-@app.on_event("shutdown")
-async def shutdown():
-    print("Manager shutting down.")
-```
+**`/home/jfxservice/manager/main.py`** — copy from `vps-manager-main.py`:
 
 Create requirements:
 
@@ -603,9 +440,44 @@ curl -H "X-API-Key: your-key" http://localhost:8000/api/mt5/account
 | GET | `/api/mt5/tick/{symbol}` | Latest tick/price | Yes |
 | POST | `/api/mt5/order` | Open trade | Yes |
 | POST | `/api/mt5/close` | Close position | Yes |
-| POST | `/api/mt5/sync` | Sync trades to Supabase | Yes |
+| POST | `/api/mt5/sync` | Sync trades to Supabase (legacy) | Yes |
+| POST | `/api/broker/credentials?user_id=` | Store broker credentials | Yes |
+| POST | `/api/broker/sync` | Trigger sync with `user_id` + `sync_key` | Yes |
+| GET | `/api/broker/status/{user_id}` | Get current broker connection status | Yes |
+| POST | `/api/broker/disconnect/{user_id}` | Disconnect broker | Yes |
+| GET | `/api/broker/diagnostics` | Full VPS diagnostics (MT5, bridge, system) | Yes |
 
 All authenticated endpoints require header: `X-API-Key: <VPS_API_KEY>`
+
+### Account response contract
+
+For the frontend broker-direct screen, `/api/mt5/account` should return at least:
+
+```json
+{
+    "account": {
+      "login": 10010736382,
+      "name": "moatshe tester",
+      "server": "MetaQuotes-Demo",
+      "company": "Forex Hedged USD (1:100)",
+      "balance": 100000,
+      "equity": 100000,
+      "currency": "USD",
+      "deposit": 100000,
+      "investor": "1tE_KzHt"
+    },
+    "broker_login": "10010736382",
+    "broker_server": "MetaQuotes-Demo",
+    "account_name": "moatshe tester",
+    "account_type": "Forex Hedged USD (1:100)",
+    "account_status": "New account opened",
+    "deposit": 100000,
+    "investor": "1tE_KzHt",
+    "last_sync_at": "2026-06-26T00:00:00Z",
+    "broker_sync_enabled": true,
+    "mt_terminal_status": "connected"
+  }
+```
 
 ---
 

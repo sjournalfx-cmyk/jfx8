@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   User,
   Globe,
@@ -25,7 +25,7 @@ import {
   ExternalLink,
   Clock,
 } from 'lucide-react';
-import { UserProfile } from '../types';
+import { UserProfile, EASession } from '../types';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
 import { Select } from './Select';
 import { normalizeThemePreference } from '../lib/theme';
@@ -73,6 +73,7 @@ interface SettingsProps {
   onDeduplicate?: () => Promise<void>;
   initialTab?: SettingsTab;
   migrationVersion?: string;
+  eaSession?: EASession | null;
 }
 
 const tabs: Array<{ id: SettingsTab; label: string; icon: React.ElementType; desc: string }> = [
@@ -115,6 +116,7 @@ const Settings: React.FC<SettingsProps> = ({
   tradesCount = 0,
   onDeduplicate,
   initialTab = 'profile',
+  eaSession,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [formData, setFormData] = useState<UserProfile>({ ...userProfile, plan: normalizePlan(userProfile.plan) });
@@ -126,6 +128,18 @@ const Settings: React.FC<SettingsProps> = ({
   const [feedbackCategory, setFeedbackCategory] = useState('Bug Report');
   const [feedbackSubject, setFeedbackSubject] = useState('');
   const [feedbackMessage, setFeedbackMessage] = useState('');
+
+  const localBrokerInfo = useMemo(() => {
+    if (!eaSession?.data?.account) return null;
+    return {
+      login: eaSession.data.account.login || userProfile.broker_login,
+      server: eaSession.data.account.server || userProfile.broker_server,
+      balance: eaSession.data.account.balance,
+      equity: eaSession.data.account.equity,
+      currency: eaSession.data.account.currency || 'USD',
+    };
+  }, [eaSession, userProfile.broker_login, userProfile.broker_server]);
+
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -650,6 +664,34 @@ const Settings: React.FC<SettingsProps> = ({
                             }`}
                           />
                         </button>
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {localBrokerInfo && (
+                  <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                    <h3 className="text-xs font-black uppercase tracking-[0.2em] mb-4 text-[#FF4F01]">Connected Broker Status</h3>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-zinc-500">Account Login</p>
+                        <p className="text-sm font-semibold">{localBrokerInfo.login}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-zinc-500">Server</p>
+                        <p className="text-sm font-semibold">{localBrokerInfo.server}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-zinc-500">Balance</p>
+                        <p className="text-sm font-semibold font-mono">
+                          {localBrokerInfo.balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })} {localBrokerInfo.currency}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-zinc-500">Equity</p>
+                        <p className="text-sm font-semibold font-mono">
+                          {localBrokerInfo.equity?.toLocaleString(undefined, { minimumFractionDigits: 2 })} {localBrokerInfo.currency}
+                        </p>
                       </div>
                     </div>
                   </section>

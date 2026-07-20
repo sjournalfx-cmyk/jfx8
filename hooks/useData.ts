@@ -329,7 +329,11 @@ const biasChannel = supabase
               setLastKnownBridgeBalance(accData.account.balance);
             }
             setEASession(prev => {
-              const currentData = prev?.data || {};
+              const currentData = prev?.data || {
+                account: {} as any,
+                openPositions: [],
+                trades: []
+              };
               return {
                 id: prev?.id || 'local-session',
                 sync_key: userProfile.syncKey || '',
@@ -337,7 +341,7 @@ const biasChannel = supabase
                 data: {
                   ...currentData,
                   account: {
-                    ...currentData.account,
+                    ...(currentData.account || {}),
                     ...accData.account
                   }
                 }

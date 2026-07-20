@@ -75,7 +75,6 @@ export const useAuth = () => {
         }
         if (!mappedProfile.timezone) {
           mappedProfile.timezone = userTz;
-          dataService.updateProfile({ timezone: userTz }).catch(() => {});
         }
 
         setUserProfile(mappedProfile);
@@ -124,7 +123,8 @@ export const useAuth = () => {
     const normalizedProfile = { ...profile, plan: normalizePlan(profile.plan) };
     setUserProfile(normalizedProfile);
     try {
-      await dataService.updateProfile(normalizedProfile);
+      const { timezone: _timezone, ...profileWithoutTimezone } = normalizedProfile;
+      await dataService.updateProfile(profileWithoutTimezone);
     } catch (error) {
       console.error("Error saving profile:", error);
       throw error;
@@ -134,7 +134,8 @@ export const useAuth = () => {
   const handleUpdateProfile = async (profile: UserProfile) => {
     try {
       const normalizedProfile = { ...profile, plan: normalizePlan(profile.plan) };
-      await dataService.updateProfile(normalizedProfile);
+      const { timezone: _timezone, ...profileWithoutTimezone } = normalizedProfile;
+      await dataService.updateProfile(profileWithoutTimezone);
       setUserProfile(normalizedProfile);
     } catch (error) {
       console.error("Error updating profile:", error);

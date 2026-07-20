@@ -2,12 +2,14 @@ import path from 'path';
 import fs from 'fs';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fetchPublicEconomicCalendar } from './lib/economicCalendar.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const _require = createRequire(import.meta.url);
 
 const readNvidiaKey = () => {
   try {
@@ -37,6 +39,19 @@ const readFinnhubKey = () => {
     const contents = fs.readFileSync(envPath, 'utf8');
     const match = contents.match(/^FINNHUB_API_KEY=(?:"([^"]+)"|([^"\r\n]+))/m);
     return match?.[1] || match?.[2] || '';
+  } catch {
+    return '';
+  }
+};
+
+const readCtraderEnv = (key) => {
+  try {
+    const envPath = path.resolve(process.cwd(), '.env.local');
+    const contents = fs.readFileSync(envPath, 'utf8');
+    const match = contents.match(new RegExp(`^${key}=("(?:[^"\\\\]|\\\\.)*"|[^"\\r\\n]+)`, 'm'));
+    if (!match) return '';
+    const val = match[1];
+    return val.startsWith('"') && val.endsWith('"') ? val.slice(1, -1) : val;
   } catch {
     return '';
   }
@@ -284,14 +299,49 @@ const mt5PythonPlugin = () => {
         }
       });
 
+      const routeCache = new Map();
+      const CACHE_TTL_MS = 6000;
+
+      const getCachedOrRun = async (cacheKey, runFn) => {
+        const cached = routeCache.get(cacheKey);
+        const now = Date.now();
+        if (cached && (now - cached.timestamp < CACHE_TTL_MS)) {
+          return cached.data;
+        }
+        const data = await runFn();
+        if (data && !data.error) {
+          routeCache.set(cacheKey, { timestamp: Date.now(), data });
+        }
+        return data;
+      };
+
       server.middlewares.use('/api/mt5/positions', async (req, res) => {
         try {
-          const data = await runPythonScript('mt5.py', ['positions']);
+          const cacheKey = '/api/mt5/positions';
+          const data = await getCachedOrRun(cacheKey, () => runPythonScript('mt5.py', ['positions']));
+
+          // Map to EAPosition shape expected by EASetup.tsx (open_price not price_open)
+          const mapped = (data.positions || []).map(p => ({
+            ticket: p.ticket,
+            symbol: p.symbol,
+            type: p.type,
+            volume: p.volume,
+            open_price: p.price_open,
+            current_price: p.price_current,
+            profit: p.profit,
+            sl: p.sl,
+            tp: p.tp,
+            magic: p.magic,
+            comment: p.comment,
+            time: p.time,
+          }));
 
           res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
           res.end(JSON.stringify({
-            positions: data.positions || [],
-            count: data.positions?.length || 0,
+            openPositions: mapped,
+            positions: mapped,
+            count: mapped.length,
           }));
         } catch (error) {
           res.setHeader('Content-Type', 'application/json');
@@ -299,6 +349,86 @@ const mt5PythonPlugin = () => {
           res.end(JSON.stringify({ error: error.message }));
         }
       });
+
+      // /api/mt5/account — account info in EASetup-compatible shape
+      server.middlewares.use('/api/mt5/account', async (req, res) => {
+        try {
+          const cacheKey = '/api/mt5/account';
+          const data = await getCachedOrRun(cacheKey, () => runPythonScript('mt5.py', []));
+
+          if (data.error) throw new Error(data.error);
+
+          const account = {
+            login: data.login,
+            server: data.server,
+            balance: data.balance,
+            equity: data.equity,
+            margin: data.margin,
+            free_margin: data.free_margin,
+            profit: data.profit,
+            currency: data.currency,
+            name: data.name,
+            company: data.company,
+            is_demo: true,
+          };
+
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({
+            isHeartbeat: true,
+            account,
+            // Also expose flat fields for BrokerConnect compatibility
+            broker_login: String(data.login),
+            broker_server: data.server,
+            account_name: data.name,
+            account_type: data.company,
+            balance: data.balance,
+            equity: data.equity,
+            currency: data.currency,
+            broker_sync_enabled: true,
+            mt_terminal_status: 'connected',
+            last_sync_at: new Date().toISOString(),
+          }));
+        } catch (error) {
+          res.setHeader('Content-Type', 'application/json');
+          res.statusCode = 400;
+          res.end(JSON.stringify({ connected: false, error: error.message }));
+        }
+      });
+
+      // /api/mt5/history — closed deals in EASetup-compatible shape
+      server.middlewares.use('/api/mt5/history', async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
+          const fromVal = requestUrl.searchParams.get('from') || '';
+          const toVal = requestUrl.searchParams.get('to') || '';
+
+          const cacheKey = `/api/mt5/history?from=${fromVal}&to=${toVal}`;
+          const data = await getCachedOrRun(cacheKey, () => {
+            const args = [];
+            if (fromVal && toVal) {
+              args.push(fromVal, toVal);
+            }
+            return runPythonScript('get_history.py', args);
+          });
+
+          const deals = data.deals || [];
+
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({
+            isHeartbeat: false,
+            trades: deals,   // EASetup reads histData.trades
+            deals,
+          }));
+        } catch (error) {
+          res.setHeader('Content-Type', 'application/json');
+          res.statusCode = 400;
+          res.end(JSON.stringify({ trades: [], deals: [], error: error.message }));
+        }
+      });
+
+
 
       server.middlewares.use('/api/mt5/open', async (req, res) => {
         if (req.method !== 'POST') {
@@ -370,6 +500,290 @@ const mt5PythonPlugin = () => {
           res.end(JSON.stringify({ error: error.message }));
         }
       });
+
+const readCtraderEnv = (key) => {
+  try {
+    const envPath = path.resolve(process.cwd(), '.env.local');
+    const contents = fs.readFileSync(envPath, 'utf8');
+    const match = contents.match(new RegExp(`^${key}=("[^"]*"|[^"\\r\\n]+)`, 'm'));
+    if (!match) return '';
+    const val = match[1];
+    return val.startsWith('"') && val.endsWith('"') ? val.slice(1, -1) : val;
+  } catch {
+    return '';
+  }
+};
+
+      // Redirect cTrader OAuth callback to root so Vite serves the SPA through its normal pipeline
+      server.middlewares.use('/api/ctrader/callback', async (req, res) => {
+        const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
+        const code = requestUrl.searchParams.get('code');
+        const target = code ? `/?code=${encodeURIComponent(code)}` : '/';
+        res.statusCode = 302;
+        res.setHeader('Location', target);
+        res.end();
+      });
+
+      // DEV ONLY: diagnostic endpoint — visit http://localhost:3000/api/ctrader/debug-env
+      server.middlewares.use('/api/ctrader/debug-env', (req, res) => {
+        const cid  = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+        const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+        const mask = (v) => v ? `${v.slice(0, 6)}…${v.slice(-4)} (len=${v.length})` : '⚠ MISSING';
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+          VITE_CTRADER_CLIENT_ID:     mask(cid),
+          VITE_CTRADER_CLIENT_SECRET: mask(csec),
+          redirect_uri_used: 'http://localhost:3000/api/ctrader/callback',
+          note: 'Compare these with your cTrader Open API portal — https://openapi.ctrader.com',
+        }, null, 2));
+      });
+
+      server.middlewares.use('/api/ctrader/exchange', async (req, res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: 'Method not allowed' }));
+          return;
+        }
+
+        const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
+        const code = requestUrl.searchParams.get('code');
+        const redirectUri = requestUrl.searchParams.get('redirect_uri');
+
+        if (!code || !redirectUri) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'Missing code or redirect_uri' }));
+          return;
+        }
+
+        const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+        const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+
+        if (!cid || !csec) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'cTrader credentials not found in .env.local' }));
+          return;
+        }
+
+        try {
+          const tokenUrl = new URL('https://openapi.ctrader.com/apps/token');
+          tokenUrl.searchParams.set('grant_type', 'authorization_code');
+          tokenUrl.searchParams.set('code', code);
+          tokenUrl.searchParams.set('redirect_uri', redirectUri);
+          tokenUrl.searchParams.set('client_id', cid);
+          tokenUrl.searchParams.set('client_secret', csec);
+
+          console.log('[cTrader] exchanging code via', tokenUrl.toString().replace(csec, '***'));
+
+          const tokenRes = await fetch(tokenUrl.toString(), {
+            headers: { Accept: 'application/json' },
+          });
+
+          const rawText = await tokenRes.text();
+          let body;
+          try { body = JSON.parse(rawText); } catch { body = {}; }
+
+          console.log('[cTrader] token response', tokenRes.status, body);
+
+          if (!tokenRes.ok) {
+            const errMsg = body?.description || body?.error_description || body?.error || rawText;
+            console.warn('[cTrader] exchange HTTP error:', tokenRes.status, errMsg);
+            res.statusCode = 502;
+            res.end(JSON.stringify({ error: errMsg || 'Token exchange failed', status: tokenRes.status, details: body }));
+            return;
+          }
+
+          // cTrader sometimes returns HTTP 200 with an errorCode field
+          if (body.errorCode) {
+            const errMsg = body.description || body.errorCode;
+            console.warn('[cTrader] exchange errorCode:', body.errorCode, body.description);
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: errMsg, errorCode: body.errorCode }));
+            return;
+          }
+
+          res.end(JSON.stringify({
+            accessToken: body.accessToken,
+            refreshToken: body.refreshToken,
+            expiresIn: body.expiresIn,
+          }));
+        } catch (err) {
+          console.error('[cTrader] exchange exception:', err);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err.message || 'Exchange failed' }));
+        }
+      });
+
+      // -----------------------------------------------------------------------
+      // /api/ctrader/accounts — server-side account fetching via Node.js WebSocket
+      // Bypasses browser port/TLS restrictions entirely.
+      // -----------------------------------------------------------------------
+      server.middlewares.use('/api/ctrader/accounts', async (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+        if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
+
+        const authHeader = req.headers['authorization'] || '';
+        const accessToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+        if (!accessToken) {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ error: 'Missing Authorization header' }));
+          return;
+        }
+
+        const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+        const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+        if (!cid || !csec) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'cTrader credentials not configured' }));
+          return;
+        }
+
+        const fetchFromEnv = (host) => new Promise((resolve) => {
+          let WebSocketLib;
+          try { WebSocketLib = _require('ws'); } catch (e) {
+            console.error('[cTrader] Failed to require ws:', e.message);
+            resolve([]); return;
+          }
+
+          console.log(`[cTrader] Connecting to wss://${host}:5036 ...`);
+          const ws = new WebSocketLib(`wss://${host}:5036`);
+          const timeout = setTimeout(() => {
+            console.warn(`[cTrader] Timeout connecting to ${host}`);
+            try { ws.close(); } catch {}
+            resolve([]);
+          }, 15000);
+          let settled = false;
+          const done = (val) => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timeout);
+              try { ws.close(); } catch {}
+              resolve(val);
+            }
+          };
+
+          let msgId = 0;
+          const pending = new Map();
+          const send = (payloadType, payload) => new Promise((res2, rej2) => {
+            const clientMsgId = `srv_${++msgId}`;
+            pending.set(clientMsgId, { resolve: res2, reject: rej2 });
+            const msg = JSON.stringify({ clientMsgId, payloadType, payload });
+            console.log(`[cTrader][${host}] SEND payloadType=${payloadType}`);
+            ws.send(msg);
+          });
+
+          ws.on('message', (data) => {
+            try {
+              const msg = JSON.parse(data.toString());
+              console.log(`[cTrader][${host}] RECV payloadType=${msg.payloadType} clientMsgId=${msg.clientMsgId}`);
+              if (msg.clientMsgId && pending.has(msg.clientMsgId)) {
+                const p = pending.get(msg.clientMsgId);
+                pending.delete(msg.clientMsgId);
+                if (msg.payloadType === 2142) p.reject(new Error(msg.payload?.errorCode || 'cTrader error'));
+                else p.resolve(msg.payload);
+              }
+            } catch (e) { console.warn(`[cTrader][${host}] parse error:`, e.message); }
+          });
+
+          ws.on('error', (e) => { console.error(`[cTrader][${host}] WS error:`, e.message); done([]); });
+          ws.on('close', (code, reason) => { console.log(`[cTrader][${host}] WS closed code=${code} reason=${reason}`); done([]); });
+          ws.on('open', async () => {
+            console.log(`[cTrader][${host}] WS connected`);
+            try {
+              const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+              const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+              // 1. Authenticate the application
+              const appAuthRes = await send(2100, { clientId: cid, clientSecret: csec });
+              console.log(`[cTrader][${host}] App auth response:`, JSON.stringify(appAuthRes));
+              // 2. Get accounts by token (ProtoOAGetAccountListByAccessTokenReq = 2149)
+              const accountList = await send(2149, { accessToken });
+              console.log(`[cTrader][${host}] Account list:`, JSON.stringify(accountList));
+              const raw = accountList?.ctidTraderAccount || [];
+              const isDemo = host.includes('demo');
+              const mapped = raw.map((acc) => ({
+                ctidTraderAccountId: Number(acc.ctidTraderAccountId),
+                login: String(acc.traderLogin ?? acc.login ?? ''),
+                server: acc.server || '',
+                isDemo: acc.isLive === true ? false : acc.isLive === false ? true : isDemo,
+                currency: acc.currency || 'USD',
+                balance: Number(acc.balance ?? 0),
+                equity: Number(acc.equity ?? 0),
+                profit: Number(acc.profit ?? 0),
+                margin: Number(acc.margin ?? 0),
+                freeMargin: Number(acc.freeMargin ?? 0),
+                name: acc.name || `Account #${acc.traderLogin ?? acc.ctidTraderAccountId}`,
+                depositAssetId: Number(acc.depositAssetId ?? 0),
+              }));
+              console.log(`[cTrader][${host}] Mapped ${mapped.length} accounts`);
+              done(mapped);
+            } catch (e) {
+              console.error(`[cTrader][${host}] accounts fetch error:`, e?.message);
+              done([]);
+            }
+          });
+        });
+
+        try {
+          const demoAccs = await fetchFromEnv('demo.ctraderapi.com');
+          const liveAccs = await fetchFromEnv('live.ctraderapi.com');
+          const all = [...demoAccs, ...liveAccs];
+          console.log(`[cTrader] /api/ctrader/accounts → ${all.length} accounts (${demoAccs.length} demo, ${liveAccs.length} live)`);
+          res.statusCode = 200;
+          res.end(JSON.stringify({ accounts: all }));
+        } catch (err) {
+          console.error('[cTrader] accounts endpoint error:', err);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err.message || 'Failed to fetch accounts' }));
+        }
+      });
+
+      // -----------------------------------------------------------------------
+      // /api/ctrader/refresh — server-side token refresh
+      // -----------------------------------------------------------------------
+      server.middlewares.use('/api/ctrader/refresh', async (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(JSON.stringify({ error: 'Method not allowed' })); return; }
+
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', async () => {
+          try {
+            const { refresh_token } = JSON.parse(body);
+            if (!refresh_token) { res.statusCode = 400; res.end(JSON.stringify({ error: 'Missing refresh_token' })); return; }
+
+            const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+            const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+
+            const tokenUrl = new URL('https://openapi.ctrader.com/apps/token');
+            tokenUrl.searchParams.set('grant_type', 'refresh_token');
+            tokenUrl.searchParams.set('refresh_token', refresh_token);
+            tokenUrl.searchParams.set('client_id', cid);
+            tokenUrl.searchParams.set('client_secret', csec);
+
+            const tokenRes = await fetch(tokenUrl.toString(), { headers: { Accept: 'application/json' } });
+            const data = await tokenRes.json().catch(() => ({}));
+            if (!tokenRes.ok) { res.statusCode = 502; res.end(JSON.stringify({ error: data?.error || 'Refresh failed' })); return; }
+            res.statusCode = 200;
+            res.end(JSON.stringify({ accessToken: data.accessToken, refreshToken: data.refreshToken, expiresIn: data.expiresIn }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: err.message || 'Refresh error' }));
+          }
+        });
+      });
     },
   };
 }
@@ -415,6 +829,20 @@ export default defineConfig(({ mode }) => {
         protocol: 'ws',
       },
       proxy: {
+        '/ctrader-ws/demo': {
+          target: 'wss://demo.ctraderapi.com:5036',
+          ws: true,
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => '/',
+        },
+        '/ctrader-ws/live': {
+          target: 'wss://live.ctraderapi.com:5036',
+          ws: true,
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => '/',
+        },
         '/api/nvidia': {
           target: 'https://integrate.api.nvidia.com',
           changeOrigin: true,

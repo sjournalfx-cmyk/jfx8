@@ -466,10 +466,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
                       <Globe size={28} />
                     </div>
                     <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-2xl font-black">Direct API</h3>
+                      <h3 className="text-2xl font-black">Broker Direct</h3>
                       <span className="bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-widest">PREMIUM</span>
                     </div>
-                    <p className="text-sm opacity-50 leading-relaxed mb-6">Connect directly to your broker via API. Professional grade synchronization without any desktop bridge software.</p>
+                    <p className="text-sm opacity-50 leading-relaxed mb-6">Connect directly to your broker via the JournalFX VPS bridge. Professional grade synchronization without any desktop bridge software.</p>
                     <ul className="space-y-2">
                       {['Cloud sync', 'Direct broker link', 'Institutional speed'].map(item => (
                         <li key={item} className="flex items-center gap-2 text-xs font-bold opacity-60 uppercase tracking-widest">

@@ -6,7 +6,7 @@ import {
     Power, ExternalLink, Activity, Clock, PlusCircle, CheckCircle2,
     ChevronDown, Wifi, WifiOff,
     TrendingUp, TrendingDown, DollarSign, BarChart3,
-    RefreshCw, Trash2, Edit3, Eye, EyeOff
+    RefreshCw, Trash2, Edit3, Eye, EyeOff, LogOut
 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import { supabase } from '../lib/supabase';
@@ -35,10 +35,23 @@ interface BridgeProps {
 const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
-    const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | null>(
-        userProfile.eaConnected ? 'bridge' : 
-        ['connected', 'credentials_stored', 'auth_failed'].includes(userProfile.mt_terminal_status || '') ? 'broker' : null
-    );
+    const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | 'ctrader' | null>(() => {
+    const justAuthorized =
+        localStorage.getItem('ctrader_just_authorized') === 'true' ||
+        sessionStorage.getItem('ctrader_just_authorized') === 'true';
+        if (justAuthorized) {
+            return 'ctrader';
+        }
+        return userProfile.eaConnected ? 'bridge' : 
+            ['connected', 'credentials_stored', 'auth_failed'].includes(userProfile.mt_terminal_status || '') ? 'broker' : null;
+    });
+
+    // Clear the OAuth redirect flag AFTER the initial render, so it survives
+    // React 18 StrictMode's mount → unmount → remount cycle.
+    useEffect(() => {
+        try { localStorage.removeItem('ctrader_just_authorized'); } catch { /* blocked */ }
+        try { sessionStorage.removeItem('ctrader_just_authorized'); } catch { /* blocked */ }
+    }, []);
     
     // Persistent cache for bridge data
     const [liveData, setLiveData] = useLocalStorage<any>(`jfx_bridge_live_data_${userId}`, eaSession?.data || null);
@@ -89,6 +102,13 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
         }
     }, [eaSession]);
 
+    if (connectionMode === 'ctrader') {
+        return <CtraderConnect
+            isDarkMode={isDarkMode}
+            onBack={() => setConnectionMode(null)}
+        />;
+    }
+
     if (connectionMode === 'broker') {
         return (
             <>
@@ -117,6 +137,10 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
                         setConnectionMode(null);
                     }}
                     userId={userId}
+                    eaSession={eaSession}
+                    onTradeAdded={onTradeAdded}
+                    onEditTrade={onEditTrade}
+                    trades={trades}
                 />
             </>
         );
@@ -168,7 +192,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
 
 /* --- SUB-COMPONENT: METHOD CHOICE SCREEN --- */
 interface MethodChoiceProps {
-    onSelect: (mode: 'bridge' | 'broker') => void;
+    onSelect: (mode: 'bridge' | 'broker' | 'ctrader') => void;
     onImportTrades?: (trades: Trade[]) => Promise<void>;
     isDarkMode: boolean;
 }
@@ -201,27 +225,25 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             description: 'Install the JournalFX Bridge application on your Windows desktop for automated, real-time trade synchronization via the EA.'
         },
         {
-            id: 'broker' as const,
-            title: 'Broker Direct',
-            subtitle: 'VPS Auto-Sync',
+            id: 'ctrader' as const,
+            title: 'cTrader',
+            subtitle: 'Open API Sync',
             icon: (
                 <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="2" y1="12" x2="22" y2="12" />
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                    <path d="M5 5a18.8 18.8 0 0 1 14 0" />
-                    <path d="M5 19a18.8 18.8 0 0 1 14 0" />
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
                 </svg>
             ),
             features: [
-                'VPS-hosted broker bridge',
-                'Auto-sync every 6 hours',
-                'Encrypted credentials',
-                'Manual sync anytime'
+                'Direct cTrader ID OAuth login',
+                'Real-time account & position data',
+                'Closed trade history via WebSocket',
+                'No VPS or bridge required'
             ],
             accent: '#22C55E',
             gradient: 'from-[#22C55E]/20 via-transparent to-transparent',
-            description: 'Connect your MT5 account via the JournalFX VPS bridge. Your credentials are encrypted, and trades are synced automatically every 6 hours.'
+            description: 'Connect your cTrader account directly using cTrader Open API. Securely access account details, open positions, and closed deals via OAuth authentication.'
         },
         {
             id: 'csv' as const,
@@ -252,7 +274,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             csvInputRef.current?.click();
             return;
         }
-        onSelect(opt.id as 'bridge' | 'broker');
+        onSelect(opt.id as 'bridge' | 'broker' | 'ctrader');
     };
 
     const handleCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,7 +327,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                             className={`group relative text-left w-full rounded-3xl border bg-black/60 backdrop-blur-xl p-6 lg:p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 ${
                                 opt.id === 'bridge'
                                     ? 'border-white/10 hover:border-[#FF4F01]/40'
-                                    : opt.id === 'broker'
+                                    : opt.id === 'ctrader'
                                     ? 'border-white/10 hover:border-[#22C55E]/40'
                                     : 'border-white/10 hover:border-[#8B5CF6]/40'
                             } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-white/10`}
@@ -406,12 +428,13 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
     // Headless local proxy state
     const [localHeadlessData, setLocalHeadlessData] = useState<any>(null);
     const [localLastHeartbeat, setLocalLastHeartbeat] = useState<Date | null>(null);
+    const [headlessSource, setHeadlessSource] = useState<'socket' | 'python' | null>(null);
 
-    // Ã¢Å“â€¦ SUGGESTION 3: Equity Sparkline History (last 20 points)
+    // ✅ SUGGESTION 3: Equity Sparkline History (last 20 points)
     const [equityHistory, setEquityHistory] = useState<number[]>([]);
 
     
-    // Ã¢Å“â€¦ FIX: cardStyle defined here Ã¢â‚¬â€ used throughout the component
+    // ✅ FIX: cardStyle defined here — used throughout the component
     // Obsidian Black theme: deeper blacks and subtle borders
     const cardStyle = 'bg-[#000000]/80 border border-white/5 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)]';
 
@@ -427,42 +450,86 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
         return () => clearInterval(timer);
     }, []);
 
-    // Local Headless MT5 Polling directly from Docker instance 
+    // Local Headless MT5 Polling:
+    // Tier 1: Try MQL5 socket bridge at localhost:8888 (Docker headless mode)
+    // Tier 2: Fallback to Vite dev-server /api/mt5/* routes (Python direct mode)
     useEffect(() => {
         let isActive = true;
+
+        const fetchFromSocketBridge = async (controller: AbortController) => {
+            const [accountRes, positionsRes, historyRes] = await Promise.all([
+                fetch(`${EA_BRIDGE_URL}/api/account`, { signal: controller.signal }),
+                fetch(`${EA_BRIDGE_URL}/api/positions`, { signal: controller.signal }),
+                fetch(`${EA_BRIDGE_URL}/api/history`, { signal: controller.signal })
+            ]);
+            if (!accountRes.ok || !positionsRes.ok || !historyRes.ok) throw new Error('Socket bridge unavailable');
+            const accData = await accountRes.json();
+            const posData = await positionsRes.json();
+            const histData = await historyRes.json();
+            return {
+                isHeartbeat: true,
+                account: accData.account,
+                openPositions: posData.openPositions || [],
+                trades: histData.trades || [],
+            };
+        };
+
+        const fetchFromViteRoutes = async (controller: AbortController) => {
+            const [accountRes, positionsRes, historyRes] = await Promise.all([
+                fetch('/api/mt5/account', { signal: controller.signal }),
+                fetch('/api/mt5/positions', { signal: controller.signal }),
+                fetch('/api/mt5/history', { signal: controller.signal })
+            ]);
+            if (!accountRes.ok || !positionsRes.ok || !historyRes.ok) throw new Error('Vite MT5 routes unavailable');
+            const accData = await accountRes.json();
+            const posData = await positionsRes.json();
+            const histData = await historyRes.json();
+            return {
+                isHeartbeat: true,
+                account: accData.account,
+                openPositions: posData.openPositions || [],
+                trades: histData.trades || [],
+            };
+        };
+
         const fetchHeadlessData = async () => {
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 2000); // Fast timeout
-                
-                const [accountRes, positionsRes, historyRes] = await Promise.all([
-                    fetch(`${EA_BRIDGE_URL}/api/account`, { signal: controller.signal }),
-                    fetch(`${EA_BRIDGE_URL}/api/positions`, { signal: controller.signal }),
-                    fetch(`${EA_BRIDGE_URL}/api/history`, { signal: controller.signal })
-                ]);
-                clearTimeout(timeoutId);
+                let result: any = null;
+                let source: 'socket' | 'python' | null = null;
 
-                if (accountRes.ok && positionsRes.ok && historyRes.ok) {
-                    const accData = await accountRes.json();
-                    const posData = await positionsRes.json();
-                    const histData = await historyRes.json();
-                    
-                    if (isActive) {
-                        setLocalHeadlessData({
-                           isHeartbeat: true,
-                           account: accData.account,
-                           openPositions: posData.openPositions,
-                           trades: histData.trades
-                        });
-                        setLocalLastHeartbeat(new Date());
+                // Try Socket Bridge (1s timeout)
+                const socketController = new AbortController();
+                const socketTimeout = setTimeout(() => socketController.abort(), 1000);
+                try {
+                    result = await fetchFromSocketBridge(socketController);
+                    source = 'socket';
+                } catch {
+                    // Socket bridge failed, try Vite Python direct (4s timeout)
+                    const viteController = new AbortController();
+                    const viteTimeout = setTimeout(() => viteController.abort(), 4000);
+                    try {
+                        result = await fetchFromViteRoutes(viteController);
+                        source = 'python';
+                    } catch {
+                        // Both failed
+                    } finally {
+                        clearTimeout(viteTimeout);
                     }
+                } finally {
+                    clearTimeout(socketTimeout);
                 }
-            } catch (e) {
-                // Ignore, fallback to standard stream if offline or not using local headless mode
+
+                if (isActive && result) {
+                    setLocalHeadlessData(result);
+                    setLocalLastHeartbeat(new Date());
+                    setHeadlessSource(source);
+                }
+            } catch {
+                // Suppress all errors silently
             }
         };
 
-        const interval = setInterval(fetchHeadlessData, 2000);
+        const interval = setInterval(fetchHeadlessData, 5000);
         fetchHeadlessData(); // Fire immediately
         return () => {
             isActive = false;
@@ -476,11 +543,16 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
     const effectiveIsHeartbeat = localHeadlessData ? true : isHeartbeat;
 
     const timeAgo = effectiveLastHeartbeat ? Math.floor((now.getTime() - effectiveLastHeartbeat.getTime()) / 1000) : null;
-    const isOnline = effectiveIsHeartbeat && timeAgo !== null && timeAgo < 15; // 15s threshold for 'offline'
+    const isOnline = effectiveIsHeartbeat && timeAgo !== null && timeAgo < 30; // 30s threshold (Python scripts take 2-5s to run)
 
     // Filter "Pending" trades (from bridge but not in DB)
     // Only show "Exit" deals (entry=1 or 2) as candidates for Journal
-    const incomingTrades = (effectiveLiveData?.trades || []).filter((t: EADeal) => t.entry === 1 || t.entry === 2);
+    const incomingTrades = (effectiveLiveData?.trades || []).filter((t: EADeal) => {
+        const hasExit = t.entry === 1 || t.entry === 2;
+        const hasSymbol = !!(t.symbol);
+        const hasProfitData = t.profit !== undefined && t.profit !== null;
+        return hasExit || (hasSymbol && hasProfitData);
+    });
     const pendingTrades = incomingTrades.filter((t: EADeal) => !trades.some(st => st.ticketId === String(t.ticket)));
 
     // Auto-Log Logic
@@ -618,7 +690,16 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-black tracking-tight text-white">Desktop Bridge</h1>
               {localHeadlessData && (
-                <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 text-[9px] font-black tracking-widest uppercase border border-indigo-500/20">Headless</span>
+                <>
+                  <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 text-[9px] font-black tracking-widest uppercase border border-indigo-500/20">Headless</span>
+                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-black tracking-widest uppercase border ${
+                    headlessSource === 'socket' 
+                      ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' 
+                      : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                  }`}>
+                    {headlessSource === 'socket' ? 'Socket Bridge' : 'Python Direct'}
+                  </span>
+                </>
               )}
 
             </div>
@@ -1225,6 +1306,985 @@ const WindowsLogoIcon: React.FC<{ className?: string; size?: number }> = ({ clas
         <path d="M30 36h28v24L30 56V36Z" fill="#0078D4" />
     </svg>
 );
+
+/* --- SUB-COMPONENT: CTRADER CONNECT --- */
+interface CtraderConnectProps {
+    isDarkMode: boolean;
+    onBack: () => void;
+}
+
+const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) => {
+    const [authState, setAuthState] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+    const [accounts, setAccounts] = useState<any[]>([]);
+    const [errorMsg, setErrorMsg] = useState('');
+    const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
+
+    // Prevents StrictMode from double-invoking handleFetchAccounts
+    // (useRef persists across React 18's mount → unmount → remount cycle)
+    const fetchCalledRef = useRef(false);
+
+    // --- State variables for 2,3,4,5,6,7,8 ---
+    const [profile, setProfile] = useState<any>(null);
+    const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+    const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+    const [accountPositions, setAccountPositions] = useState<any[]>([]);
+    const [accountDeals, setAccountDeals] = useState<any[]>([]);
+    const [pendingOrders, setPendingOrders] = useState<any[]>([]);
+    const [traderDetails, setTraderDetails] = useState<any>(null);
+    const [symbolsList, setSymbolsList] = useState<any[]>([]);
+    const [detailsError, setDetailsError] = useState('');
+    
+    // Tab state
+    const [activeTab, setActiveTab] = useState<'overview' | 'positions' | 'history' | 'market' | 'logs'>('overview');
+
+    // Trading inputs
+    const [tradingSymbolId, setTradingSymbolId] = useState<string>('');
+    const [tradingSide, setTradingSide] = useState<'buy' | 'sell'>('buy');
+    const [tradingVolume, setTradingVolume] = useState<number>(0.01);
+    const [tradingLimitPrice, setTradingLimitPrice] = useState<string>('');
+    const [tradingStopPrice, setTradingStopPrice] = useState<string>('');
+    const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+    const [tradeResultMsg, setTradeResultMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+    // Spot Price and Subscriptions inputs
+    const [subSymbolId, setSubSymbolId] = useState<string>('');
+    const [liveTicks, setLiveTicks] = useState<Record<string, { bid?: number; ask?: number; time: number }>>({});
+
+    // Margin calculations inputs
+    const [marginCalcSymbolId, setMarginCalcSymbolId] = useState<string>('');
+    const [marginCalcVolume, setMarginCalcVolume] = useState<number>(0.01);
+    const [calculatedMargin, setCalculatedMargin] = useState<number | null>(null);
+    const [isCalculatingMargin, setIsCalculatingMargin] = useState(false);
+
+    // Realtime logs
+    const [eventLogs, setEventLogs] = useState<{ time: string; msg: string }[]>([]);
+
+    const handleRefreshDetails = async (acc: any) => {
+        const id = acc.ctidTraderAccountId;
+        setIsLoadingDetails(true);
+        setDetailsError('');
+        try {
+            const { getPositions, getClosedDeals, getPendingOrders, getTrader, getSymbolsList } = await import('../services/ctraderService');
+            const isDemo = !!acc.isDemo;
+            const [positions, deals, orders, trader, symbols] = await Promise.all([
+                getPositions(id, isDemo),
+                getClosedDeals(id, undefined, undefined, isDemo),
+                getPendingOrders(id, isDemo),
+                getTrader(id, isDemo),
+                getSymbolsList(id, isDemo).catch(() => []),
+            ]);
+            setAccountPositions(positions);
+            setAccountDeals(deals);
+            setPendingOrders(orders);
+            setTraderDetails(trader);
+            
+            const uniqueSymbols = symbols.reduce((accList: any[], currentSym: any) => {
+                if (!accList.some((item: any) => item.symbolId === currentSym.symbolId)) {
+                    accList.push(currentSym);
+                }
+                return accList;
+            }, []);
+            const sortedSymbols = uniqueSymbols.sort((a: any, b: any) => (a.symbolName || '').localeCompare(b.symbolName || ''));
+            setSymbolsList(sortedSymbols);
+            if (sortedSymbols.length > 0) {
+                setTradingSymbolId(prev => prev || sortedSymbols[0].symbolId.toString());
+                setSubSymbolId(prev => prev || sortedSymbols[0].symbolId.toString());
+                setMarginCalcSymbolId(prev => prev || sortedSymbols[0].symbolId.toString());
+            }
+        } catch (e: any) {
+            setDetailsError(e.message || 'Failed to load account details');
+        } finally {
+            setIsLoadingDetails(false);
+        }
+    };
+
+    const handleSelectAccount = async (acc: any) => {
+        const id = acc.ctidTraderAccountId;
+        if (selectedAccountId === id) {
+            setSelectedAccountId(null);
+            setAccountPositions([]);
+            setAccountDeals([]);
+            setPendingOrders([]);
+            setTraderDetails(null);
+            setDetailsError('');
+            return;
+        }
+
+        setSelectedAccountId(id);
+        await handleRefreshDetails(acc);
+    };
+
+    const handlePlaceOrder = async (isDemo: boolean) => {
+        if (!selectedAccountId || !tradingSymbolId) return;
+        setIsSubmittingOrder(true);
+        setTradeResultMsg(null);
+        try {
+            const { createNewOrder } = await import('../services/ctraderService');
+            const limit = tradingLimitPrice ? Number(tradingLimitPrice) : undefined;
+            const stop = tradingStopPrice ? Number(tradingStopPrice) : undefined;
+            const volumeUnits = tradingVolume * 100000;
+            
+            await createNewOrder(
+                selectedAccountId,
+                Number(tradingSymbolId),
+                tradingSide,
+                volumeUnits,
+                limit,
+                stop,
+                isDemo
+            );
+
+            setTradeResultMsg({ type: 'success', text: `Order submitted successfully` });
+            setTradingLimitPrice('');
+            setTradingStopPrice('');
+            
+            const acc = accounts.find(a => a.ctidTraderAccountId === selectedAccountId);
+            if (acc) await handleRefreshDetails(acc);
+        } catch (e: any) {
+            setTradeResultMsg({ type: 'error', text: e.message || 'Order submission failed' });
+        } finally {
+            setIsSubmittingOrder(false);
+        }
+    };
+
+    const handleClosePosition = async (posId: number, vol: number, isDemo: boolean) => {
+        try {
+            const { closePosition } = await import('../services/ctraderService');
+            await closePosition(selectedAccountId!, posId, vol * 100000, isDemo);
+            
+            const acc = accounts.find(a => a.ctidTraderAccountId === selectedAccountId);
+            if (acc) await handleRefreshDetails(acc);
+        } catch (e: any) {
+            alert(e.message || 'Failed to close position');
+        }
+    };
+
+    const handleCancelOrder = async (orderId: number, isDemo: boolean) => {
+        try {
+            const { cancelOrder } = await import('../services/ctraderService');
+            await cancelOrder(selectedAccountId!, orderId, isDemo);
+            
+            const acc = accounts.find(a => a.ctidTraderAccountId === selectedAccountId);
+            if (acc) await handleRefreshDetails(acc);
+        } catch (e: any) {
+            alert(e.message || 'Failed to cancel order');
+        }
+    };
+
+    const handleSubscribeToSpots = async (isDemo: boolean) => {
+        if (!selectedAccountId || !subSymbolId) return;
+        try {
+            const { subscribeToSpots } = await import('../services/ctraderService');
+            await subscribeToSpots(selectedAccountId, Number(subSymbolId), isDemo);
+            
+            const sym = symbolsList.find(s => s.symbolId.toString() === subSymbolId);
+            const name = sym?.symbolName || `ID ${subSymbolId}`;
+            setEventLogs(prev => [
+                { time: new Date().toLocaleTimeString(), msg: `Subscribed to live spots for ${name}` },
+                ...prev
+            ]);
+        } catch (e: any) {
+            alert(e.message || 'Failed to subscribe to spots');
+        }
+    };
+
+    const handleCalculateMargin = async (isDemo: boolean) => {
+        if (!selectedAccountId || !marginCalcSymbolId) return;
+        setIsCalculatingMargin(true);
+        setCalculatedMargin(null);
+        try {
+            const { getExpectedMargin } = await import('../services/ctraderService');
+            const volUnits = marginCalcVolume * 100000;
+            const res = await getExpectedMargin(selectedAccountId, Number(marginCalcSymbolId), volUnits, isDemo);
+            setCalculatedMargin(Number(res.margin ?? 0) / 100);
+        } catch (e: any) {
+            alert(e.message || 'Failed to calculate margin');
+        } finally {
+            setIsCalculatingMargin(false);
+        }
+    };
+
+    const handleDisconnect = async () => {
+        try {
+            const { logout } = await import('../services/ctraderService');
+            logout();
+            setAuthState('idle');
+            setAccounts([]);
+            setSelectedAccountId(null);
+            setAccountPositions([]);
+            setAccountDeals([]);
+            setPendingOrders([]);
+            setTraderDetails(null);
+            setSymbolsList([]);
+            setProfile(null);
+            fetchCalledRef.current = false;
+        } catch (e: any) {
+            console.error('Failed to log out from cTrader', e);
+        }
+    };
+
+    const handleFetchAccounts = async () => {
+        setIsFetchingAccounts(true);
+        setErrorMsg('');
+        try {
+            const { getAccounts, getTrader } = await import('../services/ctraderService');
+            const accs = await getAccounts();
+            setAccounts(accs);
+
+            // Background-fetch live balance/equity for each account individually
+            // Each resolves on its own so the list populates progressively
+            accs.forEach(async (acc: any) => {
+                try {
+                    const trader = await getTrader(acc.ctidTraderAccountId, !!acc.isDemo);
+                    setAccounts(prev => prev.map((a: any) =>
+                        a.ctidTraderAccountId === acc.ctidTraderAccountId
+                            ? { ...a, balance: trader.balance, equity: trader.equity }
+                            : a
+                    ));
+                } catch {
+                    // Individual account balance load failed — leave as undefined (shows '—')
+                }
+            });
+        } catch (e: any) {
+            setErrorMsg(e.message || 'Failed to fetch accounts');
+        } finally {
+            setIsFetchingAccounts(false);
+        }
+    };
+
+    useEffect(() => {
+        import('../services/ctraderService').then(({ isAuthenticated, getCtidProfile }) => {
+            if (isAuthenticated()) {
+                setAuthState('connected');
+                if (!fetchCalledRef.current) {
+                    fetchCalledRef.current = true;
+                    handleFetchAccounts();
+                    getCtidProfile().then(p => setProfile(p)).catch(() => {});
+                }
+            }
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Real-time Event Listener Setup
+    useEffect(() => {
+        if (!selectedAccountId) return;
+        
+        let unsub: (() => void) | null = null;
+        const currentAcc = accounts.find(a => a.ctidTraderAccountId === selectedAccountId);
+        const isDemo = currentAcc ? !!currentAcc.isDemo : true;
+
+        import('../services/ctraderService').then(({ addCtraderListener, PT }) => {
+            unsub = addCtraderListener((payloadType, payload, wsIsDemo) => {
+                if (wsIsDemo !== isDemo) return;
+
+                if (payloadType === PT.SPOT_EVENT) {
+                    if (payload.symbolId) {
+                        setLiveTicks(prev => ({
+                            ...prev,
+                            [payload.symbolId.toString()]: {
+                                bid: payload.bid ? Number(payload.bid) : undefined,
+                                ask: payload.ask ? Number(payload.ask) : undefined,
+                                time: Date.now()
+                            }
+                        }));
+                    }
+                } else if (payloadType === PT.EXECUTION_EVENT) {
+                    const time = new Date().toLocaleTimeString();
+                    const desc = payload.executionType === 1 ? 'Order Filled' : payload.executionType === 2 ? 'Order Cancelled' : 'Execution Update';
+                    const symbolId = payload.order?.symbolId;
+                    const sym = symbolsList.find(s => s.symbolId === symbolId);
+                    const symName = sym?.symbolName || `ID ${symbolId}`;
+                    const volLots = payload.order?.volume ? Number(payload.order.volume) / 100000 : 0;
+                    
+                    setEventLogs(prev => [
+                        { time, msg: `🔥 ${desc} - Symbol: ${symName}, Vol: ${volLots.toFixed(2)} lots` },
+                        ...prev.slice(0, 19)
+                    ]);
+                    
+                    if (currentAcc) {
+                        handleRefreshDetails(currentAcc);
+                    }
+                } else if (payloadType === PT.TRADER_UPDATE_EVENT) {
+                    if (payload.trader) {
+                        setTraderDetails(prev => prev ? {
+                            ...prev,
+                            balance: payload.trader.balance !== undefined ? Number(payload.trader.balance) : prev.balance,
+                            equity: payload.trader.equity !== undefined ? Number(payload.trader.equity) : prev.equity,
+                        } : null);
+                    }
+                }
+            });
+        });
+
+        return () => {
+            if (unsub) unsub();
+        };
+    }, [selectedAccountId, accounts, symbolsList]);
+
+
+    const handleConnect = async () => {
+        setAuthState('connecting');
+        setErrorMsg('');
+        try {
+            const { getAuthorizeUrl } = await import('../services/ctraderService');
+            window.location.href = getAuthorizeUrl();
+        } catch (e: any) {
+            setErrorMsg(e.message || 'Failed to initiate cTrader connection');
+            setAuthState('error');
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="relative mb-6 flex items-center gap-3">
+                <button
+                    onClick={onBack}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
+                >
+                    <ArrowRight size={12} className="rotate-180" />
+                    Back to methods
+                </button>
+            </div>
+
+            <div className="rounded-2xl border border-white/5 bg-[#0a0a0a] overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/5 flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-[#22C55E]/10">
+                        <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-[#22C55E]" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                            <path d="M2 17l10 5 10-5" />
+                            <path d="M2 12l10 5 10-5" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold text-white">cTrader Open API</h3>
+                        <p className="text-[10px] text-zinc-500">Connect via cTrader ID OAuth</p>
+                    </div>
+                </div>
+
+                <div className="p-5 space-y-5">
+                    {authState === 'idle' && (
+                        <div className="space-y-4">
+                            <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-white/5 bg-white/[0.02]">
+                                <svg className="w-4 h-4 text-zinc-500 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                </svg>
+                                <p className="text-xs text-zinc-500 leading-relaxed">
+                                    You will be redirected to cTrader ID to authorize access to your trading accounts.
+                                    Only view permissions are requested — no trading will be performed.
+                                </p>
+                            </div>
+                            <button
+                                onClick={handleConnect}
+                                className="w-full py-2.5 rounded-xl bg-[#22C55E] text-white text-sm font-medium hover:bg-[#22C55E]/90 flex items-center justify-center gap-2 transition-all"
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                                    <polyline points="10 17 15 12 10 7" />
+                                    <line x1="15" y1="12" x2="3" y2="12" />
+                                </svg>
+                                Connect with cTrader ID
+                            </button>
+                        </div>
+                    )}
+
+                    {authState === 'connecting' && (
+                        <div className="flex items-center justify-center py-8">
+                            <div className="flex flex-col items-center gap-3">
+                                <Loader2 size={24} className="animate-spin text-[#22C55E]" />
+                                <p className="text-xs text-zinc-400">Redirecting to cTrader ID...</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {authState === 'connected' && (
+                        <div className="space-y-4">
+                            {/* Auth success banner with Log Out button */}
+                            <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                                <div className="flex items-center gap-2 text-emerald-400 text-xs">
+                                    <CheckCircle2 size={14} />
+                                    <span>Successfully authenticated with cTrader</span>
+                                </div>
+                                <button
+                                    onClick={handleDisconnect}
+                                    className="p-1.5 rounded-lg hover:bg-rose-500/10 text-zinc-500 hover:text-rose-500 transition-colors"
+                                    title="Disconnect from cTrader"
+                                >
+                                    <LogOut size={14} />
+                                </button>
+                            </div>
+
+                            {/* Loading state while fetching accounts */}
+                            {isFetchingAccounts && (
+                                <div className="flex items-center justify-center py-6">
+                                    <div className="flex flex-col items-center gap-3">
+                                        <Loader2 size={20} className="animate-spin text-[#22C55E]" />
+                                        <p className="text-xs text-zinc-400">Loading your trading accounts...</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Account list — shown as soon as fetched */}
+                            {!isFetchingAccounts && accounts.length > 0 && selectedAccountId === null && (
+                                <div className="space-y-2">
+                                    <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 px-1">
+                                        Select a connected account ({accounts.length})
+                                    </p>
+                                    <div className="divide-y divide-white/[0.03] border border-white/5 rounded-xl overflow-hidden">
+                                        {accounts.map((acc, i) => (
+                                            <button
+                                                key={acc.ctidTraderAccountId || i}
+                                                onClick={() => handleSelectAccount(acc)}
+                                                className={`w-full px-4 py-3.5 flex items-center justify-between hover:bg-white/[0.02] transition-all text-left ${
+                                                    selectedAccountId === acc.ctidTraderAccountId
+                                                        ? 'ring-1 ring-[#22C55E]/40 bg-[#22C55E]/[0.04]'
+                                                        : ''
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-2 h-2 rounded-full shrink-0 ${acc.isDemo ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-bold text-white">{acc.name || `Account #${acc.login}`}</p>
+                                                        <p className="text-[10px] text-zinc-500 mt-0.5">
+                                                            {acc.isDemo ? 'Demo' : 'Live'} · {acc.currency}
+                                                            {acc.server ? ` · ${acc.server}` : ''}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-xs font-bold text-white tabular-nums">
+                                                        {acc.balance !== undefined
+                                                            ? `${acc.currency === 'USD' ? '$' : ''}${Number(acc.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                            : <span className="text-zinc-600 text-[10px]">Loading…</span>
+                                                        }
+                                                    </p>
+                                                    {acc.equity !== undefined && (
+                                                        <p className="text-[10px] text-zinc-500 mt-0.5 tabular-nums">
+                                                            Eq {Number(acc.equity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button
+                                        onClick={handleFetchAccounts}
+                                        disabled={isFetchingAccounts}
+                                        className="w-full py-2 rounded-xl border border-white/10 text-zinc-400 text-xs font-medium hover:text-white hover:border-white/20 flex items-center justify-center gap-2 transition-all disabled:opacity-40 mt-3"
+                                    >
+                                        <RefreshCw size={12} className={isFetchingAccounts ? 'animate-spin' : ''} />
+                                        Refresh Accounts
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* --- Account details sub-panel --- */}
+                            {selectedAccountId != null && (
+                                        <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.015] overflow-hidden">
+                                            {/* Header */}
+                                            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
+                                                <div className="flex items-center gap-2">
+                                                    <Activity size={14} className="text-[#22C55E]" />
+                                                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                                                        Trading Terminal
+                                                    </span>
+                                                    {profile && (
+                                                        <span className="text-[10px] text-zinc-500 bg-white/5 px-2 py-0.5 rounded-full">
+                                                            {profile.nickname || profile.email}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedAccountId(null);
+                                                        setAccountPositions([]);
+                                                        setAccountDeals([]);
+                                                        setPendingOrders([]);
+                                                        setTraderDetails(null);
+                                                        setDetailsError('');
+                                                    }}
+                                                    className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-all"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+
+                                            {isLoadingDetails && (
+                                                <div className="flex items-center justify-center py-8">
+                                                    <Loader2 size={20} className="animate-spin text-[#22C55E]" />
+                                                    <span className="ml-2.5 text-xs text-zinc-400">Synchronizing with cTrader Server…</span>
+                                                </div>
+                                            )}
+
+                                            {detailsError && (
+                                                <div className="flex items-start gap-2.5 px-4 py-4 bg-rose-500/5 text-rose-400 text-xs border-b border-white/5">
+                                                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                                                    <span>{detailsError}</span>
+                                                </div>
+                                            )}
+
+                                            {!isLoadingDetails && !detailsError && (
+                                                <div>
+                                                    {/* Account Summary Cards */}
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x md:divide-x divide-y md:divide-y-0 divide-white/5 border-b border-white/5 bg-white/[0.005]">
+                                                        <div className="p-3">
+                                                            <span className="text-[9px] uppercase tracking-wider text-zinc-500">Balance</span>
+                                                            <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
+                                                                {Number(traderDetails?.balance ?? accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.balance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </p>
+                                                        </div>
+                                                        <div className="p-3">
+                                                            <span className="text-[9px] uppercase tracking-wider text-zinc-500">Equity</span>
+                                                            <p className="text-sm font-bold text-[#22C55E] mt-0.5 tabular-nums">
+                                                                {Number(traderDetails?.equity ?? accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.equity ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </p>
+                                                        </div>
+                                                        <div className="p-3">
+                                                            <span className="text-[9px] uppercase tracking-wider text-zinc-500">Used Margin</span>
+                                                            <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
+                                                                {Number((traderDetails?.margin ?? 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </p>
+                                                        </div>
+                                                        <div className="p-3">
+                                                            <span className="text-[9px] uppercase tracking-wider text-zinc-500">Margin Level</span>
+                                                            <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
+                                                                {traderDetails?.margin > 0
+                                                                    ? `${Number((traderDetails.equity / (traderDetails.margin / 100)) * 100).toFixed(0)}%`
+                                                                    : '100%'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Tabs Selectors */}
+                                                    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-white/[0.01]">
+                                                        {(['overview', 'positions', 'history', 'market', 'logs'] as const).map((t) => (
+                                                            <button
+                                                                key={t}
+                                                                onClick={() => setActiveTab(t)}
+                                                                className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                                                                    activeTab === t
+                                                                        ? 'bg-[#22C55E]/10 text-[#22C55E]'
+                                                                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                                                                }`}
+                                                            >
+                                                                {t === 'logs' ? 'Events' : t}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+
+                                                    <div className="p-4">
+                                                        {/* Tab Content: OVERVIEW & TRADE PANEL */}
+                                                        {activeTab === 'overview' && (
+                                                            <div className="space-y-4">
+                                                                {/* Account parameters */}
+                                                                <div className="grid grid-cols-2 gap-3 text-xs border border-white/5 rounded-xl p-3 bg-white/[0.01]">
+                                                                    <div>
+                                                                        <span className="text-zinc-500 text-[10px]">Broker Server</span>
+                                                                        <p className="font-medium text-white mt-0.5">{traderDetails?.brokerName || 'cTrader Server'}</p>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-zinc-500 text-[10px]">Leverage</span>
+                                                                        <p className="font-medium text-white mt-0.5">1:{traderDetails?.leverageInCents ? traderDetails.leverageInCents / 100 : 100}</p>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-zinc-500 text-[10px]">Deposit Currency</span>
+                                                                        <p className="font-medium text-white mt-0.5">{traderDetails?.depositAsset || 'USD'}</p>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-zinc-500 text-[10px]">Hedging Enabled</span>
+                                                                        <p className="font-medium text-white mt-0.5">{traderDetails?.isHedgingEnabled ? 'Yes' : 'No'}</p>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Manual Order Entry */}
+                                                                <div className="border border-white/5 rounded-xl p-4 bg-white/[0.01] space-y-3">
+                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Manual Order Desk</p>
+                                                                    <div className="grid grid-cols-2 gap-2.5">
+                                                                        <div>
+                                                                            <label className="text-[10px] text-zinc-500 block mb-1">Select Symbol</label>
+                                                                            <select
+                                                                                value={tradingSymbolId}
+                                                                                onChange={(e) => setTradingSymbolId(e.target.value)}
+                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                            >
+                                                                                {symbolsList.map((s) => (
+                                                                                    <option key={s.symbolId} value={s.symbolId}>{s.symbolName}</option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[10px] text-zinc-500 block mb-1">Lot Volume</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                min="0.01"
+                                                                                value={tradingVolume}
+                                                                                onChange={(e) => setTradingVolume(Number(e.target.value))}
+                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[10px] text-zinc-500 block mb-1">Limit Price (Optional)</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                placeholder="Market Price"
+                                                                                value={tradingLimitPrice}
+                                                                                onChange={(e) => setTradingLimitPrice(e.target.value)}
+                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[10px] text-zinc-500 block mb-1">Stop Price (Optional)</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                placeholder="Market Price"
+                                                                                value={tradingStopPrice}
+                                                                                onChange={(e) => setTradingStopPrice(e.target.value)}
+                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="flex gap-2 pt-1.5">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setTradingSide('buy')}
+                                                                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg border uppercase transition-all ${
+                                                                                tradingSide === 'buy'
+                                                                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                                                                    : 'border-white/5 text-zinc-500'
+                                                                            }`}
+                                                                        >
+                                                                            Buy / Long
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setTradingSide('sell')}
+                                                                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg border uppercase transition-all ${
+                                                                                tradingSide === 'sell'
+                                                                                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                                                                                    : 'border-white/5 text-zinc-500'
+                                                                            }`}
+                                                                        >
+                                                                            Sell / Short
+                                                                        </button>
+                                                                    </div>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={isSubmittingOrder || !tradingSymbolId}
+                                                                        onClick={() => handlePlaceOrder(!!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
+                                                                        className="w-full py-2 bg-[#22C55E] text-white text-xs font-bold uppercase rounded-lg hover:bg-[#22C55E]/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+                                                                    >
+                                                                        {isSubmittingOrder && <Loader2 size={12} className="animate-spin" />}
+                                                                        Place {tradingSide.toUpperCase()} Order
+                                                                    </button>
+
+                                                                    {tradeResultMsg && (
+                                                                        <div className={`p-2 rounded-lg text-[10px] font-bold ${
+                                                                            tradeResultMsg.type === 'success'
+                                                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                                                        }`}>
+                                                                            {tradeResultMsg.text}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Tab Content: POSITIONS & PENDING ORDERS */}
+                                                        {activeTab === 'positions' && (
+                                                            <div className="space-y-4">
+                                                                {/* Positions list */}
+                                                                <div>
+                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-2">Open Positions ({accountPositions.length})</p>
+                                                                    {accountPositions.length === 0 ? (
+                                                                        <div className="text-center py-4 border border-dashed border-white/5 rounded-xl">
+                                                                            <p className="text-xs text-zinc-600">No open positions</p>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden">
+                                                                            {accountPositions.map((p, idx) => (
+                                                                                <div key={`${p.positionId}_${idx}`} className="p-3 flex items-center justify-between text-xs hover:bg-white/[0.005]">
+                                                                                    <div className="flex items-center gap-2.5">
+                                                                                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                                                                            p.tradeSide === 'buy' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                                                                                        }`}>{p.tradeSide}</span>
+                                                                                        <div>
+                                                                                            <p className="font-bold text-white">{p.symbol}</p>
+                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5">{p.volume} lot · Entry {p.openPrice}</p>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-3 text-right">
+                                                                                        <div>
+                                                                                            <p className={`font-bold tabular-nums ${(p.profit ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                                                {(p.profit ?? 0) >= 0 ? '+' : ''}{Number(p.profit ?? 0).toFixed(2)}
+                                                                                            </p>
+                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5 tabular-nums">Pips {Number((p.currentPrice - p.openPrice) * (p.tradeSide === 'buy' ? 1 : -1)).toFixed(4)}</p>
+                                                                                        </div>
+                                                                                        <button
+                                                                                            onClick={() => handleClosePosition(p.positionId, p.volume, !!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
+                                                                                            className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 hover:border-rose-500/30 text-[10px] font-bold rounded-lg transition-all"
+                                                                                        >
+                                                                                            Close
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* Pending Orders list */}
+                                                                <div>
+                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-2">Pending Orders ({pendingOrders.length})</p>
+                                                                    {pendingOrders.length === 0 ? (
+                                                                        <div className="text-center py-4 border border-dashed border-white/5 rounded-xl">
+                                                                            <p className="text-xs text-zinc-600">No active pending orders</p>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden">
+                                                                            {pendingOrders.map((o, idx) => (
+                                                                                <div key={`${o.orderId}_${idx}`} className="p-3 flex items-center justify-between text-xs hover:bg-white/[0.005]">
+                                                                                    <div className="flex items-center gap-2.5">
+                                                                                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/10 text-blue-400`}>
+                                                                                            {o.orderType}
+                                                                                        </span>
+                                                                                        <div>
+                                                                                            <p className="font-bold text-white">{o.symbol}</p>
+                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5">{o.volume} lot · {o.tradeSide.toUpperCase()}</p>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-3 text-right">
+                                                                                        <div>
+                                                                                            <p className="font-bold text-white tabular-nums">
+                                                                                                {o.limitPrice || o.stopPrice || 'Market'}
+                                                                                            </p>
+                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5">SL: {o.stopLoss || '-'} | TP: {o.takeProfit || '-'}</p>
+                                                                                        </div>
+                                                                                        <button
+                                                                                            onClick={() => handleCancelOrder(o.orderId, !!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
+                                                                                            className="px-2 py-1 bg-zinc-500/10 hover:bg-zinc-500/20 text-zinc-400 border border-white/10 hover:border-white/20 text-[10px] font-bold rounded-lg transition-all"
+                                                                                        >
+                                                                                            Cancel
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Tab Content: HISTORY / CLOSED DEALS */}
+                                                        {activeTab === 'history' && (
+                                                            <div>
+                                                                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-2">Deal Execution History</p>
+                                                                {accountDeals.length === 0 ? (
+                                                                    <div className="text-center py-6 border border-dashed border-white/5 rounded-xl">
+                                                                        <p className="text-xs text-zinc-600">No closed deal logs found</p>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden max-h-80 overflow-y-auto">
+                                                                        {accountDeals.map((d, idx) => (
+                                                                            <div key={`${d.dealId}_${idx}`} className="p-3 flex items-center justify-between text-xs hover:bg-white/[0.005]">
+                                                                                <div className="flex items-center gap-2.5">
+                                                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                                                                        d.tradeSide === 'buy' ? 'bg-emerald-500/5 text-emerald-400 border border-emerald-500/10' : 'bg-rose-500/5 text-rose-400 border border-rose-500/10'
+                                                                                    }`}>{d.tradeSide}</span>
+                                                                                    <div>
+                                                                                        <p className="font-bold text-white">{d.symbol}</p>
+                                                                                        <p className="text-[10px] text-zinc-500 mt-0.5">
+                                                                                            {d.volume} lot · Price {d.price}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="text-right">
+                                                                                    <p className={`font-bold tabular-nums ${(d.profit ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                                        {(d.profit ?? 0) >= 0 ? '+' : ''}{Number(d.profit ?? 0).toFixed(2)}
+                                                                                    </p>
+                                                                                    <p className="text-[9px] text-zinc-500 mt-0.5">
+                                                                                        {d.closeTimestamp ? new Date(d.closeTimestamp).toLocaleDateString() : ''}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                              </div>
+                                                        )}
+
+                                                        {/* Tab Content: MARKET TICKERS & MARGIN */}
+                                                        {activeTab === 'market' && (
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                {/* Live Ticker Subscriptions */}
+                                                                <div className="border border-white/5 rounded-xl p-3 bg-white/[0.01] space-y-3">
+                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Live Quote Monitor</p>
+                                                                    <div className="flex gap-2">
+                                                                        <select
+                                                                            value={subSymbolId}
+                                                                            onChange={(e) => setSubSymbolId(e.target.value)}
+                                                                            className="flex-1 text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none"
+                                                                        >
+                                                                            {symbolsList.map((s) => (
+                                                                                <option key={s.symbolId} value={s.symbolId}>{s.symbolName}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleSubscribeToSpots(!!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
+                                                                            className="px-3 bg-white/5 border border-white/10 hover:border-white/20 text-xs font-bold uppercase text-white rounded-lg transition-all"
+                                                                        >
+                                                                            Subscribe
+                                                                        </button>
+                                                                    </div>
+
+                                                                    <div className="space-y-1.5 pt-1">
+                                                                        {Object.keys(liveTicks).length === 0 ? (
+                                                                            <p className="text-[10px] text-zinc-600">No active live subscriptions</p>
+                                                                        ) : (
+                                                                            Object.entries(liveTicks).map(([symId, tick]) => {
+                                                                                const sym = symbolsList.find(s => s.symbolId.toString() === symId);
+                                                                                return (
+                                                                                    <div key={symId} className="flex items-center justify-between text-xs bg-white/[0.005] p-2 border border-white/5 rounded-lg">
+                                                                                        <span className="font-bold text-white">{sym?.symbolName || `ID ${symId}`}</span>
+                                                                                        <div className="flex gap-3 text-right text-[11px] tabular-nums">
+                                                                                            <div>
+                                                                                                <span className="text-[9px] text-zinc-500 block">BID</span>
+                                                                                                <span className="text-emerald-400 font-medium">{tick.bid || '-'}</span>
+                                                                                            </div>
+                                                                                            <div>
+                                                                                                <span className="text-[9px] text-zinc-500 block">ASK</span>
+                                                                                                <span className="text-rose-400 font-medium">{tick.ask || '-'}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            })
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Margin Calculator */}
+                                                                <div className="border border-white/5 rounded-xl p-3 bg-white/[0.01] space-y-3">
+                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Margin Estimator</p>
+                                                                    <div className="space-y-2.5">
+                                                                        <div>
+                                                                            <label className="text-[10px] text-zinc-500 block mb-1">Select Symbol</label>
+                                                                            <select
+                                                                                value={marginCalcSymbolId}
+                                                                                onChange={(e) => setMarginCalcSymbolId(e.target.value)}
+                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none"
+                                                                            >
+                                                                                {symbolsList.map((s) => (
+                                                                                    <option key={s.symbolId} value={s.symbolId}>{s.symbolName}</option>
+                                                                                ))}
+                                                                            </select>
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[10px] text-zinc-500 block mb-1">Lot Size</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                min="0.01"
+                                                                                value={marginCalcVolume}
+                                                                                onChange={(e) => setMarginCalcVolume(Number(e.target.value))}
+                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none"
+                                                                            />
+                                                                        </div>
+
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={isCalculatingMargin || !marginCalcSymbolId}
+                                                                            onClick={() => handleCalculateMargin(!!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
+                                                                            className="w-full py-1.5 bg-[#22C55E]/10 border border-[#22C55E]/20 text-[#22C55E] text-xs font-bold uppercase rounded-lg hover:bg-[#22C55E]/20 transition-all flex items-center justify-center gap-1.5"
+                                                                        >
+                                                                            {isCalculatingMargin && <Loader2 size={12} className="animate-spin" />}
+                                                                            Calculate Expected Margin
+                                                                        </button>
+
+                                                                        {calculatedMargin !== null && (
+                                                                            <div className="p-2 border border-white/5 bg-white/[0.005] rounded-lg text-center">
+                                                                                <span className="text-[9px] text-zinc-500 uppercase block">Required Margin</span>
+                                                                                <span className="text-sm font-bold text-white tabular-nums">
+                                                                                    {traderDetails?.depositAsset || 'USD'} {calculatedMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                                </span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Tab Content: EVENT LOGS */}
+                                                        {activeTab === 'logs' && (
+                                                            <div>
+                                                                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-2">Real-time Terminal Logs</p>
+                                                                {eventLogs.length === 0 ? (
+                                                                    <div className="text-center py-6 border border-dashed border-white/5 rounded-xl">
+                                                                        <p className="text-xs text-zinc-600">No events logged yet. Trigger executions or subscribe to spots to generate logs.</p>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="border border-white/5 bg-black/20 rounded-xl p-3 max-h-60 overflow-y-auto space-y-1.5 font-mono text-[10px] text-zinc-400">
+                                                                        {eventLogs.map((l, idx) => (
+                                                                            <div key={idx} className="flex gap-2">
+                                                                                <span className="text-zinc-600 shrink-0">[{l.time}]</span>
+                                                                                <span className="text-zinc-300 select-all">{l.msg}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                            {/* Empty state — fetch completed but no accounts returned */}
+                            {!isFetchingAccounts && accounts.length === 0 && !errorMsg && (
+                                <div className="text-center py-6 space-y-3">
+                                    <p className="text-xs text-zinc-500">No accounts found. Make sure your cTrader ID has linked trading accounts.</p>
+                                    <button
+                                        onClick={handleFetchAccounts}
+                                        className="w-full py-2.5 rounded-xl bg-[#22C55E] text-white text-sm font-medium hover:bg-[#22C55E]/90 flex items-center justify-center gap-2 transition-all"
+                                    >
+                                        <RefreshCw size={14} />
+                                        Retry
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Account fetch error */}
+                            {!isFetchingAccounts && errorMsg && (
+                                <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-rose-500/10 text-rose-400 text-xs">
+                                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="font-semibold">Could not load accounts</p>
+                                        <p className="mt-0.5 text-rose-400/70">{errorMsg}</p>
+                                        <button onClick={handleFetchAccounts} className="mt-2 underline text-rose-400 hover:text-rose-300">
+                                            Try again
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {authState === 'error' && errorMsg && (
+                        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-rose-500/10 text-rose-500 text-xs">
+                            <AlertCircle size={14} />
+                            {errorMsg}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 export default Bridge;
 
