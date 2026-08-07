@@ -1,10 +1,6 @@
-import OpenAI from "openai";
-
-const API_KEY = import.meta.env.VITE_OPENAI_API_KEY?.trim();
-
 export const openaiService = {
   isConfigured(): boolean {
-    return Boolean(API_KEY);
+    return true; // Routed through server proxy
   },
 
   async transcribeAudio(
@@ -15,27 +11,25 @@ export const openaiService = {
       model?: 'gpt-4o-mini-transcribe' | 'gpt-4o-transcribe' | 'whisper-1';
     } = {}
   ): Promise<string> {
-    if (!API_KEY) {
-      throw new Error("OpenAI API key is not configured. Please add VITE_OPENAI_API_KEY to your environment.");
-    }
-
-    const openai = new OpenAI({
-      apiKey: API_KEY,
-      dangerouslyAllowBrowser: true,
-    });
-
     try {
-      const file = new File([audioBlob], "audio.webm", { type: audioBlob.type });
-      
-      const response = await openai.audio.transcriptions.create({
-        file: file,
-        model: options.model || "gpt-4o-mini-transcribe",
-        ...(options.prompt ? { prompt: options.prompt } : {}),
-        ...(options.language ? { language: options.language } : {}),
-        response_format: "text",
+      const formData = new FormData();
+      formData.append('file', new File([audioBlob], 'audio.webm', { type: audioBlob.type }));
+      formData.append('model', options.model || 'whisper-1');
+      if (options.prompt) formData.append('prompt', options.prompt);
+      if (options.language) formData.append('language', options.language);
+      formData.append('response_format', 'text');
+
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
       });
 
-      return typeof response === 'string' ? response : ((response as any)?.text || '');
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Transcription failed: ${res.status} ${errText}`);
+      }
+
+      return await res.text();
     } catch (error: any) {
       console.error("Transcription Error:", error);
       throw error;

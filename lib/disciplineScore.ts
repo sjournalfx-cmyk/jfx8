@@ -8,14 +8,17 @@ const DISCIPLINE_SCORE_BY_ADHERENCE: Record<string, number> = {
 };
 
 export const calculateDisciplineScore = (trades: Trade[] = []) => {
-    if (!trades.length) return null;
+    // Only score trades where the user has explicitly set their plan adherence.
+    // Auto-synced or untagged trades are excluded to avoid unfairly penalising the score.
+    const taggedTrades = trades.filter(t => t.planAdherence != null);
+    if (!taggedTrades.length) return null;
 
-    const total = trades.reduce((sum, trade) => {
-        const adherence = trade.planAdherence || 'No Plan';
+    const total = taggedTrades.reduce((sum, trade) => {
+        const adherence = trade.planAdherence!;
         return sum + (DISCIPLINE_SCORE_BY_ADHERENCE[adherence] ?? 55);
     }, 0);
 
-    return Math.round(total / trades.length);
+    return Math.round(total / taggedTrades.length);
 };
 
 export const getDisciplineScoreLabel = (score: number) => {

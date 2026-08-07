@@ -67,7 +67,7 @@ const calculateTreemap = (items: BoxData[], width: number, height: number): BoxR
     return rects;
 };
 
-export const PairDistributionTreemapWidget: React.FC<P> = ({ trades = [], isDarkMode, currencySymbol = '$' }) => {
+export const PairDistributionTreemapWidget: React.FC<P> = ({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick }) => {
     const plotRef = useRef<HTMLDivElement | null>(null);
     const [plotSize, setPlotSize] = useState({ width: 1000, height: 400 });
 
@@ -122,7 +122,7 @@ const getColor = (pnl: number) => {
                 <div className="flex items-center gap-3 mb-4">
                     <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-100'} text-emerald-500`}><LayoutGrid size={20} /></div>
                     <h3 className="text-xl font-bold tracking-tight">Pair Distribution (Treemap)</h3>
-                    <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
+                    <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
                 </div>
                 <div className="flex-1 flex items-center justify-center text-xs opacity-40 w-full h-full">No trade data</div>
             </div>
@@ -134,7 +134,7 @@ const getColor = (pnl: number) => {
             <div className="flex items-center gap-3 mb-4">
                 <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-100'} text-emerald-500`}><LayoutGrid size={20} /></div>
                 <h3 className="text-xl font-bold tracking-tight">Pair Distribution (Treemap)</h3>
-                <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
+                <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
             </div>
             <div className="flex-1 flex flex-col w-full">
                 <div ref={plotRef} className="flex-1 flex items-stretch relative w-full h-full min-h-[320px]">

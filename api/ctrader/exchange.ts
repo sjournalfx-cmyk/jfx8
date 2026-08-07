@@ -28,6 +28,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Validate redirect_uri to prevent token interception via unvalidated open redirects
+  try {
+    const parsedUri = new URL(redirectUri);
+    const allowedHosts = ['localhost', '127.0.0.1', 'jfx-journal-3-3-beta.vercel.app', 'vercel.app'];
+    const isHostAllowed = allowedHosts.some((h) => parsedUri.hostname === h || parsedUri.hostname.endsWith('.' + h));
+    if (!isHostAllowed) {
+      res.status(400).json({ error: 'Invalid redirect_uri host' });
+      return;
+    }
+  } catch {
+    res.status(400).json({ error: 'Malformed redirect_uri' });
+    return;
+  }
+
   if (!CLIENT_ID || !CLIENT_SECRET) {
     res.status(500).json({ error: 'cTrader OAuth credentials not configured' });
     return;

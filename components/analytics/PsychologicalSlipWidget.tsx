@@ -7,9 +7,10 @@ interface PsychologicalSlipProps {
     trades: Trade[];
     isDarkMode: boolean;
     currencySymbol: string;
+    onInfoClick?: () => void;
 }
 
-export const PsychologicalSlipWidget: React.FC<PsychologicalSlipProps> = ({ trades, isDarkMode, currencySymbol }) => {
+export const PsychologicalSlipWidget: React.FC<PsychologicalSlipProps> = ({ trades, isDarkMode, currencySymbol, onInfoClick }) => {
     const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
     const data = useMemo(() => {

@@ -26,7 +26,7 @@ interface TooltipState {
     count: number;
 }
 
-export const PLByMindsetWidget: React.FC<PLByMindsetWidgetProps> = ({ trades = [], isDarkMode, currencySymbol }) => {
+export const PLByMindsetWidget: React.FC<PLByMindsetWidgetProps> = ({ trades = [], isDarkMode, currencySymbol, onInfoClick }) => {
     const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, x: 0, y: 0, label: '', value: 0, count: 0 });
 
     const chart = useMemo(() => {
@@ -55,7 +55,7 @@ export const PLByMindsetWidget: React.FC<PLByMindsetWidgetProps> = ({ trades = [
         <div className="bg-[#000000] rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.35)] p-6 border border-[#1f1f1f] flex flex-col pt-[20px]">
             <div className="flex items-center gap-2 mb-6">
                 <h2 className="text-[18px] font-bold text-white">P/L by Mindset</h2>
-                <Tooltip content="Shows total profit or loss grouped by your emotional state at the time of each trade." isDarkMode={true}>
+                <Tooltip content="Shows total profit or loss grouped by your emotional state at the time of each trade." isDarkMode={true} onInfoClick={onInfoClick}>
                     <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                 </Tooltip>
             </div>

@@ -104,6 +104,7 @@ export interface Trade {
   stopLoss: number;
   takeProfit: number;
   lots: number;
+  contractSize?: number; // Optional broker-specific contract size override (e.g. 100 for XAUUSD, 1 for US30 CFD)
   result: 'Win' | 'Loss' | 'BE' | 'Pending';
   pnl: number;
   commissions?: number;

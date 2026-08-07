@@ -6,9 +6,10 @@ import { Tooltip } from '../ui/Tooltip';
 interface MomentumStreakWidgetProps {
     trades: Trade[];
     isDarkMode: boolean;
+    onInfoClick?: () => void;
 }
 
-export const MomentumStreakWidget: React.FC<MomentumStreakWidgetProps> = ({ trades = [], isDarkMode }) => {
+export const MomentumStreakWidget: React.FC<MomentumStreakWidgetProps> = ({ trades = [], isDarkMode, onInfoClick }) => {
     const stats = useMemo(() => {
         const sortedTrades = [...trades].sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
 

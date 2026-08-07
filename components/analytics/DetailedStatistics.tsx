@@ -64,14 +64,14 @@ export const DetailedStatistics: React.FC<DetailedStatisticsProps> = ({ stats, u
     { label: 'Breakeven days', value: stats.breakevenDays },
     { label: 'Logged Days', value: stats.totalTradingDays },
     { label: 'Max Consecutive Winning Days', value: stats.maxConsecutiveWinDays },
-    { label: 'Max Consecutive Losing Days', value: stats.maxConsecutiveLossDays },
+    { label: 'Max Consecutive Losing Days', value: stats.maxConsecutiveLossDays },
     { label: 'Average Daily P&L', value: formatCurrency(stats.avgDailyPnL), isNegative: stats.avgDailyPnL < 0 },
     { label: 'Average Winning Day P&L', value: formatCurrency(stats.avgWinningDay) },
     { label: 'Average Losing Day P&L', value: formatCurrency(-stats.avgLosingDay), isNegative: true },
     { label: 'Largest Profitable Day (Profits)', value: formatCurrency(stats.largestWinDay) },
     { label: 'Largest Losing Day (Losses)', value: formatCurrency(stats.largestLossDay), isNegative: true },
     { label: 'Average Planned R-Multiple', value: `${stats.avgPlannedR.toFixed(2)}R` },
-    { label: 'Average Realized R-Multiple', value: `${stats.avgRealizedR.toFixed(2)}R` },
+    { label: 'Average Realized R-Multiple', value: stats.validRealizedRCount > 0 ? `${stats.avgRealizedR.toFixed(2)}R` : 'N/A — No Stop Loss set' },
     { label: 'Trade Expectancy', value: formatCurrency(stats.tradeExpectancy), isNegative: stats.tradeExpectancy < 0 },
     { label: 'Max Drawdown', value: formatCurrency(-stats.maxDrawdown), isNegative: true },
     { label: 'Max Drawdown, %', value: stats.maxDrawdown > 0 ? `-${((stats.maxDrawdown / (userProfile.initialBalance || 100000)) * 100).toFixed(2)}%` : '0.00%' },
@@ -81,6 +81,12 @@ export const DetailedStatistics: React.FC<DetailedStatisticsProps> = ({ stats, u
 
   return (
     <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 w-full ${isDarkMode ? 'bg-black' : 'bg-white'} p-8 rounded-[32px] border ${isDarkMode ? 'border-zinc-800 shadow-2xl' : 'border-slate-200 shadow-xl'}`}>
+      {/* Currency badge so trader knows what denomination all values are in */}
+      <div className="col-span-full flex items-center gap-2 mb-2">
+        <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] ${isDarkMode ? 'bg-white/[0.05] text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>
+          All values in {userProfile.currency || 'USD'} ({currencySymbol})
+        </span>
+      </div>
       <div className="space-y-0.5">
         {leftColumn.map((row, i) => (
           <StatRow key={i} label={row.label} value={row.value} isNegative={row.isNegative} />

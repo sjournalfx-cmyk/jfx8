@@ -10,9 +10,10 @@ interface TimeAnalysisMatrixProps {
   trades: Trade[];
   isDarkMode: boolean;
   currencySymbol: string;
+  onInfoClick?: () => void;
 }
 
-export const TimeAnalysisMatrixWidget: React.FC<TimeAnalysisMatrixProps> = ({ trades, isDarkMode, currencySymbol }) => {
+export const TimeAnalysisMatrixWidget: React.FC<TimeAnalysisMatrixProps> = ({ trades, isDarkMode, currencySymbol, onInfoClick }) => {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const [hoveredCell, setHoveredCell] = useState<{ day: string; hour: number; x: number; y: number } | null>(null);

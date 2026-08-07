@@ -31,7 +31,7 @@ interface TooltipState {
     count: number;
 }
 
-export const PLByPlanAdherenceWidget: React.FC<PLByPlanAdherenceWidgetProps> = ({ trades = [], isDarkMode, currencySymbol }) => {
+export const PLByPlanAdherenceWidget: React.FC<PLByPlanAdherenceWidgetProps> = ({ trades = [], isDarkMode, currencySymbol, onInfoClick }) => {
     const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, x: 0, y: 0, label: '', value: 0, count: 0 });
 
     const chart = useMemo(() => {
@@ -60,7 +60,7 @@ export const PLByPlanAdherenceWidget: React.FC<PLByPlanAdherenceWidgetProps> = (
         <div className="bg-[#000000] rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.35)] p-6 border border-[#1f1f1f] flex flex-col pt-[20px]">
             <div className="flex items-center gap-2 mb-6">
                 <h2 className="text-[18px] font-bold text-white">P/L by Plan Adherence</h2>
-                <Tooltip content="Compares profitability across different levels of trading plan adherence." isDarkMode={true}>
+                <Tooltip content="Compares profitability across different levels of trading plan adherence." isDarkMode={true} onInfoClick={onInfoClick}>
                     <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                 </Tooltip>
             </div>

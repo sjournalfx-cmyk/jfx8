@@ -8,6 +8,7 @@ interface CustomChartProps {
   trades: Trade[];
   drawings: Drawing[];
   isDarkMode: boolean;
+  showGrid?: boolean;
   onCoordinatesChange?: (chart: any, series: any) => void;
   onMouseUpdate?: (x: number, y: number, coords: { time: number, price: number, logical: number } | null) => void;
   onSelectBar?: (index: number) => void;
@@ -26,6 +27,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
   trades,
   drawings,
   isDarkMode,
+  showGrid = false,
   onCoordinatesChange,
   onMouseUpdate,
   onSelectBar,
@@ -59,6 +61,8 @@ const CustomChart: React.FC<CustomChartProps> = ({
   });
 
   const [chartRevision, setChartRevision] = useState(0);
+  // Stable ref so onCoordinatesChange never depends on mockApi identity
+  const mockApiRef = useRef<any>(null);
 
   // Notify parent of view state changes
   const notifyViewStateChange = useCallback(() => {
@@ -213,6 +217,9 @@ const CustomChart: React.FC<CustomChartProps> = ({
     };
   }, [data, getX, getY, getIndexFromX, getPriceFromY]); // Implicitly depends on chartRevision via getX/getY
 
+  // Keep the ref in sync without causing re-renders
+  useEffect(() => { mockApiRef.current = mockApi; }, [mockApi]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || data.length === 0) return;
@@ -280,20 +287,22 @@ const CustomChart: React.FC<CustomChartProps> = ({
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, width, height);
 
-    // 3. Grid
-    ctx.strokeStyle = isDarkMode ? '#0a0a0a' : '#f8fafc';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const y = (chartHeight / 10) * i;
-      ctx.moveTo(0, y); ctx.lineTo(chartWidth, y);
-    }
+    // 3. Grid — timeStep declared here so time labels can use it below
     const timeStep = Math.max(1, Math.ceil(100 / scaleX));
-    for (let i = start - (start % timeStep); i <= end; i += timeStep) {
-      const x = getX(i);
-      ctx.moveTo(x, 0); ctx.lineTo(x, chartHeight);
+    if (showGrid) {
+      ctx.strokeStyle = isDarkMode ? '#0a0a0a' : '#f8fafc';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const y = (chartHeight / 10) * i;
+        ctx.moveTo(0, y); ctx.lineTo(chartWidth, y);
+      }
+      for (let i = start - (start % timeStep); i <= end; i += timeStep) {
+        const x = getX(i);
+        ctx.moveTo(x, 0); ctx.lineTo(x, chartHeight);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
 
     // 4. Candles
     const candleWidth = Math.max(1, Math.min(scaleX * 0.72, scaleX - 1));
@@ -575,9 +584,9 @@ const CustomChart: React.FC<CustomChartProps> = ({
     }
   }, [data, isDarkMode, getX, getY, getIndexFromX, drawings]);
 
-  // Sync API with parent only when necessary
+  // Sync API with parent whenever mockApi changes or onCoordinatesChange updates
   useEffect(() => {
-    if (onCoordinatesChange) {
+    if (onCoordinatesChange && mockApi) {
       onCoordinatesChange(mockApi.chart, mockApi.series);
     }
   }, [mockApi, onCoordinatesChange]);

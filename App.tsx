@@ -329,6 +329,14 @@ const {
       }));
     } catch (error) {
       console.warn('Failed to generate daily psychology insights:', error);
+      setPsychologyInsightsCache((current) => ({
+        ...current,
+        [psychologyInsightsScope]: {
+          date: todayPsychologyInsightsKey,
+          generatedAt: new Date().toISOString(),
+          content: buildPsychologyInsightsFallbackContent(),
+        },
+      }));
     } finally {
       psychologyInsightsRequestRef.current = null;
       setIsRefreshingPsychologyInsights(false);

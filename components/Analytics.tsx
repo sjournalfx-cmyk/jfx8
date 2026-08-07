@@ -36,6 +36,7 @@ import { SymbolPerformanceWidget } from './analytics/SymbolPerformanceWidget';
 import { DrawdownOverTimeWidget } from './analytics/DrawdownOverTimeWidget';
 import { StrategyPerformancePieChart } from './analytics/StrategyPerformancePieChart';
 import { TradingMistakesBarChartWidget } from './analytics/TradingMistakesBarChartWidget';
+import { RevenueMatrixWidget } from './analytics/RevenueMatrixWidget';
 import { OutcomeDistributionWidget } from './analytics/OutcomeDistributionWidget';
 import { RobustnessLab } from './analytics/RobustnessLab';
 import { ComparisonView } from './analytics/ComparisonView';
@@ -45,6 +46,7 @@ import { TimeAnalysisMatrixWidget } from './analytics/TimeAnalysisMatrixWidget';
 import { DetailedStatistics } from './analytics/DetailedStatistics';
 import { PLByPlanAdherenceWidget } from './analytics/PLByPlanAdherenceWidget';
 import { CashTransactionsView } from './analytics/CashTransactionsView';
+import { WidgetHelpDrawer } from './ui/WidgetHelpDrawer';
 import { resolveBridgeBackedInitialBalance } from '../lib/bridgeBalance';
 import { calculateDisciplineScore } from '../lib/disciplineScore';
 import { type PsychologyInsightsEntry } from '../lib/psychologyInsights';
@@ -289,8 +291,8 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     const [allWidgetsOrder, setAllWidgetsOrder] = useLocalStorage('analytics_bento_order', [
       'winRate', 'profitFactor', 'grossProfit', 'grossLoss',
       'equityCurve', 'drawdown',
-      'streakMomentum', 'symbolPerformance', 'largestWinLoss', 'currencyStrength', 'tradeExit',
-      'outcomeDist', 'tiltScore', 'riskReward', 'plMindset', 'plAdherence', 'tradeGrade', 'psychSlip', 'timeMatrix'
+      'streakMomentum', 'symbolPerformance', 'largestWinLoss', 'currencyStrength',
+      'outcomeDist', 'riskReward', 'tradeGrade', 'psychSlip', 'timeMatrix'
     ]);
 
     const reportWidgets = useMemo(() => {
@@ -318,15 +320,37 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     }, [userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline, completedTrades]);
 
     const equityData = useMemo(() => {
-        const safeTrades = completedTrades;
+        // Merge completed trades and cash transactions by timestamp
+        type TimelineEvent = { timestamp: number; delta: number };
+
+        const events: TimelineEvent[] = [
+            ...completedTrades.map((t) => {
+                const dt = `${t.date}T${t.time || '00:00'}`;
+                const parsed = new Date(dt).getTime();
+                return {
+                    timestamp: Number.isNaN(parsed) ? 0 : parsed,
+                    delta: safePnL(t.pnl),
+                };
+            }),
+            ...cashTransactions.map((c) => {
+                const parsed = new Date(c.date).getTime();
+                const isDeposit = c.type === 'Deposit' || c.type === 'Interest' || c.type === 'Promotion';
+                const sign = isDeposit ? 1 : -1;
+                return {
+                    timestamp: Number.isNaN(parsed) ? 0 : parsed,
+                    delta: sign * Math.abs(c.amount || 0),
+                };
+            }),
+        ].sort((a, b) => a.timestamp - b.timestamp);
+
         let cumulative = effectiveInitialBalance;
         const data = [cumulative];
-        safeTrades.forEach(t => {
-            cumulative += safePnL(t.pnl);
+        events.forEach((e) => {
+            cumulative += e.delta;
             data.push(cumulative);
         });
         return data;
-    }, [completedTrades, effectiveInitialBalance]);
+    }, [completedTrades, cashTransactions, effectiveInitialBalance]);
 
     const psychologySummary = useMemo(() => {
         const planBuckets: Record<'Followed Exactly' | 'Minor Deviation' | 'Major Deviation' | 'No Plan', { wins: number; total: number; pnl: number }> = {
@@ -376,7 +400,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     }, [completedTrades]);
 
     const disciplineScore = useMemo(() => {
-        return calculateDisciplineScore(completedTrades) ?? 78;
+        return calculateDisciplineScore(completedTrades) ?? 0;
     }, [completedTrades]);
 
     const mindsetChartPoints = useMemo<BarChartPoint[]>(() => {
@@ -429,7 +453,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
         }));
     }, [completedTrades]);
 
-const renderPsychologyLayout = () => (
+    const renderPsychologyLayout = () => (
         <div className="space-y-6 pb-20">
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,2.05fr)]">
                 <section className="flex min-h-[380px] flex-col rounded-[20px] border border-[#1f1f1f] bg-[#000000] px-7 py-7 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
@@ -440,6 +464,7 @@ const renderPsychologyLayout = () => (
                                 content={scoreToggled ? radarTooltipContent : 'Your discipline score based on plan adherence across all trades. Higher is better.'}
                                 isDarkMode={true}
                                 compact={scoreToggled}
+                                onInfoClick={() => handleOpenHelp('tiltScore')}
                             >
                                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                             </Tooltip>
@@ -528,7 +553,7 @@ const renderPsychologyLayout = () => (
                     <div className="mb-3.5 flex items-start justify-between gap-4">
                         <div className="flex items-center gap-2">
                             <h2 className="text-[18px] font-bold text-white">Key Insights & Warnings</h2>
-                            <Tooltip content="AI-generated breakdown of your cognitive strengths, warning patterns, and suggested improvements based on your trade psychology." isDarkMode={true}>
+                            <Tooltip content="AI-generated breakdown of your cognitive strengths, warning patterns, and suggested improvements based on your trade psychology." isDarkMode={true} onInfoClick={() => handleOpenHelp('psychSlip')}>
                                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                             </Tooltip>
                         </div>
@@ -595,13 +620,9 @@ const renderPsychologyLayout = () => (
                 </section>
             </div>
 
-            {/* Charts Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
-                {/* P/L by Mindset */}
-                <PLByMindsetWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />
-
-                {/* P/L by Plan Adherence */}
-                <PLByPlanAdherenceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />
+                <PLByMindsetWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('plMindset')} />
+                <PLByPlanAdherenceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('plAdherence')} />
             </div>
         </div>
     );
@@ -612,7 +633,7 @@ const renderPsychologyLayout = () => (
                 <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                         <span className="flex items-center gap-2"><Target size={14} className="text-indigo-500" /> Win Rate</span>
-                        <Tooltip content="The percentage of closed trades that resulted in a profit." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                        <Tooltip content="The percentage of closed trades that resulted in a profit." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('winRate')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black">{Number(stats.winRate).toFixed(1)}%</div>
                 </div>
@@ -621,7 +642,7 @@ const renderPsychologyLayout = () => (
                 <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                         <span className="flex items-center gap-2"><Gauge size={14} className="text-indigo-500" /> Profit Factor</span>
-                        <Tooltip content="Gross Profit divided by Gross Loss. A value above 1.0 means the system is profitable." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                        <Tooltip content="Gross Profit divided by Gross Loss. A value above 1.0 means the system is profitable." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('profitFactor')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black">{Number(stats.profitFactor).toFixed(1)}</div>
                 </div>
@@ -630,7 +651,7 @@ const renderPsychologyLayout = () => (
                 <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                         <span className="flex items-center gap-2"><TrendingUp size={14} className="text-emerald-500" /> Gross Profit</span>
-                        <Tooltip content="Total profit summed from all winning closed trades." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                        <Tooltip content="Total profit summed from all winning closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('grossProfit')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black text-emerald-500">+{currencySymbol}{stats.grossProfit.toLocaleString()}</div>
                 </div>
@@ -639,33 +660,30 @@ const renderPsychologyLayout = () => (
                 <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                         <span className="flex items-center gap-2"><TrendingDown size={14} className="text-rose-500" /> Gross Loss</span>
-                        <Tooltip content="Total loss summed from all losing closed trades." isDarkMode={isDarkMode}><HelpCircle size={12} className="cursor-help hover:opacity-100" /></Tooltip>
+                        <Tooltip content="Total loss summed from all losing closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('grossLoss')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black text-rose-500">-{currencySymbol}{stats.grossLoss.toLocaleString()}</div>
                 </div>
             );
-            case 'equityCurve': return <EquityCurveWidget trades={completedTrades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
-            case 'drawdown': return <DrawdownOverTimeWidget trades={completedTrades} isDarkMode={isDarkMode} userProfile={userProfile} startingBalance={effectiveInitialBalance} />;
-            case 'streakMomentum': return <MomentumStreakWidget trades={completedTrades} isDarkMode={isDarkMode} />;
-            case 'symbolPerformance': return <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
-            case 'largestWinLoss': return <LargestWinLossWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
-            case 'currencyStrength': return <CurrencyStrengthMeter isDarkMode={isDarkMode} trades={completedTrades} />;
-            case 'outcomeDist': return <OutcomeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} />;
-            case 'tiltScore': return null;
+            case 'equityCurve': return <EquityCurveWidget trades={completedTrades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('equityCurve')} />;
+            case 'drawdown': return <DrawdownOverTimeWidget trades={completedTrades} isDarkMode={isDarkMode} userProfile={userProfile} startingBalance={effectiveInitialBalance} onInfoClick={() => handleOpenHelp('drawdown')} />;
+            case 'streakMomentum': return <MomentumStreakWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('momentumStreak')} />;
+            case 'symbolPerformance': return <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('currencyStrength')} />;
+            case 'largestWinLoss': return <LargestWinLossWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('winRate')} />;
+            case 'currencyStrength': return <CurrencyStrengthMeter isDarkMode={isDarkMode} trades={completedTrades} onInfoClick={() => handleOpenHelp('currencyStrength')} />;
+            case 'outcomeDist': return <OutcomeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('winRate')} />;
             case 'riskReward': return (
                 <div className={`h-full p-8 rounded-[32px] border ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                     <h3 className="font-bold text-lg mb-6 flex items-center justify-between">
                         <span className="flex items-center gap-2"><Activity size={20} className="text-indigo-500" /> Risk/Reward</span>
-                        <Tooltip content="Compares average winning trade size vs average losing trade size. Higher is better." isDarkMode={isDarkMode}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
+                        <Tooltip content="Compares average winning trade size vs average losing trade size. Higher is better." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('profitFactor')}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </h3>
                     <div className="space-y-6"><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Win</span><span className="text-xl font-black text-emerald-500">{currencySymbol}{Math.round(stats.avgWin).toLocaleString()}</span></div><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Loss</span><span className="text-xl font-black text-rose-500">{currencySymbol}{Math.round(stats.avgLoss).toLocaleString()}</span></div></div>
                 </div>
             );
-            case 'plMindset': return null;
-            case 'plAdherence': return null;
-            case 'tradeGrade': return <TradeGradeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} />;
-            case 'psychSlip': return <PsychologicalSlipWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
-            case 'timeMatrix': return <TimeAnalysisMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />;
+            case 'tradeGrade': return <TradeGradeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradeGrade')} />;
+            case 'psychSlip': return <PsychologicalSlipWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('psychSlip')} />;
+            case 'timeMatrix': return <TimeAnalysisMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('revenueMatrix')} />;
             default: return null;
         }
     };
@@ -697,6 +715,13 @@ const renderPsychologyLayout = () => (
     };
 
     const [activeTab, setActiveTab] = useState<'overview' | 'trades' | 'psychology' | 'advanced' | 'comparison' | 'cash' | 'reports' | 'session'>('overview');
+    const [isHelpDrawerOpen, setIsHelpDrawerOpen] = useState(false);
+    const [helpWidgetId, setHelpWidgetId] = useState<string | null>(null);
+
+    const handleOpenHelp = (id: string) => {
+        setHelpWidgetId(id);
+        setIsHelpDrawerOpen(true);
+    };
 
     const tabDefinitions = [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -708,30 +733,6 @@ const renderPsychologyLayout = () => (
         { id: 'reports', label: 'Comparison', icon: Shield },
         { id: 'cash', label: 'Transactions', icon: Coins }
     ];
-
-    const widgetCategories = {
-        overview: ['winRate', 'profitFactor', 'grossProfit', 'grossLoss', 'equityCurve', 'drawdown', 'currencyStrength', 'riskReward', 'tradeGrade'],
-        trades: ['symbolPerformance', 'largestWinLoss', 'outcomeDist'],
-        psychology: ['psychSlip', 'streakMomentum', 'tiltScore', 'plMindset', 'plAdherence'],
-        advanced: []
-    };
-
-    const renderCategoryWidgets = (category: string) => {
-        const widgetIds = widgetCategories[category as keyof typeof widgetCategories] || [];
-        return (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={widgetIds} strategy={rectSortingStrategy}>
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 pb-20 auto-rows-min">
-                        {widgetIds.map(id => (
-                            <SortableWidget key={id} id={id} className={getColSpan(id)}>
-                                {renderWidget(id)}
-                            </SortableWidget>
-                        ))}
-                    </div>
-                </SortableContext>
-            </DndContext>
-        );
-    };
 
     const renderOverviewLayout = () => (
         <div className="space-y-6 pb-20">
@@ -745,7 +746,7 @@ const renderPsychologyLayout = () => (
                     <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                         <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                             <span className="flex items-center gap-1.5"><TrendingUp size={12} className="text-emerald-500" /> Total P&L</span>
-                            <Tooltip content="Net realized profit or loss from all closed trades." isDarkMode={isDarkMode}><HelpCircle size={10} className="cursor-help hover:opacity-100" /></Tooltip>
+                            <Tooltip content="Net realized profit or loss from all closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('grossProfit')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                         </span>
                         <div className="text-xl font-black text-emerald-500">{currencySymbol}{stats.netProfit.toLocaleString()}</div>
                     </div>
@@ -754,7 +755,7 @@ const renderPsychologyLayout = () => (
                     <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                         <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                             <span className="flex items-center gap-1.5"><Activity size={12} className="text-indigo-500" /> Risk/Reward</span>
-                            <Tooltip content="Average winning trade amount divided by average losing trade amount." isDarkMode={isDarkMode}><HelpCircle size={10} className="cursor-help hover:opacity-100" /></Tooltip>
+                            <Tooltip content="Average winning trade amount divided by average losing trade amount." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('profitFactor')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                         </span>
                         <div className="text-xl font-black">{stats.avgWin > 0 && stats.avgLoss < 0 ? (Math.abs(stats.avgWin) / Math.abs(stats.avgLoss)).toFixed(2) : '0.00'}</div>
                     </div>
@@ -763,7 +764,7 @@ const renderPsychologyLayout = () => (
 
             <div className="grid grid-cols-1 gap-6">
                 <div className="min-h-[120px]">
-                    <MomentumStreakWidget trades={completedTrades} isDarkMode={isDarkMode} />
+                    <MomentumStreakWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('momentumStreak')} />
                 </div>
             </div>
 
@@ -823,10 +824,10 @@ const renderPsychologyLayout = () => (
             {activeTab === 'trades' && (
                 <div className="space-y-6 pb-20">
                     <div className="grid grid-cols-1 gap-4">
-                        <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />
+                        <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('currencyStrength')} />
                     </div>
                     <div className="grid grid-cols-1 gap-4">
-                        <PairDistributionTreemapWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />
+                        <PairDistributionTreemapWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('currencyStrength')} />
                     </div>
                 </div>
             )}
@@ -837,11 +838,14 @@ const renderPsychologyLayout = () => (
                 <div className="space-y-6 pb-20">
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                         <div className="min-h-[280px]">
-                            <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />
+                            <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('tradeGrade')} />
                         </div>
                         <div className="min-h-[280px]">
-                            <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} />
+                            <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('psychSlip')} />
                         </div>
+                    </div>
+                    <div className="w-full min-h-[320px]">
+                        <RevenueMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('revenueMatrix')} />
                     </div>
                 </div>
             )}
@@ -908,9 +912,18 @@ const renderPsychologyLayout = () => (
                         trades={completedTrades} 
                         isDarkMode={isDarkMode} 
                         currencySymbol={currencySymbol} 
+                        onInfoClick={() => handleOpenHelp('revenueMatrix')}
                     />
                 </div>
             )}
+
+            {/* Widget Details Help Drawer - rendered once at root so it appears above all content */}
+            <WidgetHelpDrawer
+                isOpen={isHelpDrawerOpen}
+                widgetId={helpWidgetId}
+                onClose={() => setIsHelpDrawerOpen(false)}
+                isDarkMode={isDarkMode}
+            />
         </div>
     );
 };

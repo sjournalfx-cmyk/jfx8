@@ -27,6 +27,9 @@ const dropTags = new Set(['script', 'style', 'iframe', 'object', 'embed', 'meta'
 
 const isSafeHref = (href: string) => {
   const normalized = href.trim().toLowerCase();
+  if (normalized.startsWith('data:') || normalized.startsWith('javascript:')) {
+    return false;
+  }
   return (
     normalized.startsWith('/') ||
     normalized.startsWith('#') ||

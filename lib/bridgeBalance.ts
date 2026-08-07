@@ -63,11 +63,13 @@ export const resolveBridgeBackedInitialBalance = ({
   isBridgeOnline?: boolean;
 }) => {
   const currentPlan = normalizePlan(userProfile?.plan);
-  const canUseBridgeBalance =
+  // Only Pro (HOBBY) and Premium (STANDARD) tiers sync balance from the broker.
+  // FREE tier always uses the manually configured initialBalance.
+  const isBrokerSyncTier =
     currentPlan === APP_CONSTANTS.PLANS.HOBBY ||
     currentPlan === APP_CONSTANTS.PLANS.STANDARD;
 
-  if (!canUseBridgeBalance) return userProfile?.initialBalance || 0;
+  if (!isBrokerSyncTier) return userProfile?.initialBalance || 0;
 
   const totalPnL = trades.reduce((sum, trade) => sum + getSafePnL(trade.pnl), 0);
   return resolveBridgeBackedBalance({

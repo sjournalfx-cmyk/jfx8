@@ -207,23 +207,6 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
     const [currentLayoutName, setCurrentLayoutName] = useState('Default Layout');
     const settingsRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
-                setIsSettingsOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            window.dispatchEvent(new Event('resize'));
-        }, 100);
-        return () => clearTimeout(timer);
-    }, [layout, isWatchlistOpen, isFocusMode, layoutSettings]);
-
     const handleChartClick = (id: number) => {
         setActiveChartId(id);
         const chart = charts.find(c => c.id === id);
@@ -233,7 +216,6 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
     const handleSymbolChange = (newSymbol: string, skipWarning = false) => {
         const formatted = newSymbol.toUpperCase();
 
-        // Check if the symbol actually changed
         const currentChart = charts.find(c => c.id === activeChartId);
         const isActualChange = isSynced
             ? charts.some(c => c.symbol !== formatted)
@@ -260,7 +242,7 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
         } else {
             showDrawingWarning(
                 'Change Symbol?',
-                `Switching to ${formatted} will clear any drawings on the chart. Do you want to continue?`,
+                `Active drawings will be cleared when switching to ${formatted}.`,
                 doChange
             );
         }
@@ -290,7 +272,7 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
 
         showDrawingWarning(
             `Apply ${type} Preset?`,
-            `Applying the ${type} timeframe preset will change intervals and clear any drawings. Continue?`,
+            `This will change all intervals and clear any active chart drawings.`,
             doChange
         );
     };
@@ -299,7 +281,6 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
         const getNextInterval = (current: string) => {
             const idx = INTERVALS.indexOf(current);
             if (idx === -1) return '60';
-
             if (direction === 'in') {
                 return idx > 0 ? INTERVALS[idx - 1] : INTERVALS[0];
             } else {
@@ -317,7 +298,7 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
 
         showDrawingWarning(
             'Change Timeframe?',
-            `Zooming ${direction} will change the interval and clear any drawings. Continue?`,
+            `Changing the interval will clear any active chart drawings.`,
             doChange
         );
     };
@@ -344,7 +325,7 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
         const styles: React.CSSProperties = {
             height: layoutSettings.isScrollable ? 'auto' : '100%',
             minHeight: '100%',
-            display: 'grid', // Ensure grid is always active
+            display: 'grid',
         };
 
         if (layout === 'split-v') {
@@ -354,7 +335,6 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
         } else if (layout === 'focus-main') {
             styles.gridTemplateColumns = `${splitRatio}% 1fr`;
         }
-        // 'single' and 'quad' rely on Tailwind classes grid-cols-1/2 and grid-rows-1/2
 
         return styles;
     };
@@ -579,7 +559,7 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
                                 if (!isVisible(chart.id)) return null;
                                 const isActive = activeChartId === chart.id;
                                 return (
-                                    <div key={chart.id} onClick={() => handleChartClick(chart.id)} className={`relative rounded-xl border-2 ${isActive ? 'border-indigo-500 shadow-lg z-10' : isDarkMode ? 'border-zinc-800' : 'border-slate-200'}`} style={getItemStyle(chart.id)}>
+                                    <div key={chart.id} onClick={() => handleChartClick(chart.id)} className={`relative rounded-xl border-2 overflow-hidden ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200'} ${isActive ? 'border-indigo-500 shadow-lg z-10' : ''}`} style={getItemStyle(chart.id)}>
                                         <div className="absolute top-2 left-2 z-20 bg-black/50 backdrop-blur-md rounded-lg p-1 flex gap-2"><span className="text-xs font-bold text-white px-2 py-1">{chart.symbol}</span><span className="text-xs font-mono text-zinc-300 px-2 py-1 bg-white/10 rounded">{chart.interval}</span></div>
                                         <TradingViewWidget
                                             symbol={chart.symbol}
@@ -619,35 +599,48 @@ const ChartGrid: React.FC<ChartGridProps> = ({ isDarkMode, isFocusMode = false, 
 
             {/* Drawing Warning Confirmation Modal */}
             {drawingWarning.isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className={`w-full max-w-md mx-4 p-6 rounded-2xl shadow-2xl border ${isDarkMode ? 'bg-[#000000] border-zinc-700' : 'bg-white border-slate-200'}`}>
-                        <div className="flex items-start gap-4">
-                            <div className="p-3 rounded-xl bg-amber-500/10 text-amber-500">
-                                <AlertTriangle size={24} />
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setDrawingWarning(prev => ({ ...prev, isOpen: false }))}>
+                    {/* Backdrop */}
+                    <div className="absolute inset-0 bg-black/70 backdrop-blur-md" />
+
+                    {/* Card */}
+                    <div
+                        className="relative w-full max-w-[340px] rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl shadow-black/60 overflow-hidden"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Amber accent line top */}
+                        <div className="h-[2px] w-full bg-gradient-to-r from-amber-500/80 via-orange-400/60 to-transparent" />
+
+                        <div className="p-5">
+                            {/* Icon + title row */}
+                            <div className="flex items-center gap-3 mb-3">
+                                <div className="w-9 h-9 shrink-0 rounded-xl bg-amber-500/10 flex items-center justify-center ring-1 ring-amber-500/20">
+                                    <AlertTriangle size={16} className="text-amber-400" />
+                                </div>
+                                <h3 className="text-[15px] font-bold text-white tracking-tight">{drawingWarning.title}</h3>
                             </div>
-                            <div className="flex-1">
-                                <h3 className="text-lg font-bold mb-2">{drawingWarning.title}</h3>
-                                <p className={`text-sm leading-relaxed ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
-                                    {drawingWarning.message}
-                                </p>
+
+                            {/* Message */}
+                            <p className="text-[13px] text-zinc-400 leading-snug mb-5">{drawingWarning.message}</p>
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setDrawingWarning(prev => ({ ...prev, isOpen: false }))}
+                                    className="flex-1 h-9 rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-[13px] font-semibold transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        drawingWarning.onConfirm();
+                                        setDrawingWarning(prev => ({ ...prev, isOpen: false }));
+                                    }}
+                                    className="flex-1 h-9 rounded-xl bg-[#FF4F00] hover:bg-[#e04700] text-white text-[13px] font-bold shadow-lg shadow-orange-500/20 transition-colors"
+                                >
+                                    Continue
+                                </button>
                             </div>
-                        </div>
-                        <div className="flex gap-3 mt-6">
-                            <button
-                                onClick={() => setDrawingWarning(prev => ({ ...prev, isOpen: false }))}
-                                className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm ${isDarkMode ? 'bg-black hover:bg-black text-zinc-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={() => {
-                                    drawingWarning.onConfirm();
-                                    setDrawingWarning(prev => ({ ...prev, isOpen: false }));
-                                }}
-                                className="flex-1 py-3 px-4 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/20"
-                            >
-                                Continue
-                            </button>
                         </div>
                     </div>
                 </div>

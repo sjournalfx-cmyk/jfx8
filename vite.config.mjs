@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import { fetchPublicEconomicCalendar } from './lib/economicCalendar.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -175,7 +174,14 @@ const mt5PythonPlugin = () => {
           const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
           const from = requestUrl.searchParams.get('from') || undefined;
           const to = requestUrl.searchParams.get('to') || undefined;
-          const payload = await fetchPublicEconomicCalendar({ from, to });
+          const tz = requestUrl.searchParams.get('tz') || undefined;
+
+          const args = [];
+          if (from) args.push('--start', from);
+          if (to) args.push('--end', to);
+          if (tz) args.push('--tz', tz);
+
+          const payload = await runPythonScript('get_forexfactory_calendar.py', args);
 
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Content-Type', 'application/json');
@@ -300,6 +306,7 @@ const mt5PythonPlugin = () => {
       });
 
       const routeCache = new Map();
+      const MAX_CACHE_SIZE = 200;
       const CACHE_TTL_MS = 6000;
 
       const getCachedOrRun = async (cacheKey, runFn) => {
@@ -308,8 +315,14 @@ const mt5PythonPlugin = () => {
         if (cached && (now - cached.timestamp < CACHE_TTL_MS)) {
           return cached.data;
         }
+
         const data = await runFn();
         if (data && !data.error) {
+          // Bounded cache eviction if size grows too large
+          if (routeCache.size >= MAX_CACHE_SIZE && !routeCache.has(cacheKey)) {
+            const firstKey = routeCache.keys().next().value;
+            if (firstKey !== undefined) routeCache.delete(firstKey);
+          }
           routeCache.set(cacheKey, { timestamp: Date.now(), data });
         }
         return data;
@@ -524,20 +537,6 @@ const readCtraderEnv = (key) => {
         res.end();
       });
 
-      // DEV ONLY: diagnostic endpoint — visit http://localhost:3000/api/ctrader/debug-env
-      server.middlewares.use('/api/ctrader/debug-env', (req, res) => {
-        const cid  = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
-        const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
-        const mask = (v) => v ? `${v.slice(0, 6)}…${v.slice(-4)} (len=${v.length})` : '⚠ MISSING';
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          VITE_CTRADER_CLIENT_ID:     mask(cid),
-          VITE_CTRADER_CLIENT_SECRET: mask(csec),
-          redirect_uri_used: 'http://localhost:3000/api/ctrader/callback',
-          note: 'Compare these with your cTrader Open API portal — https://openapi.ctrader.com',
-        }, null, 2));
-      });
-
       server.middlewares.use('/api/ctrader/exchange', async (req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -739,7 +738,14 @@ const readCtraderEnv = (key) => {
         try {
           const demoAccs = await fetchFromEnv('demo.ctraderapi.com');
           const liveAccs = await fetchFromEnv('live.ctraderapi.com');
-          const all = [...demoAccs, ...liveAccs];
+          const merged = [...demoAccs, ...liveAccs];
+          const seen = new Map();
+          for (const acc of merged) {
+            if (!seen.has(acc.ctidTraderAccountId)) {
+              seen.set(acc.ctidTraderAccountId, acc);
+            }
+          }
+          const all = Array.from(seen.values());
           console.log(`[cTrader] /api/ctrader/accounts → ${all.length} accounts (${demoAccs.length} demo, ${liveAccs.length} live)`);
           res.statusCode = 200;
           res.end(JSON.stringify({ accounts: all }));
@@ -860,10 +866,6 @@ export default defineConfig(({ mode }) => {
       },
     },
     plugins: [react(), mt5PythonPlugin()],
-    define: {
-      'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

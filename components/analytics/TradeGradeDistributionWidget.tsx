@@ -6,9 +6,10 @@ import { Tooltip } from '../ui/Tooltip';
 interface TradeGradeDistributionProps {
     trades: Trade[];
     isDarkMode: boolean;
+    onInfoClick?: () => void;
 }
 
-export const TradeGradeDistributionWidget: React.FC<TradeGradeDistributionProps> = ({ trades, isDarkMode }) => {
+export const TradeGradeDistributionWidget: React.FC<TradeGradeDistributionProps> = ({ trades, isDarkMode, onInfoClick }) => {
     const distribution = useMemo(() => {
         const counts = [0, 0, 0, 0, 0]; // 1-5 stars
         trades.forEach(t => {

@@ -44,35 +44,41 @@ class ErrorBoundary extends React.Component<Props, State> {
       const { error } = this.state;
 
       return (
-        <div className={`min-h-dvh w-full flex items-center justify-center p-6 ${isDarkMode ? 'bg-[#000000] text-white' : 'bg-slate-50 text-slate-900'}`}>
-          <div className={`max-w-md w-full p-8 rounded-3xl border text-center ${isDarkMode ? 'bg-black border-zinc-800 shadow-2xl shadow-black' : 'bg-white border-slate-200 shadow-xl'}`}>
-            <div className={`w-20 h-20 rounded-2xl mx-auto mb-6 flex items-center justify-center ${isDarkMode ? 'bg-rose-500/10 text-rose-500' : 'bg-rose-50 text-rose-600'}`}>
+        <div className={`fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center px-4 py-8 overflow-y-auto ${isDarkMode ? 'bg-[#000000] text-white' : 'bg-slate-50 text-slate-900'}`}>
+          <div className={`w-[min(100%,28rem)] sm:w-[min(100%,32rem)] p-6 sm:p-8 rounded-3xl border text-center relative shadow-2xl ${isDarkMode ? 'bg-[#0a0a0c] border-zinc-800 shadow-black/80' : 'bg-white border-slate-200 shadow-xl'}`}>
+            <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl mx-auto mb-5 flex items-center justify-center ${isDarkMode ? 'bg-rose-500/10 text-rose-500' : 'bg-rose-50 text-rose-600'}`}>
               <AlertTriangle size={40} />
             </div>
             
-            <h1 className="text-2xl font-black tracking-tight mb-2">Something went wrong</h1>
-            <p className={`text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
-              An unexpected error occurred. This has been logged and we'll look into it.
-              {error && (
-                <code className="block mt-4 p-3 rounded-lg bg-black/20 text-xs font-mono text-left overflow-x-auto">
-                  {error.message}
-                </code>
-              )}
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight mb-3 leading-tight">Something went wrong</h1>
+            <p className={`text-sm sm:text-[15px] mb-6 leading-relaxed max-w-[26rem] mx-auto ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+              We hit an unexpected error in this view. It has been logged.
             </p>
 
-            <div className="flex flex-col gap-3">
+            {error && (
+              <div className="mb-8 text-left">
+                <span className="text-[10px] font-black uppercase tracking-wider text-rose-500 mb-2 block">Error details</span>
+                <code className={`block p-3 rounded-xl text-xs font-mono overflow-x-auto max-h-32 border whitespace-pre-wrap break-words ${
+                  isDarkMode ? 'bg-black border-zinc-800 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}>
+                  {error.message}
+                </code>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               <button
                 onClick={this.handleReset}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-[#FF4F01] hover:bg-[#FF4F01]/90 text-white rounded-xl font-bold transition-all active:scale-95 shadow-lg shadow-[#FF4F01]/20"
+                className="flex-1 min-h-12 flex items-center justify-center gap-2 px-6 py-3.5 bg-[#FF4F01] hover:bg-[#FF4F01]/90 text-white rounded-xl font-bold transition-all active:scale-95 shadow-lg shadow-[#FF4F01]/20 text-sm"
               >
                 <RefreshCw size={18} /> Reload Application
               </button>
               
               <button
                 onClick={() => window.location.href = '/'}
-                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all border ${
+                className={`flex-1 min-h-12 flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold transition-all border text-sm ${
                   isDarkMode 
-                    ? 'bg-black border-zinc-700 text-white hover:bg-black' 
+                    ? 'bg-zinc-900 border-zinc-800 text-white hover:bg-zinc-800' 
                     : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
                 }`}
               >

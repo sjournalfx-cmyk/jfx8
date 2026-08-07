@@ -42,3 +42,8 @@ temp_agent_skills/
 check.txt
 tsc_output.txt
 GEMINI.md
+
+# Python tooling
+__pycache__/
+*.pyc
+scripts/.cache_calendar.json

@@ -21,13 +21,13 @@ function TradingViewWidget({
   autosize = true,
   chartId = "default",
   showLegend = true,
-  showGrid = true,
+  showGrid = false,
   showToolbar = true
 }: TradingViewWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isInitializedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const currentConfigRef = useRef({ symbol: '', interval: '', theme: '', showToolbar: true, showLegend: true, showGrid: true });
+  const currentConfigRef = useRef({ symbol: '', interval: '', theme: '', showToolbar: true, showLegend: true, showGrid: false });
 
   const initializeWidget = useCallback(() => {
     if (!containerRef.current) return;
@@ -81,7 +81,10 @@ function TradingViewWidget({
             "enable_publishing": false,
             "hide_side_toolbar": !showToolbar,
             "hide_volume": true,
-            "disabled_features": ["create_volume_indicator_by_default"],
+            "disabled_features": [
+              "create_volume_indicator_by_default",
+              ...(!showGrid ? ["pane_context_menu"] : []),
+            ],
             "enabled_features": [
               "side_toolbar_as_default_active",
               "drawing_templates",
@@ -100,8 +103,19 @@ function TradingViewWidget({
             "popup_width": "1000",
             "studies_overrides": {},
             "overrides": {
-              "paneProperties.vertGridProperties.color": showGrid ? (theme === 'dark' ? "rgba(42, 46, 57, 0.6)" : "rgba(240, 243, 250, 0.6)") : "rgba(0,0,0,0)",
-              "paneProperties.horzGridProperties.color": showGrid ? (theme === 'dark' ? "rgba(42, 46, 57, 0.6)" : "rgba(240, 243, 250, 0.6)") : "rgba(0,0,0,0)",
+              "paneProperties.backgroundType": "solid",
+              "paneProperties.background": theme === 'dark' ? "#000000" : "#ffffff",
+              "paneProperties.backgroundColor": theme === 'dark' ? "#000000" : "#ffffff",
+              // Grid lines: set to exact background color to visually remove them
+              "paneProperties.vertGridProperties.color": showGrid
+                ? (theme === 'dark' ? "#1e2130" : "#e8ecf0")
+                : (theme === 'dark' ? "#000000" : "#ffffff"),
+              "paneProperties.vertGridProperties.style": 0,
+              "paneProperties.horzGridProperties.color": showGrid
+                ? (theme === 'dark' ? "#1e2130" : "#e8ecf0")
+                : (theme === 'dark' ? "#000000" : "#ffffff"),
+              "paneProperties.horzGridProperties.style": 0,
+              "scalesProperties.backgroundColor": theme === 'dark' ? "#000000" : "#ffffff",
               "paneProperties.legendProperties.showLegend": showLegend
             }
           });

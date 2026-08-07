@@ -23,7 +23,7 @@ export const calculateStats = (trades: Trade[]) => {
   const netProfit = safeTrades.reduce((acc, t) => acc + toFiniteNumber(t.pnl, 0), 0);
   
   const winRate = totalCount > 0 ? (wins.length / totalCount) * 100 : 0;
-  const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Number.POSITIVE_INFINITY : 0);
+  const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? grossProfit : 0);
   
   const totalCommissions = safeTrades.reduce((acc, t) => acc + (t.commissions || 0), 0);
   const totalFees = safeTrades.reduce((acc, t) => acc + (t.fees || 0), 0);
@@ -94,6 +94,7 @@ export const calculateStats = (trades: Trade[]) => {
   const avgWinningDay = winningDays.length > 0 ? winningDays.reduce((a, b) => a + b, 0) / winningDays.length : 0;
   const avgLosingDay = losingDays.length > 0 ? Math.abs(losingDays.reduce((a, b) => a + b, 0) / losingDays.length) : 0;
 
+
   const largestProfit = Math.max(0, ...safeTrades.map(t => toFiniteNumber(t.pnl, 0)));
   const largestLoss = Math.min(0, ...safeTrades.map(t => toFiniteNumber(t.pnl, 0)));
   
@@ -123,8 +124,8 @@ export const calculateStats = (trades: Trade[]) => {
     }
   });
 
-  // Drawdown with percentage (using 100000 as default starting if not provided, though we should pass it)
-  // For now, let's assume we use a reasonable starting point if we can't get it
+  // Drawdown — peak tracks highest equity; initialised to 0 (PnL relative baseline).
+  // NOTE: for accurate percentage drawdown callers should pass the account starting balance.
   let peak = 0;
   let currentEquity = 0;
   let maxDD = 0;
@@ -132,7 +133,7 @@ export const calculateStats = (trades: Trade[]) => {
   let ddCount = 0;
 
   sortedByTime.forEach(t => {
-    currentEquity += t.pnl;
+    currentEquity += toFiniteNumber(t.pnl, 0);
     if (currentEquity > peak) {
       peak = currentEquity;
     }
@@ -219,6 +220,11 @@ export const calculateStats = (trades: Trade[]) => {
         .filter((value): value is number => value !== null);
 
       return realizedRs.length > 0 ? realizedRs.reduce((acc, value) => acc + value, 0) / realizedRs.length : 0;
-    })()
+    })(),
+    // Number of trades that had a valid Stop Loss — used to show 'N/A' vs '0.00R' in the UI
+    validRealizedRCount: safeTrades.filter(t => {
+      const sl = toFiniteNumber(t.stopLoss, NaN);
+      return Number.isFinite(sl) && sl > 0;
+    }).length,
   };
 };

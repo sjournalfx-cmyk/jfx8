@@ -14,10 +14,14 @@ import { UserProfile, Trade, EASession, EADeal, EAPosition } from '../types';
 import OpenPositions from './OpenPositions';
 import BrokerConnect from './BrokerConnect';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useConnectionMode } from '../hooks/useConnectionMode';
 import { EA_BRIDGE_URL } from '../lib/constants';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
 import { parseMTTradeCSV } from '../lib/trade-import';
+import icon1 from '../icon1.png';
+import icon2 from '../icon2.png';
+import icon3 from '../icon3.jpeg';
 
 interface BridgeProps {
     isDarkMode: boolean;
@@ -35,16 +39,7 @@ interface BridgeProps {
 const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
-    const [connectionMode, setConnectionMode] = useState<'bridge' | 'broker' | 'ctrader' | null>(() => {
-    const justAuthorized =
-        localStorage.getItem('ctrader_just_authorized') === 'true' ||
-        sessionStorage.getItem('ctrader_just_authorized') === 'true';
-        if (justAuthorized) {
-            return 'ctrader';
-        }
-        return userProfile.eaConnected ? 'bridge' : 
-            ['connected', 'credentials_stored', 'auth_failed'].includes(userProfile.mt_terminal_status || '') ? 'broker' : null;
-    });
+    const { connectionMode, updateConnectionMode } = useConnectionMode(userId, userProfile);
 
     // Clear the OAuth redirect flag AFTER the initial render, so it survives
     // React 18 StrictMode's mount → unmount → remount cycle.
@@ -105,7 +100,13 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
     if (connectionMode === 'ctrader') {
         return <CtraderConnect
             isDarkMode={isDarkMode}
-            onBack={() => setConnectionMode(null)}
+            onBack={() => updateConnectionMode(null)}
+            userProfile={userProfile}
+            userId={userId}
+            onTradeAdded={onTradeAdded}
+            onEditTrade={onEditTrade}
+            onAddOffline={onAddOffline}
+            trades={trades}
         />;
     }
 
@@ -117,7 +118,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
                         onClick={async () => {
                             const updated = { ...userProfile, mt_terminal_status: '' };
                             await onUpdateProfile(updated);
-                            setConnectionMode(null);
+                            updateConnectionMode(null);
                         }}
                         className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
                     >
@@ -134,7 +135,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
                     onDisconnect={async () => {
                         const updated = { ...userProfile, mt_terminal_status: '' };
                         await onUpdateProfile(updated);
-                        setConnectionMode(null);
+                        updateConnectionMode(null);
                     }}
                     userId={userId}
                     eaSession={eaSession}
@@ -147,7 +148,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
     }
 
     if (!connectionMode) {
-        return <MethodChoice onSelect={setConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} />;
+        return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} />;
     }
 
     if (isInternalConnected) {
@@ -179,7 +180,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             isDarkMode={isDarkMode}
             userProfile={userProfile}
             onUpdateProfile={onUpdateProfile}
-            onBack={() => setConnectionMode(null)}
+            onBack={() => updateConnectionMode(null)}
             onComplete={async (key) => {
                 const updated = { ...userProfile, syncKey: key, eaConnected: true };
                 await onUpdateProfile(updated);
@@ -205,14 +206,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             title: 'Desktop Bridge',
             subtitle: 'EA Terminal Bridge',
             icon: (
-                <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                    <line x1="8" y1="21" x2="16" y2="21" />
-                    <line x1="12" y1="17" x2="12" y2="21" />
-                    <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01" strokeWidth="2" />
-                    <path d="M4 11h16" />
-                    <path d="M4 14h16" />
-                </svg>
+                <img src={icon2} alt="Desktop Bridge" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
             ),
             features: [
                 'Windows EXE bridge client',
@@ -229,11 +223,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             title: 'cTrader',
             subtitle: 'Open API Sync',
             icon: (
-                <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                    <path d="M2 17l10 5 10-5" />
-                    <path d="M2 12l10 5 10-5" />
-                </svg>
+                <img src={icon3} alt="cTrader" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
             ),
             features: [
                 'Direct cTrader ID OAuth login',
@@ -241,8 +231,8 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                 'Closed trade history via WebSocket',
                 'No VPS or bridge required'
             ],
-            accent: '#22C55E',
-            gradient: 'from-[#22C55E]/20 via-transparent to-transparent',
+            accent: '#FF4F00',
+            gradient: 'from-[#FF4F00]/20 via-transparent to-transparent',
             description: 'Connect your cTrader account directly using cTrader Open API. Securely access account details, open positions, and closed deals via OAuth authentication.'
         },
         {
@@ -300,10 +290,6 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             <div className="max-w-5xl w-full mx-auto pt-12 pb-8 px-8">
                 {/* Header */}
                 <div className="mb-12 text-center">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-400 text-xs font-medium mb-4 tracking-wider uppercase">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#FF4F01] animate-pulse" />
-                        Connection Setup
-                    </div>
                     <h1 className="text-4xl font-black tracking-tight text-white mb-3">
                         Choose Your Connection
                     </h1>
@@ -328,7 +314,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                                 opt.id === 'bridge'
                                     ? 'border-white/10 hover:border-[#FF4F01]/40'
                                     : opt.id === 'ctrader'
-                                    ? 'border-white/10 hover:border-[#22C55E]/40'
+                                    ? 'border-white/10 hover:border-[#FF4F00]/40'
                                     : 'border-white/10 hover:border-[#8B5CF6]/40'
                             } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-white/10`}
                         >
@@ -772,7 +758,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <div className={`w-2 h-2 rounded-full ${profit >= 0 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(251,113,133,0.8)]'}`} />
-                                    <span className={`text-sm font-mono font-black ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    <span className={`text-sm font-mono font-black ${profit >= 0 ? 'text-[#FF4F00]' : 'text-rose-400'}`}>
                                         {profit >= 0 ? '+' : ''}{userProfile.currencySymbol}{profit.toLocaleString(undefined, { minimumFractionDigits: 2 })} Live P&amp;L
                                     </span>
                                 </div>
@@ -819,8 +805,8 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                         <div className={`col-span-12 lg:col-span-8 ${cardStyle} rounded-3xl p-6 flex flex-col`} style={{ minHeight: '340px' }}>
                             <div className="flex items-center justify-between mb-5">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                                        <Activity size={17} className="text-emerald-400" />
+                                    <div className="w-9 h-9 rounded-xl bg-[#FF4F00]/10 flex items-center justify-center">
+                                        <Activity size={17} className="text-[#FF4F00]" />
                                     </div>
                                     <div>
                                         <h3 className="font-black text-sm text-white uppercase tracking-wider leading-none">Terminal Pipeline</h3>
@@ -905,9 +891,9 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                                                     <div className="flex items-center justify-between mb-2">
                                                         <div className="flex items-center gap-2">
                                                             <span className="font-black text-xs text-white">{trade.symbol}</span>
-                                                            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${trade.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>{trade.type}</span>
+                                                            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${trade.type === 'BUY' ? 'bg-[#FF4F00]/10 text-[#FF4F00]' : 'bg-rose-500/10 text-rose-400'}`}>{trade.type}</span>
                                                         </div>
-                                                        <span className={`text-xs font-mono font-black ${trade.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{trade.profit >= 0 ? '+' : ''}{trade.profit?.toFixed(2)}</span>
+                                                        <span className={`text-xs font-mono font-black ${trade.profit >= 0 ? 'text-[#FF4F00]' : 'text-rose-400'}`}>{trade.profit >= 0 ? '+' : ''}{trade.profit?.toFixed(2)}</span>
                                                     </div>
                                                     <div className="flex items-center justify-between">
                                                         <span className="text-[9px] font-mono text-slate-500">#{trade.ticket} Â· {trade.volume}L Â· {pipMov >= 0 ? '+' : ''}{pipMov.toFixed(1)}p</span>
@@ -1086,7 +1072,7 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, onB
                                     className={`w-full text-left rounded-2xl border p-4 transition-all ${isCurrent
                                         ? 'border-[#FF4F01]/40 bg-[#FF4F01]/8'
                                         : isDone
-                                            ? 'border-emerald-500/20 bg-emerald-500/6'
+                                            ? 'border-[#FF4F00]/20 bg-emerald-500/6'
                                             : `${cardBg} opacity-75 hover:border-zinc-700`
                                         } ${step >= s.id ? 'cursor-pointer' : 'cursor-not-allowed'}`}
                                 >
@@ -1311,9 +1297,15 @@ const WindowsLogoIcon: React.FC<{ className?: string; size?: number }> = ({ clas
 interface CtraderConnectProps {
     isDarkMode: boolean;
     onBack: () => void;
+    userProfile?: UserProfile;
+    userId?: string;
+    onTradeAdded?: (trade: Trade) => void;
+    onEditTrade?: (trade: Trade) => void;
+    onAddOffline?: (trade: Trade) => void;
+    trades?: Trade[];
 }
 
-const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) => {
+const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, userProfile, userId, onTradeAdded, onEditTrade, onAddOffline, trades }) => {
     const [authState, setAuthState] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
     const [accounts, setAccounts] = useState<any[]>([]);
     const [errorMsg, setErrorMsg] = useState('');
@@ -1358,6 +1350,75 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
 
     // Realtime logs
     const [eventLogs, setEventLogs] = useState<{ time: string; msg: string }[]>([]);
+
+    const [savingDealId, setSavingDealId] = useState<number | null>(null);
+    const [savedDealIds, setSavedDealIds] = useState<Set<number>>(new Set());
+
+    const getSymbolName = (d: any) => {
+        if (d.symbol && isNaN(Number(d.symbol))) {
+            return d.symbol;
+        }
+        const targetId = d.symbolId !== undefined ? d.symbolId : d.symbol;
+        if (targetId !== undefined && targetId !== null) {
+            const found = symbolsList.find(s => s.symbolId.toString() === targetId.toString());
+            if (found && found.symbolName) {
+                return found.symbolName;
+            }
+        }
+        return d.symbol || 'EURUSD';
+    };
+
+    const handleAddDealToJournal = async (deal: any) => {
+        try {
+            setSavingDealId(deal.dealId);
+            const pairName = getSymbolName(deal);
+            const netPnL = Number(((deal.profit ?? 0) + (deal.swap || 0) + (deal.commission || 0)).toFixed(2));
+            const closeDate = deal.closeTimestamp ? new Date(deal.closeTimestamp) : new Date();
+            const openDate = deal.openTimestamp ? new Date(deal.openTimestamp) : closeDate;
+
+            const sastClose = getSASTDateTime(closeDate);
+
+            const newTrade = normalizeTrade({
+                id: '',
+                ticketId: String(deal.dealId || deal.orderId || Date.now()),
+                pair: pairName,
+                assetType: 'Forex',
+                date: sastClose.date,
+                time: sastClose.fullTime,
+                openTime: openDate.toISOString(),
+                closeTime: closeDate.toISOString(),
+                direction: deal.tradeSide === 'buy' ? 'Long' : 'Short',
+                entryPrice: deal.entryPrice || deal.price || 0,
+                exitPrice: deal.price || 0,
+                stopLoss: deal.stopLoss || 0,
+                takeProfit: deal.takeProfit || 0,
+                lots: deal.volume || 0.01,
+                result: netPnL > 0 ? 'Win' : netPnL < 0 ? 'Loss' : 'BE',
+                pnl: netPnL,
+                rr: 0,
+                rating: 0,
+                tags: ['cTrader'],
+                notes: `Synced from cTrader. Deal #${deal.dealId} | Order #${deal.orderId}`,
+                planAdherence: 'No Plan',
+                tradingMistake: 'None',
+                mindset: 'Neutral',
+            });
+
+            if (onEditTrade) {
+                onEditTrade(newTrade);
+            } else {
+                const saved = await dataService.addTrade(newTrade);
+                if (onTradeAdded) {
+                    onTradeAdded(saved);
+                }
+            }
+            setSavedDealIds(prev => new Set(prev).add(deal.dealId));
+        } catch (err) {
+            console.error('Failed to add deal to journal:', err);
+        } finally {
+            setSavingDealId(null);
+        }
+    };
 
     const handleRefreshDetails = async (acc: any) => {
         const id = acc.ctidTraderAccountId;
@@ -1508,6 +1569,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
         try {
             const { logout } = await import('../services/ctraderService');
             logout();
+            try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
             setAuthState('idle');
             setAccounts([]);
             setSelectedAccountId(null);
@@ -1553,7 +1615,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
     };
 
     useEffect(() => {
-        import('../services/ctraderService').then(({ isAuthenticated, getCtidProfile }) => {
+        import('../services/ctraderService').then(({ isAuthenticated, refreshToken, getCtidProfile, logout }) => {
             if (isAuthenticated()) {
                 setAuthState('connected');
                 if (!fetchCalledRef.current) {
@@ -1561,6 +1623,27 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                     handleFetchAccounts();
                     getCtidProfile().then(p => setProfile(p)).catch(() => {});
                 }
+            } else {
+                // If tokens exist but are expired, attempt automatic refresh
+                refreshToken().then(refreshed => {
+                    if (refreshed) {
+                        setAuthState('connected');
+                        if (!fetchCalledRef.current) {
+                            fetchCalledRef.current = true;
+                            handleFetchAccounts();
+                            getCtidProfile().then(p => setProfile(p)).catch(() => {});
+                        }
+                    } else {
+                        // Refresh failed or revoked: log out and fall back cleanly to idle state
+                        logout();
+                        try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
+                        setAuthState('idle');
+                    }
+                }).catch(() => {
+                    logout();
+                    try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
+                    setAuthState('idle');
+                });
             }
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1647,14 +1730,10 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                 </button>
             </div>
 
-            <div className="rounded-2xl border border-white/5 bg-[#0a0a0a] overflow-hidden">
+            <div className="rounded-2xl border border-white/5 bg-[#000000] overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/5 flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-[#22C55E]/10">
-                        <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-[#22C55E]" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                            <path d="M2 17l10 5 10-5" />
-                            <path d="M2 12l10 5 10-5" />
-                        </svg>
+                    <div className="p-2 rounded-lg bg-[#FF4F00]/10">
+                        <img src={icon3} alt="cTrader" className="w-10 h-10 object-contain" />
                     </div>
                     <div>
                         <h3 className="text-sm font-bold text-white">cTrader Open API</h3>
@@ -1676,7 +1755,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                             </div>
                             <button
                                 onClick={handleConnect}
-                                className="w-full py-2.5 rounded-xl bg-[#22C55E] text-white text-sm font-medium hover:bg-[#22C55E]/90 flex items-center justify-center gap-2 transition-all"
+                                className="w-full py-2.5 rounded-xl bg-[#FF4F00] text-white text-sm font-medium hover:bg-[#FF4F00]/90 flex items-center justify-center gap-2 transition-all"
                             >
                                 <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
@@ -1691,7 +1770,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                     {authState === 'connecting' && (
                         <div className="flex items-center justify-center py-8">
                             <div className="flex flex-col items-center gap-3">
-                                <Loader2 size={24} className="animate-spin text-[#22C55E]" />
+                                <Loader2 size={24} className="animate-spin text-[#FF4F00]" />
                                 <p className="text-xs text-zinc-400">Redirecting to cTrader ID...</p>
                             </div>
                         </div>
@@ -1700,8 +1779,8 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                     {authState === 'connected' && (
                         <div className="space-y-4">
                             {/* Auth success banner with Log Out button */}
-                            <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                                <div className="flex items-center gap-2 text-emerald-400 text-xs">
+                            <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#FF4F00]/10 border border-[#FF4F00]/20">
+                                <div className="flex items-center gap-2 text-[#FF4F00] text-xs">
                                     <CheckCircle2 size={14} />
                                     <span>Successfully authenticated with cTrader</span>
                                 </div>
@@ -1718,7 +1797,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                             {isFetchingAccounts && (
                                 <div className="flex items-center justify-center py-6">
                                     <div className="flex flex-col items-center gap-3">
-                                        <Loader2 size={20} className="animate-spin text-[#22C55E]" />
+                                        <Loader2 size={20} className="animate-spin text-[#FF4F00]" />
                                         <p className="text-xs text-zinc-400">Loading your trading accounts...</p>
                                     </div>
                                 </div>
@@ -1737,12 +1816,12 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                 onClick={() => handleSelectAccount(acc)}
                                                 className={`w-full px-4 py-3.5 flex items-center justify-between hover:bg-white/[0.02] transition-all text-left ${
                                                     selectedAccountId === acc.ctidTraderAccountId
-                                                        ? 'ring-1 ring-[#22C55E]/40 bg-[#22C55E]/[0.04]'
+                                                        ? 'ring-1 ring-[#FF4F00]/40 bg-[#FF4F00]/[0.04]'
                                                         : ''
                                                 }`}
                                             >
                                                 <div className="flex items-center gap-3">
-                                                    <div className={`w-2 h-2 rounded-full shrink-0 ${acc.isDemo ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                                                    <div className={`w-2 h-2 rounded-full shrink-0 ${acc.isDemo ? 'bg-amber-400' : 'bg-[#FF4F00]'}`} />
                                                     <div>
                                                         <p className="text-xs font-bold text-white">{acc.name || `Account #${acc.login}`}</p>
                                                         <p className="text-[10px] text-zinc-500 mt-0.5">
@@ -1780,11 +1859,11 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
 
                             {/* --- Account details sub-panel --- */}
                             {selectedAccountId != null && (
-                                        <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.015] overflow-hidden">
+                                        <div className="mt-4 rounded-xl border border-white/5 bg-[#000000] overflow-hidden">
                                             {/* Header */}
-                                            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
+                                            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-[#000000]">
                                                 <div className="flex items-center gap-2">
-                                                    <Activity size={14} className="text-[#22C55E]" />
+                                                    <Activity size={14} className="text-[#FF4F00]" />
                                                     <span className="text-xs font-bold text-white uppercase tracking-wider">
                                                         Trading Terminal
                                                     </span>
@@ -1811,7 +1890,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
 
                                             {isLoadingDetails && (
                                                 <div className="flex items-center justify-center py-8">
-                                                    <Loader2 size={20} className="animate-spin text-[#22C55E]" />
+                                                    <Loader2 size={20} className="animate-spin text-[#FF4F00]" />
                                                     <span className="ml-2.5 text-xs text-zinc-400">Synchronizing with cTrader Server…</span>
                                                 </div>
                                             )}
@@ -1826,7 +1905,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                             {!isLoadingDetails && !detailsError && (
                                                 <div>
                                                     {/* Account Summary Cards */}
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x md:divide-x divide-y md:divide-y-0 divide-white/5 border-b border-white/5 bg-white/[0.005]">
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x md:divide-x divide-y md:divide-y-0 divide-white/5 border-b border-white/5 bg-[#000000]">
                                                         <div className="p-3">
                                                             <span className="text-[9px] uppercase tracking-wider text-zinc-500">Balance</span>
                                                             <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
@@ -1835,7 +1914,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                         </div>
                                                         <div className="p-3">
                                                             <span className="text-[9px] uppercase tracking-wider text-zinc-500">Equity</span>
-                                                            <p className="text-sm font-bold text-[#22C55E] mt-0.5 tabular-nums">
+                                                            <p className="text-sm font-bold text-[#FF4F00] mt-0.5 tabular-nums">
                                                                 {Number(traderDetails?.equity ?? accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.equity ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                             </p>
                                                         </div>
@@ -1856,14 +1935,14 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                     </div>
 
                                                     {/* Tabs Selectors */}
-                                                    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-white/[0.01]">
+                                                    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-[#000000]">
                                                         {(['overview', 'positions', 'history', 'market', 'logs'] as const).map((t) => (
                                                             <button
                                                                 key={t}
                                                                 onClick={() => setActiveTab(t)}
                                                                 className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
                                                                     activeTab === t
-                                                                        ? 'bg-[#22C55E]/10 text-[#22C55E]'
+                                                                        ? 'bg-[#FF4F00]/10 text-[#FF4F00]'
                                                                         : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
                                                                 }`}
                                                             >
@@ -1877,7 +1956,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                         {activeTab === 'overview' && (
                                                             <div className="space-y-4">
                                                                 {/* Account parameters */}
-                                                                <div className="grid grid-cols-2 gap-3 text-xs border border-white/5 rounded-xl p-3 bg-white/[0.01]">
+                                                                <div className="grid grid-cols-2 gap-3 text-xs border border-white/5 rounded-xl p-3 bg-[#000000]">
                                                                     <div>
                                                                         <span className="text-zinc-500 text-[10px]">Broker Server</span>
                                                                         <p className="font-medium text-white mt-0.5">{traderDetails?.brokerName || 'cTrader Server'}</p>
@@ -1897,7 +1976,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                 </div>
 
                                                                 {/* Manual Order Entry */}
-                                                                <div className="border border-white/5 rounded-xl p-4 bg-white/[0.01] space-y-3">
+                                                                <div className="border border-white/5 rounded-xl p-4 bg-[#000000] space-y-3">
                                                                     <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Manual Order Desk</p>
                                                                     <div className="grid grid-cols-2 gap-2.5">
                                                                         <div>
@@ -1905,7 +1984,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                             <select
                                                                                 value={tradingSymbolId}
                                                                                 onChange={(e) => setTradingSymbolId(e.target.value)}
-                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             >
                                                                                 {symbolsList.map((s) => (
                                                                                     <option key={s.symbolId} value={s.symbolId}>{s.symbolName}</option>
@@ -1920,7 +1999,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                                 min="0.01"
                                                                                 value={tradingVolume}
                                                                                 onChange={(e) => setTradingVolume(Number(e.target.value))}
-                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             />
                                                                         </div>
                                                                         <div>
@@ -1930,7 +2009,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                                 placeholder="Market Price"
                                                                                 value={tradingLimitPrice}
                                                                                 onChange={(e) => setTradingLimitPrice(e.target.value)}
-                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             />
                                                                         </div>
                                                                         <div>
@@ -1940,50 +2019,25 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                                 placeholder="Market Price"
                                                                                 value={tradingStopPrice}
                                                                                 onChange={(e) => setTradingStopPrice(e.target.value)}
-                                                                                className="w-full text-xs bg-[#0f0f0f] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#22C55E]/50"
+                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             />
                                                                         </div>
                                                                     </div>
 
-                                                                    <div className="flex gap-2 pt-1.5">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setTradingSide('buy')}
-                                                                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg border uppercase transition-all ${
-                                                                                tradingSide === 'buy'
-                                                                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                                                                                    : 'border-white/5 text-zinc-500'
-                                                                            }`}
-                                                                        >
-                                                                            Buy / Long
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setTradingSide('sell')}
-                                                                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg border uppercase transition-all ${
-                                                                                tradingSide === 'sell'
-                                                                                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                                                                                    : 'border-white/5 text-zinc-500'
-                                                                            }`}
-                                                                        >
-                                                                            Sell / Short
-                                                                        </button>
-                                                                    </div>
-
                                                                     <button
                                                                         type="button"
-                                                                        disabled={isSubmittingOrder || !tradingSymbolId}
+                                                                        disabled={true}
                                                                         onClick={() => handlePlaceOrder(!!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
-                                                                        className="w-full py-2 bg-[#22C55E] text-white text-xs font-bold uppercase rounded-lg hover:bg-[#22C55E]/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+                                                                        className="w-full py-2 bg-[#FF4F00]/50 text-white/50 text-xs font-bold uppercase rounded-lg cursor-not-allowed flex items-center justify-center gap-1.5"
                                                                     >
                                                                         {isSubmittingOrder && <Loader2 size={12} className="animate-spin" />}
-                                                                        Place {tradingSide.toUpperCase()} Order
+                                                                        Place Order
                                                                     </button>
 
                                                                     {tradeResultMsg && (
                                                                         <div className={`p-2 rounded-lg text-[10px] font-bold ${
                                                                             tradeResultMsg.type === 'success'
-                                                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                                                ? 'bg-[#FF4F00]/10 text-[#FF4F00] border border-[#FF4F00]/20'
                                                                                 : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                                                                         }`}>
                                                                             {tradeResultMsg.text}
@@ -1996,84 +2050,14 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                         {/* Tab Content: POSITIONS & PENDING ORDERS */}
                                                         {activeTab === 'positions' && (
                                                             <div className="space-y-4">
-                                                                {/* Positions list */}
-                                                                <div>
-                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-2">Open Positions ({accountPositions.length})</p>
-                                                                    {accountPositions.length === 0 ? (
-                                                                        <div className="text-center py-4 border border-dashed border-white/5 rounded-xl">
-                                                                            <p className="text-xs text-zinc-600">No open positions</p>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden">
-                                                                            {accountPositions.map((p, idx) => (
-                                                                                <div key={`${p.positionId}_${idx}`} className="p-3 flex items-center justify-between text-xs hover:bg-white/[0.005]">
-                                                                                    <div className="flex items-center gap-2.5">
-                                                                                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                                                                                            p.tradeSide === 'buy' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                                                                                        }`}>{p.tradeSide}</span>
-                                                                                        <div>
-                                                                                            <p className="font-bold text-white">{p.symbol}</p>
-                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5">{p.volume} lot · Entry {p.openPrice}</p>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    <div className="flex items-center gap-3 text-right">
-                                                                                        <div>
-                                                                                            <p className={`font-bold tabular-nums ${(p.profit ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                                                                {(p.profit ?? 0) >= 0 ? '+' : ''}{Number(p.profit ?? 0).toFixed(2)}
-                                                                                            </p>
-                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5 tabular-nums">Pips {Number((p.currentPrice - p.openPrice) * (p.tradeSide === 'buy' ? 1 : -1)).toFixed(4)}</p>
-                                                                                        </div>
-                                                                                        <button
-                                                                                            onClick={() => handleClosePosition(p.positionId, p.volume, !!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
-                                                                                            className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 hover:border-rose-500/30 text-[10px] font-bold rounded-lg transition-all"
-                                                                                        >
-                                                                                            Close
-                                                                                        </button>
-                                                                                    </div>
-                                                                                </div>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
+                                                                <div className="rounded-xl border border-white/5 bg-[#000000] px-4 py-5 text-center">
+                                                                    <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">Open Positions</p>
+                                                                    <p className="mt-2 text-sm text-zinc-400">Under development</p>
                                                                 </div>
 
-                                                                {/* Pending Orders list */}
-                                                                <div>
-                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-2">Pending Orders ({pendingOrders.length})</p>
-                                                                    {pendingOrders.length === 0 ? (
-                                                                        <div className="text-center py-4 border border-dashed border-white/5 rounded-xl">
-                                                                            <p className="text-xs text-zinc-600">No active pending orders</p>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden">
-                                                                            {pendingOrders.map((o, idx) => (
-                                                                                <div key={`${o.orderId}_${idx}`} className="p-3 flex items-center justify-between text-xs hover:bg-white/[0.005]">
-                                                                                    <div className="flex items-center gap-2.5">
-                                                                                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/10 text-blue-400`}>
-                                                                                            {o.orderType}
-                                                                                        </span>
-                                                                                        <div>
-                                                                                            <p className="font-bold text-white">{o.symbol}</p>
-                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5">{o.volume} lot · {o.tradeSide.toUpperCase()}</p>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    <div className="flex items-center gap-3 text-right">
-                                                                                        <div>
-                                                                                            <p className="font-bold text-white tabular-nums">
-                                                                                                {o.limitPrice || o.stopPrice || 'Market'}
-                                                                                            </p>
-                                                                                            <p className="text-[10px] text-zinc-500 mt-0.5">SL: {o.stopLoss || '-'} | TP: {o.takeProfit || '-'}</p>
-                                                                                        </div>
-                                                                                        <button
-                                                                                            onClick={() => handleCancelOrder(o.orderId, !!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
-                                                                                            className="px-2 py-1 bg-zinc-500/10 hover:bg-zinc-500/20 text-zinc-400 border border-white/10 hover:border-white/20 text-[10px] font-bold rounded-lg transition-all"
-                                                                                        >
-                                                                                            Cancel
-                                                                                        </button>
-                                                                                    </div>
-                                                                                </div>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
+                                                                <div className="rounded-xl border border-white/5 bg-[#000000] px-4 py-5 text-center">
+                                                                    <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">Pending Orders</p>
+                                                                    <p className="mt-2 text-sm text-zinc-400">Under development</p>
                                                                 </div>
                                                             </div>
                                                         )}
@@ -2087,33 +2071,78 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                         <p className="text-xs text-zinc-600">No closed deal logs found</p>
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden max-h-80 overflow-y-auto">
-                                                                        {accountDeals.map((d, idx) => (
-                                                                            <div key={`${d.dealId}_${idx}`} className="p-3 flex items-center justify-between text-xs hover:bg-white/[0.005]">
-                                                                                <div className="flex items-center gap-2.5">
-                                                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                                                                                        d.tradeSide === 'buy' ? 'bg-emerald-500/5 text-emerald-400 border border-emerald-500/10' : 'bg-rose-500/5 text-rose-400 border border-rose-500/10'
-                                                                                    }`}>{d.tradeSide}</span>
-                                                                                    <div>
-                                                                                        <p className="font-bold text-white">{d.symbol}</p>
-                                                                                        <p className="text-[10px] text-zinc-500 mt-0.5">
-                                                                                            {d.volume} lot · Price {d.price}
-                                                                                        </p>
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="text-right">
-                                                                                    <p className={`font-bold tabular-nums ${(d.profit ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                                                        {(d.profit ?? 0) >= 0 ? '+' : ''}{Number(d.profit ?? 0).toFixed(2)}
-                                                                                    </p>
-                                                                                    <p className="text-[9px] text-zinc-500 mt-0.5">
-                                                                                        {d.closeTimestamp ? new Date(d.closeTimestamp).toLocaleDateString() : ''}
-                                                                                    </p>
-                                                                                </div>
-                                                                            </div>
-                                                                        ))}
+                                                                    <div className="border border-white/10 rounded-lg overflow-hidden overflow-x-auto bg-[#000000]">
+                                                                        <table className="w-full text-left text-xs text-zinc-300 border-collapse">
+                                                                            <thead>
+                                                                                <tr className="border-b border-white/10 bg-white/[0.02] text-[11px] font-medium text-zinc-400">
+                                                                                    <th className="py-2.5 px-3 font-normal">Symbol</th>
+                                                                                    <th className="py-2.5 px-3 font-normal">Opening direction</th>
+                                                                                    <th className="py-2.5 px-3 font-normal">Closing time</th>
+                                                                                    <th className="py-2.5 px-3 font-normal">Entry price</th>
+                                                                                    <th className="py-2.5 px-3 font-normal">Closing price</th>
+                                                                                    <th className="py-2.5 px-3 font-normal">Closing Quantity</th>
+                                                                                    <th className="py-2.5 px-3 font-normal">Closing volume</th>
+                                                                                    <th className="py-2.5 px-3 font-normal">Net $</th>
+                                                                                    <th className="py-2.5 px-3 font-normal text-right">Add to journal</th>
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody className="divide-y divide-white/5 font-sans">
+                                                                                {accountDeals.map((d, idx) => {
+                                                                                    const formattedTime = d.closeTimestamp ? (() => {
+                                                                                        const dt = new Date(d.closeTimestamp);
+                                                                                        if (isNaN(dt.getTime())) return d.closeTimestamp;
+                                                                                        const day = String(dt.getDate()).padStart(2, '0');
+                                                                                        const month = String(dt.getMonth() + 1).padStart(2, '0');
+                                                                                        const year = dt.getFullYear();
+                                                                                        const hours = String(dt.getHours()).padStart(2, '0');
+                                                                                        const mins = String(dt.getMinutes()).padStart(2, '0');
+                                                                                        const secs = String(dt.getSeconds()).padStart(2, '0');
+                                                                                        const ms = String(dt.getMilliseconds()).padStart(3, '0');
+                                                                                        return `${day}/${month}/${year} ${hours}:${mins}:${secs}.${ms}`;
+                                                                                    })() : '-';
+
+                                                                                    const closingVolNum = Number(d.volume || 0) * 100000;
+                                                                                    const formattedVol = `$ ${closingVolNum.toLocaleString('en-US').replace(/,/g, ' ')}`;
+                                                                                    const netProfit = Number(((d.profit ?? 0) + (d.swap || 0) + (d.commission || 0)).toFixed(2));
+                                                                                    const isAlreadyInJournal = trades.some(t => String(t.ticketId) === String(d.dealId)) || savedDealIds.has(d.dealId);
+
+                                                                                    return (
+                                                                                        <tr key={`${d.dealId}_${idx}`} className="hover:bg-white/[0.02] transition-colors">
+                                                                                            <td className="py-2.5 px-3 font-bold text-white">{getSymbolName(d)}</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white capitalize">{d.tradeSide === 'buy' ? 'Buy' : 'Sell'}</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white tabular-nums">{formattedTime}</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white tabular-nums">{d.entryPrice !== undefined ? d.entryPrice : (d.price || '-')}</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white tabular-nums">{d.price || '-'}</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white tabular-nums">{Number(d.volume || 0).toFixed(2)} Lots</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white tabular-nums">{formattedVol}</td>
+                                                                                            <td className={`py-2.5 px-3 font-bold tabular-nums ${netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                                                {netProfit.toFixed(2)}
+                                                                                            </td>
+                                                                                            <td className="py-2.5 px-3 text-right">
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    disabled={savingDealId === d.dealId || isAlreadyInJournal}
+                                                                                                    onClick={() => handleAddDealToJournal(d)}
+                                                                                                    className="p-1 text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
+                                                                                                    title={isAlreadyInJournal ? "Already in journal" : "Add to journal"}
+                                                                                                >
+                                                                                                    {savingDealId === d.dealId ? (
+                                                                                                        <Loader2 size={16} className="animate-spin text-[#FF4F00]" />
+                                                                                                    ) : isAlreadyInJournal ? (
+                                                                                                        <Check size={16} className="text-[#FF4F00]" />
+                                                                                                    ) : (
+                                                                                                        <PlusCircle size={16} />
+                                                                                                    )}
+                                                                                                </button>
+                                                                                            </td>
+                                                                                        </tr>
+                                                                                    );
+                                                                                })}
+                                                                            </tbody>
+                                                                        </table>
                                                                     </div>
                                                                 )}
-                              </div>
+                                                            </div>
                                                         )}
 
                                                         {/* Tab Content: MARKET TICKERS & MARGIN */}
@@ -2153,7 +2182,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                                         <div className="flex gap-3 text-right text-[11px] tabular-nums">
                                                                                             <div>
                                                                                                 <span className="text-[9px] text-zinc-500 block">BID</span>
-                                                                                                <span className="text-emerald-400 font-medium">{tick.bid || '-'}</span>
+                                                                                                <span className="text-[#FF4F00] font-medium">{tick.bid || '-'}</span>
                                                                                             </div>
                                                                                             <div>
                                                                                                 <span className="text-[9px] text-zinc-500 block">ASK</span>
@@ -2199,7 +2228,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                                                             type="button"
                                                                             disabled={isCalculatingMargin || !marginCalcSymbolId}
                                                                             onClick={() => handleCalculateMargin(!!accounts.find(a => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
-                                                                            className="w-full py-1.5 bg-[#22C55E]/10 border border-[#22C55E]/20 text-[#22C55E] text-xs font-bold uppercase rounded-lg hover:bg-[#22C55E]/20 transition-all flex items-center justify-center gap-1.5"
+                                                                            className="w-full py-1.5 bg-[#FF4F00]/10 border border-[#FF4F00]/20 text-[#FF4F00] text-xs font-bold uppercase rounded-lg hover:bg-[#FF4F00]/20 transition-all flex items-center justify-center gap-1.5"
                                                                         >
                                                                             {isCalculatingMargin && <Loader2 size={12} className="animate-spin" />}
                                                                             Calculate Expected Margin
@@ -2250,7 +2279,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack }) =
                                     <p className="text-xs text-zinc-500">No accounts found. Make sure your cTrader ID has linked trading accounts.</p>
                                     <button
                                         onClick={handleFetchAccounts}
-                                        className="w-full py-2.5 rounded-xl bg-[#22C55E] text-white text-sm font-medium hover:bg-[#22C55E]/90 flex items-center justify-center gap-2 transition-all"
+                                        className="w-full py-2.5 rounded-xl bg-[#FF4F00] text-white text-sm font-medium hover:bg-[#FF4F00]/90 flex items-center justify-center gap-2 transition-all"
                                     >
                                         <RefreshCw size={14} />
                                         Retry

@@ -17,6 +17,7 @@ import { MT5_BRIDGE_URL } from '../lib/constants';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
 import { UserProfile, BacktestSession, Trade, BacktestTrade } from '../types';
 import { dataService } from '../services/dataService';
+import { fetchCtraderCandles, isAuthenticated as isCtraderAuthenticated, getAccounts as getCtraderAccounts } from '../services/ctraderService';
 import CustomChart from './CustomChart';
 import { OptimizationHeatmap } from './backtest/OptimizationHeatmap';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
@@ -82,7 +83,9 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     // UI State
     const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'none'>('jfx_backtest_data_source', 'none');
+    const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'ctrader' | 'none'>('jfx_backtest_data_source', 'none');
+    const [isCtraderFetching, setIsCtraderFetching] = useState(false);
+    const [showCtraderAuthModal, setShowCtraderAuthModal] = useState(false);
 
     // Check for cached data at initialization to prevent flash
     const hasCachedData = (() => {
@@ -122,26 +125,23 @@ const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'none'>('
 
     // Bridge Heartbeat
     useEffect(() => {
+        let cancelled = false;
         const checkBridge = async () => {
-            setBridgeError(null);
             try {
-                const res = await fetch(`${MT5_BRIDGE_URL}/ping`);
-                if (res.ok) {
-                    setBridgeStatus('online');
-                    setBridgeError(null);
-                } else {
-                    setBridgeStatus('offline');
-                    setBridgeError('Bridge not responding');
-                }
-            } catch (err) {
-                const errorMsg = err instanceof Error ? err.message : 'Connection failed';
-                setBridgeStatus('offline');
-                setBridgeError(errorMsg);
+                // no-cors avoids CSP blocking localhost; opaque response = server is reachable
+                await fetch(`${MT5_BRIDGE_URL}/ping`, { mode: 'no-cors' });
+                if (cancelled) return;
+                setBridgeStatus(prev => prev !== 'online' ? 'online' : prev);
+                setBridgeError(null);
+            } catch {
+                if (cancelled) return;
+                setBridgeStatus(prev => prev !== 'offline' ? 'offline' : prev);
+                setBridgeError(prev => prev !== 'Bridge Offline' ? 'Bridge Offline' : prev);
             }
         };
         checkBridge();
-        const interval = setInterval(checkBridge, 5000);
-        return () => clearInterval(interval);
+        const interval = setInterval(checkBridge, 10000);
+        return () => { cancelled = true; clearInterval(interval); };
     }, []);
 
     // Replay State
@@ -405,28 +405,44 @@ setCurrentIdx(session.data.length - 1);
         chartRef.current.timeScale().fitContent();
     }, []);
 
+    const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour TTL
+
     const saveToLocalCache = useCallback((data: any[], overrideSymbol?: string, overrideTimeframe?: string) => {
         try {
             const activeSymbol = overrideSymbol || symbol;
             const activeTF = overrideTimeframe || timeframe;
             const key = `jfx_backtest_cache_${activeSymbol}_${activeTF}`;
             const optimized = optimizeCandleData(data);
-            localStorage.setItem(key, JSON.stringify(optimized));
+            const payload = {
+                timestamp: Date.now(),
+                data: optimized
+            };
+            localStorage.setItem(key, JSON.stringify(payload));
         } catch (e) {
             console.error('Failed to cache data', e);
         }
     }, [symbol, timeframe]);
 
-    const loadFromLocalCache = useCallback((overrideSymbol?: string, overrideTimeframe?: string, options?: { notify?: boolean }) => {
+    const loadFromLocalCache = useCallback((overrideSymbol?: string, overrideTimeframe?: string, options?: { notify?: boolean, ignoreTTL?: boolean }) => {
         const activeSymbol = overrideSymbol || symbol;
         const activeTF = overrideTimeframe || timeframe;
         const key = `jfx_backtest_cache_${activeSymbol}_${activeTF}`;
         const cached = localStorage.getItem(key);
         if (cached) {
             try {
-                const data = JSON.parse(cached);
+                const parsed = JSON.parse(cached);
+                // Backward compatibility if raw array was saved
+                const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
+                const savedAt = Array.isArray(parsed) ? 0 : (parsed.timestamp || 0);
+
+                // TTL check: if older than 1 hour and ignoreTTL is not set, invalidate cache
+                if (!options?.ignoreTTL && savedAt > 0 && (Date.now() - savedAt > CACHE_TTL_MS)) {
+                    localStorage.removeItem(key);
+                    return false;
+                }
+
                 if (Array.isArray(data) && data.length > 0) {
-setAllData(data);
+                    setAllData(data);
                     setCurrentIdx(Math.min(data.length - 1, 50));
                     setDataSource('cache');
                     localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data, index: Math.min(data.length - 1, 50) }));
@@ -443,11 +459,11 @@ setAllData(data);
                     return true;
                 }
             } catch (e) {
-                console.error('Failed to parse cached data', e);
+                console.error('Error parsing local cache', e);
             }
         }
         return false;
-    }, [symbol, timeframe, setAllData, setCurrentIdx, addToast]);
+    }, [symbol, timeframe, setAllData, setCurrentIdx, setDataSource, addToast]);
 
     const handleDownloadData = () => {
         if (allData.length === 0) return;
@@ -575,7 +591,101 @@ setAllData(validData);
         }
     }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe]);
 
+    const handleFetchCtraderData = useCallback(async (overrideSymbol?: string, overrideTimeframe?: string) => {
+        setIsPlaying(false);
+        const activeSymbol = overrideSymbol || symbol;
+        const activeTF = overrideTimeframe || timeframe;
+        setIsCtraderFetching(true);
+
+        // Check local cache first for instant switching
+        const cached = loadFromLocalCache(activeSymbol, activeTF, { notify: false });
+        if (cached) {
+            setDataSource('ctrader');
+            setShowWelcome(false);
+        }
+
+        try {
+            if (!isCtraderAuthenticated()) {
+                setShowCtraderAuthModal(true);
+                addToast({
+                    type: 'warning',
+                    title: 'cTrader Auth Required',
+                    message: 'Please connect your cTrader account first.'
+                });
+                setIsCtraderFetching(false);
+                return;
+            }
+
+            const accounts = await getCtraderAccounts();
+            if (!accounts || accounts.length === 0) {
+                setShowCtraderAuthModal(true);
+                addToast({
+                    type: 'error',
+                    title: 'No cTrader Accounts',
+                    message: 'No active cTrader accounts found for this profile.'
+                });
+                setIsCtraderFetching(false);
+                return;
+            }
+
+            const account = accounts[0];
+            const candles = await fetchCtraderCandles(account.ctidTraderAccountId, activeSymbol, activeTF, 500, account.isDemo);
+
+            if (!candles || candles.length === 0) {
+                if (!cached) {
+                    addToast({
+                        type: 'warning',
+                        title: 'No cTrader Bars',
+                        message: `No trendbars returned for ${activeSymbol} ${activeTF}.`
+                    });
+                }
+                setIsCtraderFetching(false);
+                return;
+            }
+
+            setAllData(candles);
+            if (!cached) {
+                setCurrentIdx(Math.min(candles.length - 1, 50));
+            }
+            setHistory([]);
+            setDrawings([]);
+            historyStatesRef.current = [];
+            historyPointerRef.current = -1;
+            setHistoryStates([]);
+            setHistoryStep(-1);
+            resetDrawingInteractionState();
+            saveToLocalCache(candles, activeSymbol, activeTF);
+            setDataSource('ctrader');
+            setShowWelcome(false);
+            addToast({
+                type: 'success',
+                title: 'cTrader Candles Loaded',
+                message: `Loaded ${candles.length} historical bars for ${activeSymbol} (${activeTF}).`
+            });
+        } catch (err: any) {
+            if (!cached) {
+                addToast({
+                    type: 'error',
+                    title: 'cTrader Fetch Failed',
+                    message: err?.message || 'Could not fetch historical candles from cTrader.'
+                });
+            }
+        } finally {
+            setIsCtraderFetching(false);
+        }
+    }, [symbol, timeframe, setAllData, setCurrentIdx, saveToLocalCache, addToast]);
+
+    const handleFetchActiveSourceData = useCallback(async (overrideSymbol?: string, overrideTimeframe?: string) => {
+        if (dataSource === 'ctrader') {
+            return handleFetchCtraderData(overrideSymbol, overrideTimeframe);
+        }
+        return handleFetchMT5Data(overrideSymbol, overrideTimeframe);
+    }, [dataSource, handleFetchCtraderData, handleFetchMT5Data]);
+
     const handleUpdateData = useCallback(async () => {
+        if (dataSource === 'ctrader') {
+            return handleFetchCtraderData();
+        }
         if (allData.length === 0) return handleFetchMT5Data();
         setIsPlaying(false);
         try {
@@ -586,7 +696,7 @@ setAllData(validData);
         } catch (err: any) {
             addToast({ type: 'error', title: 'Update Failed', message: err.message });
         }
-    }, [allData, fetchData, handleFetchMT5Data, saveToLocalCache, addToast]);
+    }, [dataSource, handleFetchCtraderData, allData.length, handleFetchMT5Data, fetchData, saveToLocalCache, setDataSource, addToast]);
 
     const resolveTradeIsoTime = useCallback((value?: string, fallbackDate?: string, fallbackTime?: string) => {
         if (value) {
@@ -1155,9 +1265,12 @@ setAllData(validData);
     };
 
     const handleCoordinatesChange = useCallback((c: any, s: any) => {
+        const isInitial = !chartRef.current || !candlestickSeriesRef.current;
         chartRef.current = c;
         candlestickSeriesRef.current = s;
-        setTick(t => t + 1);
+        if (isInitial) {
+            setTick(t => t + 1);
+        }
     }, []);
 
     // Tool keyboard shortcuts mapping
@@ -1302,7 +1415,7 @@ setAllData(validData);
                                 value={symbol}
                                 onChange={(e) => { setSymbol(e.target.value.toUpperCase()); setIsSymbolMenuOpen(true); }}
                                 onFocus={() => setIsSymbolMenuOpen(true)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') { handleFetchMT5Data(symbol); setIsSymbolMenuOpen(false); } }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { handleFetchActiveSourceData(symbol); setIsSymbolMenuOpen(false); } }}
                                 className={`bg-transparent text-xs font-black w-20 py-2 outline-none uppercase text-center ${isDarkMode ? 'text-white' : 'text-slate-900'}`}
                                 placeholder="SYMBOL"
                             />
@@ -1321,7 +1434,7 @@ setAllData(validData);
                                         autoFocus
                                     />
                                     {POPULAR_SYMBOLS.filter(s => searchTerm === '' || s.includes(searchTerm)).map(s => (
-                                        <button key={s} onClick={() => { setSymbol(s); setIsSymbolMenuOpen(false); handleFetchMT5Data(s); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left ${symbol === s ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
+                                        <button key={s} onClick={() => { setSymbol(s); setIsSymbolMenuOpen(false); handleFetchActiveSourceData(s); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left ${symbol === s ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
                                             <span className="text-xs font-black">{s}</span>
                                             {symbol === s && <Check size={14} />}
                                         </button>
@@ -1341,7 +1454,7 @@ setAllData(validData);
                                     <div className="fixed inset-0 z-40" onClick={() => setIsTFMenuOpen(false)} />
                                     <div className={`absolute top-full left-0 mt-2 w-48 border rounded-2xl shadow-2xl p-2 z-[100] ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
                                         {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
-                                            <button key={tf} onClick={() => { setTimeframe(tf); setIsTFMenuOpen(false); handleFetchMT5Data(undefined, tf); }} className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-left ${timeframe === tf ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
+                                            <button key={tf} onClick={() => { setTimeframe(tf); setIsTFMenuOpen(false); handleFetchActiveSourceData(undefined, tf); }} className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-left ${timeframe === tf ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
                                                 <span className="text-sm font-black">{tf}</span>
                                                 {timeframe === tf && <Check size={14} className="text-white" />}
                                             </button>
@@ -1359,7 +1472,23 @@ setAllData(validData);
                     </div>
 
                     <button onClick={() => handleFetchMT5Data()} disabled={isFetching} className={`h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest ${isFetching ? 'bg-black text-zinc-500 cursor-wait' : 'bg-gradient-to-r from-[#FF4F01] to-[#ff7e42] text-white active:scale-95 shadow-lg shadow-[#FF4F01]/25'}`}>
-                        {isFetching ? 'Syncing...' : 'Sync'}
+                        {isFetching ? 'Syncing...' : 'MT5 Sync'}
+                    </button>
+                    <button
+                        onClick={() => handleFetchCtraderData()}
+                        disabled={isCtraderFetching}
+                        title="Fetch historical candles from cTrader Open API"
+                        className={`h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
+                            isCtraderFetching
+                                ? 'bg-black text-zinc-500 cursor-wait'
+                                : 'bg-gradient-to-r from-[#0061FF] to-[#60efff] text-white active:scale-95 shadow-lg shadow-[#0061FF]/25'
+                        }`}
+                    >
+                        {isCtraderFetching ? (
+                            <><RefreshCw size={12} className="animate-spin" /> Fetching...</>
+                        ) : (
+                            <><Zap size={12} /> cTrader</>
+                        )}
                     </button>
                 </div>
 
@@ -1439,7 +1568,7 @@ setAllData(validData);
                     <AnimatePresence>
                         {showWelcome && allData.length === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center z-[60] p-8 bg-black/40">
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full max-w-6xl">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6 w-full max-w-7xl">
                                     {/* Option 1: Live Sync */}
                                     <div
                                         onClick={() => handleFetchMT5Data()}
@@ -1540,6 +1669,42 @@ setAllData(validData);
                                             )}
                                         </div>
                                     </div>
+
+                                    {/* Option 4: cTrader Historical */}
+                                    <div
+                                        onClick={() => handleFetchCtraderData()}
+                                        className={`p-8 rounded-3xl border-2 border-dashed flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] group ${
+                                            isDarkMode
+                                                ? 'bg-black/80 border-zinc-800 hover:border-[#0061FF]/50 hover:bg-[#0061FF]/5'
+                                                : 'bg-white border-slate-200 hover:border-[#0061FF]/50'
+                                        }`}
+                                    >
+                                        <div className={`p-6 rounded-2xl border-2 border-dashed transition-all group-hover:scale-110 ${
+                                            isDarkMode
+                                                ? 'bg-black border-zinc-800 group-hover:border-[#0061FF] group-hover:text-[#0061FF] text-zinc-600'
+                                                : 'bg-slate-50 border-slate-200 group-hover:border-[#0061FF] group-hover:text-[#0061FF] text-slate-400'
+                                        }`}>
+                                            <Zap size={48} />
+                                        </div>
+                                        <div className="text-center space-y-2">
+                                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${
+                                                isDarkMode ? 'text-[#60efff]' : 'text-[#0061FF]'
+                                            }`}>Historical Data</p>
+                                            <h3 className={`text-xl font-black uppercase tracking-tight ${
+                                                isDarkMode ? 'text-white' : 'text-slate-900'
+                                            }`}>cTrader API</h3>
+                                            <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${
+                                                isDarkMode ? 'text-zinc-500' : 'text-slate-400'
+                                            }`}>Fetch directly from cTrader<br />Requires cTrader auth</p>
+                                        </div>
+                                        <div className={`px-6 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${
+                                            isDarkMode
+                                                ? 'bg-black border-zinc-700 text-zinc-400 group-hover:text-[#60efff]'
+                                                : 'bg-white border-slate-200 text-slate-500 group-hover:text-[#0061FF]'
+                                        }`}>
+                                            {isCtraderFetching ? 'Fetching...' : 'Pull Data'}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -1575,6 +1740,57 @@ setAllData(validData);
                                             </div>
                                             <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Processing JSON structures</p>
                                         </div>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* cTrader Re-auth Modal */}
+                    <AnimatePresence>
+                        {showCtraderAuthModal && (
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="absolute inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
+                            >
+                                <div className={`w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-6 ${isDarkMode ? 'bg-zinc-950 border-zinc-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-3 rounded-2xl bg-[#0061FF]/10 text-[#0061FF]">
+                                                <Zap size={24} />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-lg font-black uppercase tracking-tight">cTrader Connection Required</h3>
+                                                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Authentication Warning</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => setShowCtraderAuthModal(false)} className="p-2 rounded-xl hover:bg-zinc-800/50 text-zinc-400">
+                                            <X size={18} />
+                                        </button>
+                                    </div>
+
+                                    <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
+                                        You are currently not connected to cTrader Open API. Please authenticate your cTrader account in Settings to pull historical candlesticks directly into the Backtest Lab.
+                                    </p>
+
+                                    <div className="flex items-center justify-end gap-3 pt-2">
+                                        <button
+                                            onClick={() => setShowCtraderAuthModal(false)}
+                                            className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                                        >
+                                            Dismiss
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowCtraderAuthModal(false);
+                                                setIsSettingsOpen(true);
+                                            }}
+                                            className="px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider bg-gradient-to-r from-[#0061FF] to-[#60efff] text-white active:scale-95 shadow-lg shadow-[#0061FF]/25"
+                                        >
+                                            Open Settings & Connect
+                                        </button>
                                     </div>
                                 </div>
                             </motion.div>

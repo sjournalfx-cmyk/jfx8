@@ -920,11 +920,100 @@ const isEconomicCalendarRequest = (query: string) => {
   const normalized = query.toLowerCase();
   return normalized.includes('economic calendar')
     || (normalized.includes('calendar') && /\b(cpi|ppi|nfp|fomc|fed|ecb|boe|boj|gdp|inflation|employment|jobs|rate|macro)\b/.test(normalized));
-};// --- Slash Commands ---
+};
+
+type ForexFactoryEvent = {
+  date: string;
+  time?: string;
+  currency?: string;
+  Currency?: string;
+  impact?: string;
+  Impact?: string;
+  event?: string;
+  Event?: string;
+  actual?: string;
+  Actual?: string;
+  forecast?: string;
+  Forecast?: string;
+  previous?: string;
+  Previous?: string;
+  datetime_local?: string;
+  datetime_utc?: string;
+};
+
+const formatForexFactoryCalendarMarkdown = (events: ForexFactoryEvent[]): string => {
+  if (!events || events.length === 0) return '## 📅 Economic Calendar\n\nNo upcoming economic events found. Try again later.';
+
+  const impactIcon = (impact: string | undefined) => {
+    const imp = (impact || '').toLowerCase();
+    if (imp === 'high' || imp === 'red') return '🔴 High';
+    if (imp === 'medium' || imp === 'orange' || imp === 'med') return '🟠 Medium';
+    if (imp === 'low' || imp === 'yellow') return '🟡 Low';
+    return '⚪ —';
+  };
+
+  const formatTime = (evt: ForexFactoryEvent) => {
+    const dtLocal = evt.datetime_local;
+    if (dtLocal) {
+      try {
+        const d = new Date(dtLocal);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+      } catch { /* fall through */ }
+    }
+    return evt.time || '—';
+  };
+
+  const formatDate = (evt: ForexFactoryEvent) => {
+    const dtLocal = evt.datetime_local;
+    if (dtLocal) {
+      try {
+        const d = new Date(dtLocal);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+        }
+      } catch { /* fall through */ }
+    }
+    return evt.date || '—';
+  };
+
+  // Group events by date
+  const grouped = new Map<string, ForexFactoryEvent[]>();
+  for (const evt of events) {
+    const dateKey = formatDate(evt);
+    if (!grouped.has(dateKey)) grouped.set(dateKey, []);
+    grouped.get(dateKey)!.push(evt);
+  }
+
+  let md = '## 📅 Economic Calendar — ForexFactory Live\n\n';
+
+  for (const [dateKey, dayEvents] of grouped) {
+    md += `### ${dateKey}\n\n`;
+    md += '| Time | Currency | Impact | Event | Actual | Forecast | Previous |\n';
+    md += '|------|----------|--------|-------|--------|----------|----------|\n';
+    for (const evt of dayEvents) {
+      const currency = evt.currency || evt.Currency || '—';
+      const impact = impactIcon(evt.impact || evt.Impact);
+      const event = evt.event || evt.Event || '—';
+      const actual = evt.actual || evt.Actual || '—';
+      const forecast = evt.forecast || evt.Forecast || '—';
+      const previous = evt.previous || evt.Previous || '—';
+      const time = formatTime(evt);
+      md += `| ${time} | **${currency}** | ${impact} | ${event} | ${actual} | ${forecast} | ${previous} |\n`;
+    }
+    md += '\n';
+  }
+
+  md += `\n*Source: ForexFactory — Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}*`;
+  return md;
+};
+
+// --- Slash Commands ---
 type SlashCommand = {
   cmd: string;
-  kind: DataToolKind | FinnhubToolKind;
-  source: 'fmp' | 'finnhub';
+  kind: DataToolKind | FinnhubToolKind | 'forexfactory-calendar';
+  source: 'fmp' | 'finnhub' | 'forexfactory';
   label: string;
   needsSymbol: boolean;
   desc: string;
@@ -947,6 +1036,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { cmd: '/insider', kind: 'insider-transactions', source: 'finnhub', label: 'Insider Trades', needsSymbol: true, desc: 'Insider buying & selling' },
   { cmd: '/analyst', kind: 'analyst-recommendations', source: 'finnhub', label: 'Analyst Ratings', needsSymbol: true, desc: 'Buy/hold/sell consensus' },
   { cmd: '/macro', kind: 'economic-calendar', source: 'finnhub', label: 'Macro Events', needsSymbol: false, desc: 'CPI, GDP, jobs & macro events' },
+  { cmd: '/calendar', kind: 'forexfactory-calendar', source: 'forexfactory', label: 'Economic Calendar', needsSymbol: false, desc: 'Live ForexFactory economic events' },
   { cmd: '/filings', kind: 'sec-filings', source: 'finnhub', label: 'SEC Filings', needsSymbol: true, desc: '10-K, 10-Q & other filings' },
   { cmd: '/surprises', kind: 'earnings-surprises', source: 'finnhub', label: 'Earnings Surprises', needsSymbol: true, desc: 'Historical beat/miss rates' },
   { cmd: '/peers', kind: 'peer-companies', source: 'finnhub', label: 'Peer Companies', needsSymbol: true, desc: 'Similar companies' },
@@ -1712,23 +1802,20 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       return;
     }
 
-    if (isResearchMode && normalizedInput && isEconomicCalendarRequest(normalizedInput)) {
+    if (normalizedInput && isEconomicCalendarRequest(normalizedInput)) {
       try {
-        const [econRes, treasRes] = await Promise.all([
-          fetch('/api/fmp/earnings-calendar').then(r => r.json().catch(() => ({}))),
-          fetch('/api/fmp/treasury-rates').then(r => r.json().catch(() => ({}))),
-        ]);
-        const earningsMd = formatDataToolResponse('earnings-calendar', econRes?.data ?? econRes);
-        const treasMd = formatDataToolResponse('treasury-rates', treasRes?.data ?? treasRes);
-        processResponse(
-          `## Economic Calendar\n\nThe live economic calendar requires a paid FMP plan and is not available on the free tier. Here are free alternatives:\n\n---\n\n${earningsMd}\n\n---\n\n${treasMd}`,
-          (Date.now() + 1).toString(),
-          { contextSummary }
-        );
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const from = new Date().toISOString().split('T')[0];
+        const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+        const calRes = await fetch(`/api/economic-calendar?from=${from}&to=${to}&tz=${encodeURIComponent(tz)}`);
+        const calPayload = await calRes.json().catch(() => ({}));
+        const events: ForexFactoryEvent[] = Array.isArray(calPayload) ? calPayload : calPayload?.data ?? calPayload?.events ?? [];
+        const calendarMd = formatForexFactoryCalendarMarkdown(events);
+        processResponse(calendarMd, (Date.now() + 1).toString(), { contextSummary });
       } catch (error) {
-        console.error('Economic calendar redirect error:', error);
+        console.error('Economic calendar fetch error:', error);
         processResponse(
-          '## Economic Calendar\n\nThe live economic calendar requires a paid FMP plan and is not available on the free tier. Try the Earnings Calendar or Treasury Rates data tools instead.',
+          '## 📅 Economic Calendar\n\nFailed to fetch the live economic calendar. Please check your connection and try again, or use the `/calendar` command.',
           (Date.now() + 1).toString(),
           { contextSummary }
         );
@@ -2014,6 +2101,39 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     }
   };
 
+  const handleFetchForexFactoryCalendar = async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const from = new Date().toISOString().split('T')[0];
+      const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+      const response = await fetch(`/api/economic-calendar?from=${from}&to=${to}&tz=${encodeURIComponent(tz)}`);
+      const payload = await response.json().catch(() => ({}));
+
+      let markdown: string;
+      if (!response.ok) {
+        const reason = payload?.error || 'The economic calendar service did not return data.';
+        markdown = `## 📅 Economic Calendar\n\nI could not fetch calendar data right now.\n\n**Reason:** ${reason}`;
+      } else {
+        const events: ForexFactoryEvent[] = Array.isArray(payload) ? payload : payload?.data ?? payload?.events ?? [];
+        markdown = formatForexFactoryCalendarMarkdown(events);
+      }
+
+      processResponse(markdown, (Date.now() + 1).toString(), { contextSummary: buildContextSummary('research', 0) });
+    } catch (error) {
+      console.error('ForexFactory calendar tool error:', error);
+      processResponse(
+        `## 📅 Economic Calendar\n\nFailed to fetch live economic calendar data. Check your connection and try again.`,
+        (Date.now() + 1).toString(),
+        { contextSummary: buildContextSummary('research', 0) }
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handleSelectCommand = useCallback((cmd: SlashCommand) => {
     // Track usage
     setCommandUsage(prev => ({
@@ -2028,13 +2148,15 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     } else {
       setInput('');
       setSelectedCommandIndex(0);
-      if (cmd.source === 'fmp') {
+      if (cmd.source === 'forexfactory') {
+        handleFetchForexFactoryCalendar();
+      } else if (cmd.source === 'fmp') {
         handleFetchDataTool(cmd.kind as DataToolKind);
       } else {
         handleFetchFinnhubDataTool(cmd.kind as FinnhubToolKind);
       }
     }
-  }, [setCommandUsage, handleFetchDataTool, handleFetchFinnhubDataTool]);
+  }, [setCommandUsage, handleFetchDataTool, handleFetchFinnhubDataTool, handleFetchForexFactoryCalendar]);
 
   const handleFeatureRequest = async (mode: 'psychology' | 'scaling', userRequest: string) => {
     if (isGenerating) return;
@@ -2570,9 +2692,6 @@ ${strategyProfile.whyITrade}`;
               <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                 {assistantLabel}
               </h2>
-              <span className={`text-[10px] uppercase tracking-[0.16em] ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                {isResearchMode ? 'Public research only' : 'Private journal context'}
-              </span>
             </div>
           </div>
         </div>

@@ -420,6 +420,9 @@ async function chatCompletion(
       if (response.status === 401) {
         throw new Error('NVIDIA_API_KEY is missing or invalid. Add NVIDIA_API_KEY to your .env.local file.');
       }
+      if (response.status === 410 || response.status === 404) {
+        throw new Error('NVIDIA AI service endpoint is currently updating. Using local fallback analysis.');
+      }
       throw new Error(`NVIDIA API error (${response.status})`);
     }
 

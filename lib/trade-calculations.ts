@@ -18,6 +18,53 @@ const resolveExitPrice = (trade: Partial<Trade>): number => {
   return toFiniteNumber(entryPrice, 0);
 };
 
+/**
+ * Returns pip size and approximate USD pip value per standard lot for a Forex pair.
+ * JPY-quoted pairs (e.g. GBPJPY, USDJPY, EURJPY) use pip size 0.01 and ~$6.50/pip/lot.
+ * All other pairs use pip size 0.0001 and $10/pip/lot.
+ */
+const getForexPipInfo = (pair?: string): { pipSize: number; pipValuePerLot: number } => {
+  const sym = (pair || '').toUpperCase().replace('/', '');
+  // JPY is always the quote currency in 6-char pairs ending in JPY
+  if (sym.length >= 6 && sym.slice(-3) === 'JPY') {
+    return { pipSize: 0.01, pipValuePerLot: 6.5 };
+  }
+  // Standard USD-quoted or EUR/GBP/AUD/NZD/CHF quoted pairs
+  return { pipSize: 0.0001, pipValuePerLot: 10 };
+};
+
+/**
+ * Returns the standard contract multiplier for non-Forex assets.
+ * This is the number of units (oz, barrels, contracts) per 1 lot.
+ * Traders can override this per-trade via trade.contractSize for non-standard brokers.
+ *
+ * Commodities:
+ *   XAUUSD / GOLD   = 100 oz/lot   → $1 move = $100/lot
+ *   XAGUSD / SILVER = 5000 oz/lot  → $1 move = $5000/lot
+ *   OIL / WTI / USOIL / BRENT = 1000 bbl/lot
+ *   NG / NGAS / NATGAS = 10000 MMBtu/lot
+ * Indices (CFD, most brokers):
+ *   1 lot = 1 contract = $1/point (US30, NAS100, SPX500, etc.)
+ * Crypto:
+ *   1 lot = 1 coin (BTC, ETH, etc.) — adjust via contractSize for mini-lot brokers
+ * Stocks:
+ *   1 lot = 1 share by default
+ */
+const getContractMultiplier = (assetType: string | undefined, pair?: string): number => {
+  if (assetType === 'Commodities') {
+    const sym = (pair || '').toUpperCase().replace('/', '').replace('_', '');
+    if (sym.includes('XAU') || sym.includes('GOLD')) return 100;
+    if (sym.includes('XAG') || sym.includes('SILVER')) return 5000;
+    if (sym.includes('WTI') || sym.includes('USOIL') || sym.includes('OIL') || sym.includes('BRENT') || sym.includes('UKOIL')) return 1000;
+    if (sym.includes('NG') || sym.includes('NGAS') || sym.includes('NATGAS')) return 10000;
+    return 1; // unknown commodity — treat as 1:1
+  }
+  // Indices (CFD): 1 lot = 1 contract = 1 point value
+  if (assetType === 'Indices') return 1;
+  // Crypto / Stocks: 1 lot = 1 unit
+  return 1;
+};
+
 const calculateDirectionalPnL = (trade: Partial<Trade>, exit: number): number => {
   const assetType = trade.assetType;
   const entryPrice = toFiniteNumber(trade.entryPrice, NaN);
@@ -29,16 +76,19 @@ const calculateDirectionalPnL = (trade: Partial<Trade>, exit: number): number =>
   const diff = direction === 'Long' ? (exit - entryPrice) : (entryPrice - exit);
 
   switch (assetType) {
-    case 'Forex':
-      return diff * 10000 * lots * 10;
-    case 'Indices':
-      return diff * lots;
-    case 'Commodities':
-      return diff * 100 * lots;
-    case 'Crypto':
-      return diff * lots;
-    default:
-      return diff * lots;
+    case 'Forex': {
+      const { pipSize, pipValuePerLot } = getForexPipInfo(trade.pair);
+      // pips = price diff / pipSize; PnL = pips * pipValuePerLot * lots
+      return (diff / pipSize) * pipValuePerLot * lots;
+    }
+    default: {
+      // For Indices, Commodities, Crypto, Stocks:
+      // Use per-trade contractSize override if provided, otherwise use symbol-based lookup.
+      const multiplier = toFiniteNumber(trade.contractSize, 0) > 0
+        ? toFiniteNumber(trade.contractSize, 1)
+        : getContractMultiplier(assetType, trade.pair);
+      return diff * multiplier * lots;
+    }
   }
 };
 
@@ -94,10 +144,10 @@ export const getSessionFromTime = (time: string): string => {
     const hour = h;
 
     if (!Number.isFinite(hour)) return 'London Session';
-    if (hour >= 15 && hour < 18) return 'London/NY Overlap';
-    if (hour >= 9 && hour < 15) return 'London Session';
-    if (hour >= 18 || hour < 0) return 'New York Session';
     if (hour >= 0 && hour < 9) return 'Asian Session';
+    if (hour >= 9 && hour < 15) return 'London Session';
+    if (hour >= 15 && hour < 18) return 'London/NY Overlap';
+    if (hour >= 18 && hour < 24) return 'New York Session';
 
     return 'London Session';
 };

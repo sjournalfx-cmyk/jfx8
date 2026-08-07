@@ -15,6 +15,7 @@ import { Tooltip } from "../ui/Tooltip"
 interface OutcomeDistributionWidgetProps {
   trades: Trade[]
   isDarkMode: boolean
+  onInfoClick?: () => void
 }
 
 const chartConfig = {
@@ -35,7 +36,7 @@ const chartConfig = {
   },
 } satisfies ChartConfig
 
-export const OutcomeDistributionWidget: React.FC<OutcomeDistributionWidgetProps> = ({ trades = [], isDarkMode }) => {
+export const OutcomeDistributionWidget: React.FC<OutcomeDistributionWidgetProps> = ({ trades = [], isDarkMode, onInfoClick }) => {
   const safeTrades = trades || []
   const total = safeTrades.length || 1
   
@@ -61,7 +62,7 @@ export const OutcomeDistributionWidget: React.FC<OutcomeDistributionWidgetProps>
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-lg font-black tracking-tight italic uppercase">Outcome Distribution</h3>
-            <Tooltip content="Pie chart showing the proportion of Wins, Losses, and Break-Even trades across your journal." isDarkMode={isDarkMode}>
+            <Tooltip content="Pie chart showing the proportion of Wins, Losses, and Break-Even trades across your journal." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
               <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
             </Tooltip>
           </div>

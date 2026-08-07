@@ -237,7 +237,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
     const lots = parseFloat(formData.lots);
     const rating = Number(formData.rating) || 0;
     const normalizedPair = formData.pair.trim().toUpperCase();
-    const hasInitialTrade = Boolean(initialTrade?.id);
+    const hasInitialTrade = Boolean(initialTrade?.id || initialTrade?.ticketId || initialTrade?.pnl !== undefined);
     const hasExecutionChanges = hasInitialTrade ? [
       normalizedPair !== (initialTrade?.pair || '').trim().toUpperCase(),
       formData.assetType !== initialTrade?.assetType,
@@ -251,7 +251,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
       Number.isFinite(takeProfit) ? takeProfit !== Number(initialTrade?.takeProfit ?? 0) : Number(initialTrade?.takeProfit ?? 0) !== 0,
       Number.isFinite(lots) ? lots !== Number(initialTrade?.lots ?? 0) : Number(initialTrade?.lots ?? 0) !== 0,
       formData.result !== initialTrade?.result,
-    ].some(Boolean) : true;
+    ].some(Boolean) : false;
 
     if (!formData.pair || isNaN(entry)) {
       setConfirmModal({ isOpen: true, title: 'Incomplete', description: 'Fill required fields.', onConfirm: () => setConfirmModal(p => ({ ...p, isOpen: false })) });
@@ -274,7 +274,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
       voiceNote: formData.voiceNote,
       beforeScreenshot: screenshots.before,
       afterScreenshot: screenshots.after,
-    }, initialTrade, { preserveProvidedPnl: hasInitialTrade ? !hasExecutionChanges : false });
+    }, initialTrade, { preserveProvidedPnl: initialTrade?.ticketId ? true : (hasInitialTrade ? !hasExecutionChanges : false) });
 
     const lockedTrade = isDesktopBridgeTrade && initialTrade
       ? {
@@ -328,6 +328,26 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                     </div>
                 </div>
             )}
+
+            {initialTrade?.ticketId && !isReadOnly && (
+                <div className="px-8 pt-4">
+                    <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
+                                <Lock size={14} className="text-violet-400" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold text-violet-300">Broker-Locked PnL</p>
+                                <p className="text-xs text-violet-400/70 mt-0.5">Net PnL sourced directly from the broker. Will not be recalculated.</p>
+                            </div>
+                        </div>
+                        <div className={`text-lg font-bold tabular-nums ${(initialTrade.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {(initialTrade.pnl ?? 0) >= 0 ? '+' : ''}{(initialTrade.pnl ?? 0).toFixed(2)}
+                        </div>
+                    </div>
+                </div>
+            )}
+
 
             <div className="flex flex-1 overflow-hidden relative">
                 <div className="flex-1 overflow-y-auto custom-scrollbar">

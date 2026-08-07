@@ -27,9 +27,10 @@ interface StrategyEfficiencyMinimalProps {
   trades: Trade[]
   isDarkMode: boolean;
   currencySymbol: string;
+  onInfoClick?: () => void;
 }
 
-export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencySymbol = '$' }: StrategyEfficiencyMinimalProps) {
+export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick }: StrategyEfficiencyMinimalProps) {
   const id = "strategy-performance-pie"
   
   // 1. Get all unique strategies to establish consistent colors
@@ -205,7 +206,7 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
         <div className="grid gap-1">
           <div className="flex items-center gap-2">
             <CardTitle>Strategy Distribution</CardTitle>
-            <Tooltip content="Breaks down your trade count and cumulative P/L by trading strategy tag. Click a slice or use the dropdown to focus." isDarkMode={isDarkMode}>
+            <Tooltip content="Breaks down your trade count and cumulative P/L by trading strategy tag. Click a slice or use the dropdown to focus." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
               <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
             </Tooltip>
           </div>

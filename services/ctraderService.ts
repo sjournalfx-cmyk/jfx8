@@ -1,4 +1,4 @@
-import { EADeal, EAPosition } from '../types';
+import { Candle, EADeal, EAPosition } from '../types';
 
 const CTRADER_ID_BASE = 'https://id.ctrader.com';
 const WS_DEMO = `ws://${window.location.host}/ctrader-ws/demo`;
@@ -6,6 +6,9 @@ const WS_LIVE = `ws://${window.location.host}/ctrader-ws/live`;
 
 const CLIENT_ID = import.meta.env.VITE_CTRADER_CLIENT_ID || '';
 const CLIENT_SECRET = import.meta.env.VITE_CTRADER_CLIENT_SECRET || '';
+const CTRADER_VOLUME_CENTS_PER_UNIT = 100;
+const CTRADER_UNITS_PER_LOT = 100000;
+const CTRADER_VOLUME_CENTS_PER_LOT = CTRADER_VOLUME_CENTS_PER_UNIT * CTRADER_UNITS_PER_LOT;
 
 export interface CtraderTokens {
   accessToken: string;
@@ -28,10 +31,31 @@ export interface CtraderAccount {
   depositAssetId: number;
 }
 
+function dedupeAccountsByTraderId(accounts: CtraderAccount[]): CtraderAccount[] {
+  const seen = new Map<number, CtraderAccount>();
+
+  for (const account of accounts) {
+    if (!seen.has(account.ctidTraderAccountId)) {
+      seen.set(account.ctidTraderAccountId, account);
+    }
+  }
+
+  return Array.from(seen.values());
+}
+
+function lotsToCtraderVolume(volumeLots: number): number {
+  return Math.round(volumeLots * CTRADER_VOLUME_CENTS_PER_LOT);
+}
+
+function unitsToCtraderVolume(volumeUnits: number): number {
+  return Math.round(volumeUnits * CTRADER_VOLUME_CENTS_PER_UNIT);
+}
+
 export interface CtraderDeal {
   dealId: number;
   orderId: number;
   symbol: string;
+  symbolId?: number;
   tradeSide: 'buy' | 'sell';
   volume: number;
   price: number;
@@ -48,6 +72,7 @@ export interface CtraderDeal {
 export interface CtraderPosition {
   positionId: number;
   symbol: string;
+  symbolId: number;
   volume: number;
   tradeSide: 'buy' | 'sell';
   openPrice: number;
@@ -175,6 +200,8 @@ export const PT = {
   ORDER_ERROR_EVENT: 2132,
   DEAL_LIST_REQ: 2133,
   DEAL_LIST_RES: 2134,
+  GET_TRENDBARS_REQ: 2137,
+  GET_TRENDBARS_RES: 2138,
   EXPECTED_MARGIN_REQ: 2139,
   EXPECTED_MARGIN_RES: 2140,
   MARGIN_CHANGED_EVENT: 2141,
@@ -466,7 +493,7 @@ export async function getAccounts(): Promise<CtraderAccount[]> {
   }
 
   const data = await res.json();
-  return (data.accounts || []) as CtraderAccount[];
+  return dedupeAccountsByTraderId((data.accounts || []) as CtraderAccount[]);
 }
 export async function authAccount(ctidTraderAccountId: number, isDemo: boolean = true): Promise<void> {
   let tokens = getStoredTokens();
@@ -531,8 +558,9 @@ export async function getPositions(ctidTraderAccountId: number, isDemo: boolean 
     const tradeData = pos.tradeData || pos;
     return {
       positionId: Number(pos.positionId),
-      symbol: tradeData.symbolName || tradeData.symbol || '',
-      volume: Number(tradeData.volume ?? 0) / 100,
+      symbol: tradeData.symbolName || tradeData.symbol || String(tradeData.symbolId || ''),
+      symbolId: Number(tradeData.symbolId),
+      volume: Number(tradeData.volume ?? 0) / 10000000,
       tradeSide: tradeData.tradeSide === 1 ? 'buy' : 'sell',
       openPrice: Number(pos.price ?? tradeData.openPrice ?? 0),
       currentPrice: Number(pos.currentPrice ?? 0),
@@ -559,23 +587,30 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
 
   const data = await sendWsMessage(socket, PT.DEAL_LIST_REQ, payload);
 
-  return (data.deal || []).map((deal: any) => ({
-    dealId: Number(deal.dealId),
-    orderId: Number(deal.orderId ?? 0),
-    symbol: deal.symbolName || deal.symbol || '',
-    tradeSide: deal.tradeSide === 1 ? 'buy' : 'sell',
-    volume: Number(deal.filledVolume ?? deal.volume ?? 0) / 100,
-    price: Number(deal.executionPrice ?? deal.price ?? 0),
-    profit: Number(deal.closePositionDetail?.grossProfit ?? deal.profit ?? 0) / 100,
-    swap: Number(deal.closePositionDetail?.swap ?? deal.swap ?? 0) / 100,
-    commission: Number(deal.commission ?? 0) / 100,
-    openTimestamp: deal.createTimestamp ? new Date(Number(deal.createTimestamp)).toISOString() : '',
-    closeTimestamp: deal.executionTimestamp ? new Date(Number(deal.executionTimestamp)).toISOString()
-      : deal.createTimestamp ? new Date(Number(deal.createTimestamp)).toISOString() : '',
-    stopLoss: deal.closePositionDetail?.stopLoss ? Number(deal.closePositionDetail.stopLoss) : undefined,
-    takeProfit: deal.closePositionDetail?.takeProfit ? Number(deal.closePositionDetail.takeProfit) : undefined,
-    entryPrice: deal.closePositionDetail?.entryPrice ? Number(deal.closePositionDetail.entryPrice) : undefined,
-  }));
+  return (data.deal || []).map((deal: any) => {
+    const tradeData = deal.tradeData || {};
+    const rawSymbolId = deal.symbolId ?? tradeData.symbolId ?? deal.closePositionDetail?.symbolId;
+    const symbolId = rawSymbolId !== undefined && rawSymbolId !== null ? Number(rawSymbolId) : undefined;
+
+    return {
+      dealId: Number(deal.dealId),
+      orderId: Number(deal.orderId ?? 0),
+      symbol: deal.symbolName || deal.symbol || tradeData.symbolName || tradeData.symbol || '',
+      symbolId: typeof symbolId === 'number' && Number.isFinite(symbolId) ? symbolId : undefined,
+      tradeSide: deal.tradeSide === 1 ? 'buy' : 'sell',
+      volume: Number(deal.filledVolume ?? deal.volume ?? 0) / 10000000,
+      price: Number(deal.executionPrice ?? deal.price ?? 0),
+      profit: Number(deal.closePositionDetail?.grossProfit ?? deal.profit ?? 0) / 100,
+      swap: Number(deal.closePositionDetail?.swap ?? deal.swap ?? 0) / 100,
+      commission: Number(deal.commission ?? 0) / 100,
+      openTimestamp: deal.createTimestamp ? new Date(Number(deal.createTimestamp)).toISOString() : '',
+      closeTimestamp: deal.executionTimestamp ? new Date(Number(deal.executionTimestamp)).toISOString()
+        : deal.createTimestamp ? new Date(Number(deal.createTimestamp)).toISOString() : '',
+      stopLoss: deal.closePositionDetail?.stopLoss ? Number(deal.closePositionDetail.stopLoss) : undefined,
+      takeProfit: deal.closePositionDetail?.takeProfit ? Number(deal.closePositionDetail.takeProfit) : undefined,
+      entryPrice: deal.closePositionDetail?.entryPrice ? Number(deal.closePositionDetail.entryPrice) : undefined,
+    };
+  });
 }
 
 export function disconnect() {
@@ -677,7 +712,7 @@ export async function getPendingOrders(ctidTraderAccountId: number, isDemo: bool
     return {
       orderId: Number(ord.orderId),
       symbol: ord.symbolName || ord.symbol || '',
-      volume: Number(ord.volume ?? 0) / 100,
+      volume: Number(ord.volume ?? 0) / 10000000,
       tradeSide: ord.tradeSide === 1 ? 'buy' : 'sell',
       orderType: ord.orderType === 1 ? 'market' : ord.orderType === 2 ? 'limit' : ord.orderType === 3 ? 'stop' : 'stop_limit',
       limitPrice: ord.limitPrice ? Number(ord.limitPrice) : undefined,
@@ -710,7 +745,7 @@ export async function createNewOrder(
     symbolId,
     orderType,
     tradeSide: tradeSide === 'buy' ? 1 : 2,
-    volume: volume * 100, // volume is in units (in cents for FX)
+    volume: unitsToCtraderVolume(volume),
   };
 
   if (limitPrice) payload.limitPrice = limitPrice;
@@ -730,7 +765,7 @@ export async function closePosition(
   return sendWsMessage(socket, PT.CLOSE_POSITION_REQ, {
     ctidTraderAccountId,
     positionId,
-    volume: volume * 100,
+    volume: lotsToCtraderVolume(volume),
   });
 }
 
@@ -765,6 +800,15 @@ export async function subscribeToSpots(ctidTraderAccountId: number, symbolId: nu
   });
 }
 
+export async function unsubscribeFromSpots(ctidTraderAccountId: number, symbolId: number, isDemo: boolean = true): Promise<any> {
+  const socket = await ensureConnected(isDemo);
+  await authAccount(ctidTraderAccountId, isDemo);
+  return sendWsMessage(socket, PT.UNSUBSCRIBE_SPOTS_REQ, {
+    ctidTraderAccountId,
+    symbolId: [symbolId],
+  });
+}
+
 export async function getExpectedMargin(
   ctidTraderAccountId: number,
   symbolId: number,
@@ -778,4 +822,114 @@ export async function getExpectedMargin(
     symbolId,
     volume: volume * 100,
   });
+}
+
+export function mapTimeframeToCtraderPeriod(tf: string): number {
+  const norm = tf.toUpperCase().trim();
+  switch (norm) {
+    case 'M1': case '1M': case '1m': case 'm1': return 1;
+    case 'M2': case '2M': return 2;
+    case 'M3': case '3M': return 3;
+    case 'M4': case '4M': return 4;
+    case 'M5': case '5M': case '5m': case 'm5': return 5;
+    case 'M10': case '10M': return 6;
+    case 'M15': case '15M': case '15m': case 'm15': return 7;
+    case 'M30': case '30M': case '30m': case 'm30': return 8;
+    case 'H1': case '1H': case '1h': case 'h1': return 9;
+    case 'H4': case '4H': case '4h': case 'h4': return 10;
+    case 'D1': case '1D': case '1d': case 'd1': return 11;
+    case 'W1': case '1W': case '1w': case 'w1': return 12;
+    case 'MN1': case '1MN': case 'MN': return 13;
+    default: return 9;
+  }
+}
+
+export async function getTrendbars(
+  ctidTraderAccountId: number,
+  symbolId: number,
+  period: number,
+  fromTimestamp?: number,
+  toTimestamp?: number,
+  count?: number,
+  digits: number = 5,
+  isDemo: boolean = true
+): Promise<Candle[]> {
+  const socket = await ensureConnected(isDemo);
+  await authAccount(ctidTraderAccountId, isDemo);
+
+  const payload: Record<string, any> = {
+    ctidTraderAccountId,
+    symbolId,
+    period,
+  };
+  if (fromTimestamp) payload.fromTimestamp = fromTimestamp;
+  if (toTimestamp) payload.toTimestamp = toTimestamp;
+  if (count) payload.count = count;
+
+  const res = await sendWsMessage(socket, PT.GET_TRENDBARS_REQ, payload);
+
+  const divisor = Math.pow(10, digits);
+  const trendbars = res.trendbar || [];
+
+  const candles: Candle[] = trendbars.map((bar: any) => {
+    const lowPrice = Number(bar.low || 0) / divisor;
+    const deltaOpen = Number(bar.deltaOpen || 0) / divisor;
+    const deltaHigh = Number(bar.deltaHigh || 0) / divisor;
+    const deltaClose = Number(bar.deltaClose || 0) / divisor;
+
+    let timeInSeconds = 0;
+    if (bar.utcTimestampInMinutes) {
+      timeInSeconds = Number(bar.utcTimestampInMinutes) * 60;
+    } else if (bar.utcTimestamp) {
+      timeInSeconds = Math.floor(Number(bar.utcTimestamp) / 1000);
+    } else if (bar.timestamp) {
+      timeInSeconds = Math.floor(Number(bar.timestamp) / 1000);
+    } else {
+      timeInSeconds = Math.floor(Date.now() / 1000);
+    }
+
+    return {
+      time: timeInSeconds,
+      open: Number((lowPrice + deltaOpen).toFixed(digits)),
+      high: Number((lowPrice + deltaHigh).toFixed(digits)),
+      low: Number(lowPrice.toFixed(digits)),
+      close: Number((lowPrice + deltaClose).toFixed(digits)),
+    };
+  });
+
+  return candles.sort((a, b) => a.time - b.time);
+}
+
+export async function fetchCtraderCandles(
+  ctidTraderAccountId: number,
+  symbolName: string,
+  timeframe: string,
+  count: number = 500,
+  isDemo: boolean = true,
+  maxRetries: number = 3
+): Promise<Candle[]> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const symbols = await getSymbolsList(ctidTraderAccountId, isDemo);
+      const cleanSym = symbolName.toUpperCase().replace('/', '').replace('_', '');
+      const match = symbols.find((s: any) => {
+        const sName = (s.symbolName || s.name || '').toUpperCase().replace('/', '').replace('_', '');
+        return sName === cleanSym || sName.includes(cleanSym);
+      });
+
+      const symbolId = match?.symbolId ? Number(match.symbolId) : 1;
+      const digits = match?.digits ? Number(match.digits) : (cleanSym.includes('JPY') ? 3 : 5);
+      const period = mapTimeframeToCtraderPeriod(timeframe);
+
+      return await getTrendbars(ctidTraderAccountId, symbolId, period, undefined, undefined, count, digits, isDemo);
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        // Exponential backoff delay (1s, 2s, 4s...)
+        await new Promise((res) => setTimeout(res, 1000 * Math.pow(2, attempt - 1)));
+      }
+    }
+  }
+  throw lastError;
 }

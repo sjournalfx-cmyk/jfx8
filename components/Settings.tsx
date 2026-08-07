@@ -120,6 +120,10 @@ const Settings: React.FC<SettingsProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [formData, setFormData] = useState<UserProfile>({ ...userProfile, plan: normalizePlan(userProfile.plan) });
+
+  const currentPlan = normalizePlan(formData.plan);
+  const isFreeTier = currentPlan === APP_CONSTANTS.PLANS.FREE;
+  const isBrokerSyncTier = currentPlan === APP_CONSTANTS.PLANS.HOBBY || currentPlan === APP_CONSTANTS.PLANS.STANDARD;
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveStatus] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -218,7 +222,7 @@ const Settings: React.FC<SettingsProps> = ({
   const containerBg = 'bg-[#000000] text-zinc-100';
 
   const shellCard = isDarkMode
-    ? 'bg-white/[0.03] border-white/[0.08] shadow-[0_20px_60px_rgba(0,0,0,0.25)]'
+    ? 'bg-[#000000] border-white/[0.08] shadow-[0_20px_60px_rgba(0,0,0,0.25)]'
     : 'bg-white border-slate-200 shadow-[0_24px_80px_rgba(15,23,42,0.08)]';
 
   const inputClass = `w-full rounded-2xl border px-4 py-3.5 text-sm outline-none transition-all ${
@@ -259,8 +263,8 @@ const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className={`h-screen overflow-hidden ${containerBg}`}>
-      <div className="flex h-full w-full flex-col gap-6 p-4 sm:p-6 lg:p-8">
-        <header className={`rounded-[32px] border p-6 md:p-8 ${shellCard}`}>
+      <div className="flex h-full w-full flex-col gap-5 p-4 sm:p-5 lg:p-6">
+        <header className={`rounded-[28px] border p-5 md:p-6 ${shellCard}`}>
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
               <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#FF4F01]">Preferences</p>
@@ -291,8 +295,8 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
         </header>
 
-        <div className="grid flex-1 min-h-0 gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className={`flex min-h-0 flex-col gap-3 rounded-[32px] border p-3 ${shellCard} lg:sticky lg:top-8`}>
+        <div className="grid flex-1 min-h-0 gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className={`flex min-h-0 flex-col gap-2.5 rounded-[28px] border p-2.5 ${shellCard} lg:sticky lg:top-8`}>
             <div className="px-3 pb-2 pt-1">
               <p className="text-[10px] font-black uppercase tracking-[0.28em] opacity-40">Sections</p>
             </div>
@@ -305,7 +309,7 @@ const Settings: React.FC<SettingsProps> = ({
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`group flex items-center gap-4 rounded-2xl px-4 py-4 text-left transition-all ${
+                  className={`group flex items-center gap-3 rounded-2xl px-3.5 py-3.5 text-left transition-all ${
                     active
                       ? 'bg-[#FF4F01] text-white shadow-lg shadow-[#FF4F01]/20'
                       : isDarkMode
@@ -313,30 +317,30 @@ const Settings: React.FC<SettingsProps> = ({
                         : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  <div className={`rounded-xl p-2.5 ${active ? 'bg-white/15' : isDarkMode ? 'bg-white/[0.04]' : 'bg-slate-100'}`}>
-                    <Icon size={18} />
+                  <div className={`rounded-xl p-2 ${active ? 'bg-white/15' : isDarkMode ? 'bg-white/[0.04]' : 'bg-slate-100'}`}>
+                    <Icon size={16} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold">{tab.label}</p>
-                    <p className={`text-[11px] ${active ? 'text-white/75' : 'opacity-45'}`}>{tab.desc}</p>
+                    <p className="text-[13px] font-bold">{tab.label}</p>
+                    <p className={`text-[10px] ${active ? 'text-white/75' : 'opacity-45'}`}>{tab.desc}</p>
                   </div>
                 </button>
               );
             })}
 
-            <div className={`mt-2 rounded-2xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+            <div className={`mt-2 rounded-2xl border p-3.5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
               <div className="flex items-center gap-3">
                 <div className="rounded-xl bg-rose-500/10 p-2 text-rose-500">
-                  <LogOut size={16} />
+                  <LogOut size={14} />
                 </div>
                 <div>
-                  <p className="text-sm font-bold">Sign out</p>
-                  <p className="text-[11px] opacity-50">End this session on the device.</p>
+                  <p className="text-[13px] font-bold">Sign out</p>
+                  <p className="text-[10px] opacity-50">End this session on the device.</p>
                 </div>
               </div>
               <button
                 onClick={onLogout}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-500 px-4 py-3 text-sm font-bold text-white transition-all hover:bg-rose-400"
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-500 px-3.5 py-2.5 text-sm font-bold text-white transition-all hover:bg-rose-400"
               >
                 <LogOut size={16} />
                 Sign Out
@@ -344,16 +348,16 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
           </aside>
 
-          <main className={`flex min-h-0 flex-col overflow-y-auto rounded-[32px] border p-6 md:p-8 ${shellCard} custom-scrollbar`}>
+          <main className={`flex min-h-0 flex-col overflow-y-auto rounded-[28px] border p-5 md:p-6 ${shellCard} custom-scrollbar`}>
             <div
-              className={`mb-6 flex flex-col gap-3 border-b pb-5 ${
+              className={`mb-5 flex flex-col gap-3 border-b pb-4 ${
                 isDarkMode ? 'border-white/[0.06]' : 'border-slate-200'
               }`}
             >
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#FF4F01]">{currentTab.label}</p>
-                  <h2 className="mt-1 text-2xl font-black tracking-tight">{currentTab.label}</h2>
+                  <h2 className="mt-1 text-xl font-black tracking-tight">{currentTab.label}</h2>
                 </div>
                 {activeTab === 'help' ? (
                   <a
@@ -561,23 +565,47 @@ const Settings: React.FC<SettingsProps> = ({
                       />
                     </div>
                     <div>
-                      <label htmlFor="settings-initial-balance" className={labelClass}>
-                        Initial Balance
-                      </label>
-                      <div className="relative">
-                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-mono font-black text-[#FF4F01]">
-                          {formData.currencySymbol}
-                        </span>
-                        <input
-                          id="settings-initial-balance"
-                          type="number"
-                          value={formData.initialBalance}
-                          onChange={(e) =>
-                            setFormData({ ...formData, initialBalance: Number(e.target.value) || 0 })
-                          }
-                          className={`${inputClass} pl-10 font-mono`}
-                        />
-                      </div>
+                      {isFreeTier ? (
+                        <>
+                          <label htmlFor="settings-initial-balance" className={labelClass}>
+                            Initial Balance
+                          </label>
+                          <div className="relative">
+                            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-mono font-black text-[#FF4F01]">
+                              {formData.currencySymbol}
+                            </span>
+                            <input
+                              id="settings-initial-balance"
+                              type="number"
+                              value={formData.initialBalance}
+                              onChange={(e) =>
+                                setFormData({ ...formData, initialBalance: Number(e.target.value) || 0 })
+                              }
+                              className={`${inputClass} pl-10 font-mono`}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <label className={labelClass}>Account Balance</label>
+                          <div className={`flex h-[52px] items-center gap-3 rounded-2xl border px-4 ${
+                            isDarkMode ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-emerald-200 bg-emerald-50'
+                          }`}>
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="text-xs font-black uppercase tracking-[0.18em] text-emerald-500">
+                              {isBrokerSyncTier && localBrokerInfo
+                                ? `${formData.currencySymbol}${localBrokerInfo.balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })} — Synced from Broker`
+                                : isBrokerSyncTier
+                                ? 'Synced from Broker — Connect EA to view live balance'
+                                : `${formData.currencySymbol}${(formData.initialBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                              }
+                            </span>
+                          </div>
+                          <p className="mt-1.5 text-[10px] opacity-40">
+                            Your balance is pulled directly from your broker. To adjust it, update from within your trading platform.
+                          </p>
+                        </>
+                      )}
                     </div>
                     <div>
                       <label className={labelClass}>Sync Method</label>

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, HelpCircle, CalendarDays, AlertTriangle } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, HelpCircle, CalendarDays, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
     DndContext,
     closestCenter,
@@ -38,15 +38,23 @@ const safePnL = (value: unknown): number => {
 };
 
 type EconomicCalendarItem = {
-    category?: string;
-    country?: string;
     date: string;
-    detail?: string;
-    endDate?: string;
-    impact?: string;
-    source: 'BLS' | 'Fed' | string;
     time?: string;
-    title: string;
+    currency?: string;
+    Currency?: string;
+    impact?: string;
+    Impact?: string;
+    event?: string;
+    Event?: string;
+    actual?: string;
+    Actual?: string;
+    forecast?: string;
+    Forecast?: string;
+    previous?: string;
+    Previous?: string;
+    source?: string;
+    datetime_local?: string;
+    datetime_utc?: string;
 };
 
 interface DashboardProps {
@@ -169,13 +177,6 @@ const formatDateLabel = (value?: string) => {
     }).format(date);
 };
 
-const formatEventDateRange = (start?: string, end?: string, time?: string) => {
-    const startLabel = formatDateLabel(start);
-    const endLabel = end && end !== start ? formatDateLabel(end) : '';
-    const dateLabel = endLabel ? `${startLabel} - ${endLabel}` : startLabel;
-    return time ? `${dateLabel} | ${time}` : dateLabel;
-};
-
 const impactStyleMap: Record<string, { pill: string; dot: string }> = {
     high: { pill: 'bg-rose-500/10 text-rose-500 border-rose-500/20', dot: 'bg-rose-500' },
     medium: { pill: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-400' },
@@ -184,6 +185,7 @@ const impactStyleMap: Record<string, { pill: string; dot: string }> = {
 
 const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
     const [events, setEvents] = useState<EconomicCalendarItem[]>([]);
+    const [impactFilter, setImpactFilter] = useState<'all' | 'high' | 'med-high'>('all');
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -207,14 +209,15 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
         try {
             const now = new Date();
-            const from = new Date(now.getTime() - 14 * 86400000).toISOString().split('T')[0];
-            const to = new Date(now.getTime() + 60 * 86400000).toISOString().split('T')[0];
-            const response = await fetch(`/api/economic-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+            const from = new Date(now.getTime() - 1 * 86400000).toISOString().split('T')[0];
+            const to = new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0];
+            const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+            const response = await fetch(`/api/economic-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&tz=${encodeURIComponent(userTz)}`);
             const payload = await response.json().catch(() => ({}));
 
             if (!mountedRef.current) return;
 
-            if (!response.ok) {
+            if (!response.ok || payload?.error) {
                 setError(payload?.error || 'The economic calendar service did not return data.');
                 setEvents([]);
                 hasEventsRef.current = false;
@@ -223,14 +226,13 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
             const rawEvents = Array.isArray(payload?.data) ? payload.data : [];
             const normalizedEvents = rawEvents
-                .filter((item: EconomicCalendarItem) => item && item.title && item.date)
+                .filter((item: EconomicCalendarItem) => item && (item.event || item.Event) && item.date)
                 .slice()
                 .sort((a: EconomicCalendarItem, b: EconomicCalendarItem) => {
-                    const aTs = Date.parse(`${a.date}T00:00:00Z`);
-                    const bTs = Date.parse(`${b.date}T00:00:00Z`);
+                    const aTs = Date.parse(`${a.date}T${a.time || '00:00:00'}Z`);
+                    const bTs = Date.parse(`${b.date}T${b.time || '00:00:00'}Z`);
                     if (aTs !== bTs) return aTs - bTs;
-                    if (a.source !== b.source) return a.source.localeCompare(b.source);
-                    return a.title.localeCompare(b.title);
+                    return (a.currency || a.Currency || '').localeCompare(b.currency || b.Currency || '');
                 });
 
             setEvents(normalizedEvents);
@@ -276,29 +278,85 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
         };
     }, []);
 
-    const visibleEvents = events.slice(0, 6);
+    // Filter events by impact level
+    const filteredEvents = useMemo(() => {
+        return events.filter((e) => {
+            const imp = (e.impact || e.Impact || '').toLowerCase();
+            if (impactFilter === 'high') return imp === 'high';
+            if (impactFilter === 'med-high') return imp === 'high' || imp === 'medium';
+            return true;
+        });
+    }, [events, impactFilter]);
+
+    // Check for imminent High-Impact events within next 60 minutes
+    const imminentHighImpactEvent = useMemo(() => {
+        const now = Date.now();
+        return events.find((e) => {
+            const imp = (e.impact || e.Impact || '').toLowerCase();
+            if (imp !== 'high') return false;
+            const eventTimeStr = `${e.date}T${e.time || '00:00:00'}Z`;
+            const eventTs = Date.parse(eventTimeStr);
+            if (Number.isNaN(eventTs)) return false;
+            const diffMinutes = (eventTs - now) / 60000;
+            return diffMinutes >= -15 && diffMinutes <= 60;
+        });
+    }, [events]);
+
+    const visibleEvents = filteredEvents;
 
     return (
-        <div className={`h-full p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
-            <div className="flex items-start justify-between gap-4 mb-2">
+        <div className={`h-[400px] p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-3 shrink-0">
                 <div>
                     <h3 className="font-bold flex items-center gap-2">
                         <CalendarDays size={18} className="text-sky-500" />
                         Economic Calendar
+                        <button
+                            onClick={() => void loadCalendar({ silent: false })}
+                            disabled={isRefreshing || isLoading}
+                            title="Refresh calendar data"
+                            className={`p-1 rounded-lg transition-all ${isDarkMode ? 'hover:bg-zinc-800 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-700'} disabled:opacity-50`}
+                        >
+                            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-sky-500' : ''} />
+                        </button>
                     </h3>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                        Recent and upcoming macro events
-                    </p>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDarkMode ? 'text-zinc-600' : 'text-slate-300'}`}>
-                        Auto-refresh every 30 minutes{lastUpdated ? ` • updated ${new Date(lastUpdated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
-                    </p>
                 </div>
-                {isRefreshing && (
-                    <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${isDarkMode ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>
-                        Refreshing
-                    </span>
-                )}
+                
+                {/* Impact Filter Controls */}
+                <div className="flex items-center gap-1 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800 self-start sm:self-auto">
+                    <button
+                        onClick={() => setImpactFilter('all')}
+                        className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition-all ${impactFilter === 'all' ? 'bg-sky-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                        ALL
+                    </button>
+                    <button
+                        onClick={() => setImpactFilter('med-high')}
+                        className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition-all ${impactFilter === 'med-high' ? 'bg-amber-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                        MED+HIGH
+                    </button>
+                    <button
+                        onClick={() => setImpactFilter('high')}
+                        className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition-all ${impactFilter === 'high' ? 'bg-rose-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                        HIGH ONLY
+                    </button>
+                </div>
             </div>
+
+            {/* Imminent High Impact Warning Alert */}
+            {imminentHighImpactEvent && (
+                <div className={`mb-3 p-3 rounded-xl border flex items-center gap-3 animate-pulse ${isDarkMode ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>
+                    <AlertTriangle size={18} className="shrink-0 text-rose-500" />
+                    <div className="min-w-0 flex-1">
+                        <p className="text-xs font-black uppercase tracking-wider">High Impact News Warning</p>
+                        <p className="text-xs truncate font-bold">
+                            {imminentHighImpactEvent.currency || imminentHighImpactEvent.Currency} - {imminentHighImpactEvent.event || imminentHighImpactEvent.Event} ({imminentHighImpactEvent.time || 'Today'})
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {isLoading ? (
                 <div className="space-y-3 flex-1 overflow-hidden">
@@ -325,54 +383,58 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                 <div className={`flex-1 rounded-2xl border border-dashed flex items-center justify-center text-center px-6 ${isDarkMode ? 'border-zinc-800 text-zinc-500' : 'border-slate-200 text-slate-400'}`}>
                     <div>
                         <p className="text-sm font-bold">No economic events in this window</p>
-                        <p className="text-xs mt-1">BLS and Fed returned no scheduled events for the selected window.</p>
+                        <p className="text-xs mt-1">ForexFactory returned no scheduled events for the selected range.</p>
                     </div>
                 </div>
             ) : (
-                <div className="space-y-3 flex-1 overflow-auto custom-scrollbar pr-2">
+                <div className="space-y-3 flex-1 overflow-y-auto max-h-[290px] custom-scrollbar pr-2.5">
                     {visibleEvents.map((event, index) => {
-                        const impactKey = (event.impact || '').toLowerCase();
+                        const eventName = event.event || event.Event || 'Unnamed Event';
+                        const currency = event.currency || event.Currency || 'USD';
+                        const impactRaw = event.impact || event.Impact || 'low';
+                        const impactKey = impactRaw.toLowerCase();
                         const impactStyle = impactStyleMap[impactKey] || {
                             pill: isDarkMode ? 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' : 'bg-slate-100 text-slate-500 border-slate-200',
                             dot: 'bg-zinc-400',
                         };
-                        const sourceStyle = event.source === 'Fed'
-                            ? (isDarkMode ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-amber-50 text-amber-700 border-amber-200')
-                            : (isDarkMode ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-sky-50 text-sky-700 border-sky-200');
+
+                        const actualVal = event.actual || event.Actual || '--';
+                        const forecastVal = event.forecast || event.Forecast || '--';
+                        const previousVal = event.previous || event.Previous || '--';
 
                         return (
-                            <div key={`${event.source}-${event.date}-${event.title}-${index}`} className={`p-3 rounded-xl border ${isDarkMode ? 'border-[#27272a] bg-white/[0.02]' : 'border-slate-100 bg-slate-50'}`}>
+                            <div key={`${currency}-${event.date}-${eventName}-${index}`} className={`p-3 rounded-xl border ${isDarkMode ? 'border-[#27272a] bg-white/[0.02]' : 'border-slate-100 bg-slate-50'}`}>
                                 <div className="flex items-start justify-between gap-3 mb-2">
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <div className={`w-2 h-2 rounded-full ${impactStyle.dot}`} />
-                                            <p className="text-sm font-bold truncate">{event.title || 'Unnamed event'}</p>
+                                            <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-zinc-800 text-zinc-300' : 'bg-slate-200 text-slate-700'}`}>
+                                                {currency}
+                                            </span>
+                                            <p className="text-sm font-bold truncate">{eventName}</p>
                                         </div>
                                         <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                                            {formatEventDateRange(event.date, event.endDate, event.time)} | {event.country || 'United States'}
+                                            {formatDateLabel(event.date)} {event.time ? `| ${event.time}` : ''}
                                         </p>
                                     </div>
-                                    <div className="flex flex-col items-end gap-2 shrink-0">
-                                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${sourceStyle}`}>
-                                            {event.source}
-                                        </span>
+                                    <div className="flex flex-col items-end gap-1 shrink-0">
                                         <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${impactStyle.pill}`}>
-                                            {impactKey || 'unknown'} impact
+                                            {impactKey}
                                         </span>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                                     <div className={`rounded-lg px-2 py-1.5 ${isDarkMode ? 'bg-black/30 text-zinc-300' : 'bg-white text-slate-600'}`}>
-                                        <div className="opacity-50 uppercase tracking-widest font-bold">Source</div>
-                                        <div className="font-bold mt-0.5">{event.source}</div>
+                                        <div className="opacity-50 uppercase tracking-widest font-bold text-[9px]">Actual</div>
+                                        <div className="font-bold mt-0.5">{actualVal}</div>
                                     </div>
                                     <div className={`rounded-lg px-2 py-1.5 ${isDarkMode ? 'bg-black/30 text-zinc-300' : 'bg-white text-slate-600'}`}>
-                                        <div className="opacity-50 uppercase tracking-widest font-bold">Type</div>
-                                        <div className="font-bold mt-0.5">{event.category || 'Scheduled release'}</div>
+                                        <div className="opacity-50 uppercase tracking-widest font-bold text-[9px]">Forecast</div>
+                                        <div className="font-bold mt-0.5">{forecastVal}</div>
                                     </div>
                                     <div className={`rounded-lg px-2 py-1.5 ${isDarkMode ? 'bg-black/30 text-zinc-300' : 'bg-white text-slate-600'}`}>
-                                        <div className="opacity-50 uppercase tracking-widest font-bold">Detail</div>
-                                        <div className="font-bold mt-0.5">{event.detail || 'Scheduled release'}</div>
+                                        <div className="opacity-50 uppercase tracking-widest font-bold text-[9px]">Previous</div>
+                                        <div className="font-bold mt-0.5">{previousVal}</div>
                                     </div>
                                 </div>
                             </div>

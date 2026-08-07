@@ -23,6 +23,7 @@ import { Tooltip } from "../ui/Tooltip"
 interface TradingMistakesBarChartWidgetProps {
   trades: Trade[]
   isDarkMode: boolean
+  onInfoClick?: () => void
 }
 
 const MISTAKE_COLORS = [
@@ -48,7 +49,7 @@ const chartConfig = {
 const isNonMistakeLabel = (value: string) =>
   /^(none|n\/a|na|no mistake|no mistakes|none recorded|clean)$/i.test(value.trim())
 
-export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: TradingMistakesBarChartWidgetProps) {
+export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoClick }: TradingMistakesBarChartWidgetProps) {
   // Track visibility of each mistake type on the chart
   const [activeMistakes, setActiveMistakes] = React.useState<Record<string, boolean>>({})
 
@@ -180,7 +181,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode }: Tradi
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <CardTitle className="text-base tracking-tight">Trading Mistakes</CardTitle>
-            <Tooltip content="Tracks the frequency and accumulation of self-reported trading mistakes over time. Click legend items to toggle lines." isDarkMode={isDarkMode}>
+            <Tooltip content="Tracks the frequency and accumulation of self-reported trading mistakes over time. Click legend items to toggle lines." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
               <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
             </Tooltip>
           </div>

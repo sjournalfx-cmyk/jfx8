@@ -20,10 +20,10 @@ Each time you have local changes to push to production:
 
 3. ✅ **Trigger Vercel deploy hook**
    ```powershell
-   Invoke-RestMethod -Method Post -Uri "https://api.vercel.com/v1/integrations/deploy/prj_Q3NrV3DDu6mhdskwn249cbACxx6l/vVc6M0ZJsK"
+   Invoke-RestMethod -Method Post -Uri "https://api.vercel.com/v1/integrations/deploy/prj_lQh9T1ByDI22nrN35Y5r4nI7C6FU/37DuJhjKQK"
    ```
 
    Or with `curl` (Git Bash / WSL):
    ```bash
-   curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_Q3NrV3DDu6mhdskwn249cbACxx6l/vVc6M0ZJsK"
+   curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_lQh9T1ByDI22nrN35Y5r4nI7C6FU/37DuJhjKQK"
    ```
