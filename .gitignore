@@ -34,6 +34,12 @@ build/
 *.png
 *.jpg
 
+# But allow specific icons in public/ used by the app
+!public/icon2.png
+!public/icon3.jpeg
+!public/mt5-logo.png
+!public/landing-hero-poster.jpg
+
 # Local scratch artifacts from tooling and cleanup work
 .push-tmp/
 .playwright-mcp/

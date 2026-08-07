@@ -179,10 +179,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
       <main>
         <section className="pt-[220px] px-10 max-w-[1728px] mx-auto flex flex-col items-center text-center relative overflow-visible bg-[#FAF9F5]">
           <h1 className="text-[82px] leading-[1.05] tracking-[-0.04em] font-bold max-w-4xl mb-8 text-[#1B1B1B] text-balance">
-            The trading journal for traders who are serious about their craft
+            The trading journal for smart traders
           </h1>
           <p className="text-[18px] leading-[1.6] text-[#111111] max-w-2xl mb-16">
-            Track every trade, analyse every outcome, and evolve your strategy with the most comprehensive trading journal built for serious traders.
+            Track every trade, analyse every outcome, and evolve your strategy with the most comprehensive trading journal built for smart traders.
           </p>
           <div ref={heroFrameRef} className="w-full max-w-[1194px] bg-[#F0EFEB] overflow-hidden shadow-2xl relative z-10 rounded-[40px] h-[640px]">
             <video

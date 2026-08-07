@@ -6,7 +6,7 @@ import {
     Power, ExternalLink, Activity, Clock, PlusCircle, CheckCircle2,
     ChevronDown, Wifi, WifiOff,
     TrendingUp, TrendingDown, DollarSign, BarChart3,
-    RefreshCw, Trash2, Edit3, Eye, EyeOff, LogOut
+    RefreshCw, Trash2, Edit3, Eye, EyeOff, LogOut, Monitor, Layers
 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import { supabase } from '../lib/supabase';
@@ -19,9 +19,6 @@ import { EA_BRIDGE_URL } from '../lib/constants';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
 import { parseMTTradeCSV } from '../lib/trade-import';
-import icon1 from '../icon1.png';
-import icon2 from '../icon2.png';
-import icon3 from '../icon3.jpeg';
 
 interface BridgeProps {
     isDarkMode: boolean;
@@ -147,10 +144,6 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
         );
     }
 
-    if (!connectionMode) {
-        return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} />;
-    }
-
     if (isInternalConnected) {
         return (
             <BridgeMonitor
@@ -206,7 +199,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             title: 'Desktop Bridge',
             subtitle: 'EA Terminal Bridge',
             icon: (
-                <img src={icon2} alt="Desktop Bridge" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
+                <img src="/icon2.png" alt="Desktop Bridge" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
             ),
             features: [
                 'Windows EXE bridge client',
@@ -223,7 +216,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             title: 'cTrader',
             subtitle: 'Open API Sync',
             icon: (
-                <img src={icon3} alt="cTrader" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
+                <img src="/icon3.jpeg" alt="cTrader" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
             ),
             features: [
                 'Direct cTrader ID OAuth login',
@@ -270,12 +263,10 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
     const handleCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file || !onImportTrades) return;
-
         const reader = new FileReader();
         reader.onload = async (loadEvent) => {
             const text = typeof loadEvent.target?.result === 'string' ? loadEvent.target.result : '';
             if (!text) return;
-
             const importedTrades = parseMTTradeCSV(text);
             if (importedTrades.length > 0) {
                 await onImportTrades(importedTrades);
@@ -294,7 +285,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                         Choose Your Connection
                     </h1>
                     <p className="text-zinc-500 text-sm leading-relaxed max-w-2xl mx-auto whitespace-normal break-normal">
-                        Select how you want to connect your trading terminal to JournalFX. 
+                        Select how you want to connect your trading terminal to JournalFX.
                         You can switch between methods at any time.
                     </p>
                 </div>
