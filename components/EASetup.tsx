@@ -144,6 +144,10 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
         );
     }
 
+    if (!connectionMode) {
+        return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} />;
+    }
+
     if (isInternalConnected) {
         return (
             <BridgeMonitor
