@@ -1728,7 +1728,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             <div className="rounded-2xl border border-white/5 bg-[#000000] overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/5 flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-[#FF4F00]/10">
-                        <img src={icon3} alt="cTrader" className="w-10 h-10 object-contain" />
+                        <img src="/icon3.jpeg" alt="cTrader" className="w-10 h-10 object-contain" />
                     </div>
                     <div>
                         <h3 className="text-sm font-bold text-white">cTrader Open API</h3>
