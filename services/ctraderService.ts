@@ -1,8 +1,8 @@
 import { Candle, EADeal, EAPosition } from '../types';
 
 const CTRADER_ID_BASE = 'https://id.ctrader.com';
-const WS_DEMO = `ws://${window.location.host}/ctrader-ws/demo`;
-const WS_LIVE = `ws://${window.location.host}/ctrader-ws/live`;
+const WS_DEMO = 'wss://demo.ctraderapi.com:5036';
+const WS_LIVE = 'wss://live.ctraderapi.com:5036';
 
 const CLIENT_ID = import.meta.env.VITE_CTRADER_CLIENT_ID || '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
 const CLIENT_SECRET = import.meta.env.VITE_CTRADER_CLIENT_SECRET || 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
