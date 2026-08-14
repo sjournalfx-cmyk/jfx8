@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const apiKey = process.env.NVIDIA_API_KEY || process.env.VITE_NVIDIA_API_KEY;
+  const apiKey = process.env.NVIDIA_API_KEY || process.env.VITE_NVIDIA_API_KEY || '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';
   if (!apiKey) {
     res.status(500).json({ error: 'Missing NVIDIA_API_KEY environment variable' });
     return;
