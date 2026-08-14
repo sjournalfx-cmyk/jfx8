@@ -206,94 +206,94 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
 
     return (
         <div className="h-full flex flex-col">
-            <div className={`flex flex-col md:flex-row md:items-center justify-between p-6 gap-4 border-b shrink-0 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-100 bg-white'}`}>
-                <div className="flex items-center gap-4">
-                    <div className={`flex items-center p-1 rounded-xl border ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-slate-50 border-slate-200'}`}>
-                        <button onClick={prev} className={`p-2 rounded-lg hover:bg-opacity-10 ${isDarkMode ? 'hover:bg-white text-zinc-400' : 'hover:bg-black text-slate-500'}`}><ChevronLeft size={18} /></button>
-                        <span className={`w-40 text-center font-bold text-sm ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{mode === 'month' ? currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : year}</span>
-                        <button onClick={next} className={`p-2 rounded-lg hover:bg-opacity-10 ${isDarkMode ? 'hover:bg-white text-zinc-400' : 'hover:bg-black text-slate-500'}`}><ChevronRight size={18} /></button>
+            <div className={`flex flex-col md:flex-row md:items-center justify-between px-4 py-2.5 gap-3 border-b shrink-0 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-100 bg-white'}`}>
+                <div className="flex items-center gap-3">
+                    <div className={`flex items-center p-0.5 rounded-lg border ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-slate-50 border-slate-200'}`}>
+                        <button onClick={prev} className={`p-1 rounded hover:bg-opacity-10 ${isDarkMode ? 'hover:bg-white text-zinc-400' : 'hover:bg-black text-slate-500'}`}><ChevronLeft size={15} /></button>
+                        <span className={`w-32 text-center font-bold text-xs ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{mode === 'month' ? currentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : year}</span>
+                        <button onClick={next} className={`p-1 rounded hover:bg-opacity-10 ${isDarkMode ? 'hover:bg-white text-zinc-400' : 'hover:bg-black text-slate-500'}`}><ChevronRight size={15} /></button>
                     </div>
-                    <div className={`flex rounded-lg border overflow-hidden p-1 gap-1 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-slate-50'}`}>
-                         <button onClick={() => setMode('month')} className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${mode === 'month' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Month</button>
-                         <button onClick={() => setMode('year')} className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${mode === 'year' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Year</button>
+                    <div className={`flex rounded-lg border overflow-hidden p-0.5 gap-0.5 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-slate-50'}`}>
+                         <button onClick={() => setMode('month')} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'month' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Month</button>
+                         <button onClick={() => setMode('year')} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'year' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Year</button>
                     </div>
                 </div>
                 {mode === 'month' && (
-                    <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-4 animate-in fade-in slide-in-from-right-4">
+                    <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1.5 animate-in fade-in slide-in-from-right-4">
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">Winning Days</span>
-                            <div className="flex items-center gap-1.5">
-                                <Trophy size={14} className="text-amber-500" />
-                                <span className={`font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winDays}</span>
+                            <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Winning Days</span>
+                            <div className="flex items-center gap-1">
+                                <Trophy size={12} className="text-amber-500" />
+                                <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winDays}</span>
                             </div>
                         </div>
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">Losing Days</span>
-                            <div className="flex items-center gap-1.5">
-                                <TrendingDown size={14} className="text-rose-500" />
-                                <span className={`font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.lossDays}</span>
+                            <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Losing Days</span>
+                            <div className="flex items-center gap-1">
+                                <TrendingDown size={12} className="text-rose-500" />
+                                <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.lossDays}</span>
                             </div>
                         </div>
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">Winning Trades</span>
-                            <div className="flex items-center gap-1.5">
-                                <CheckCircle size={14} className="text-emerald-500" />
-                                <span className={`font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winTrades}</span>
+                            <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Winning Trades</span>
+                            <div className="flex items-center gap-1">
+                                <CheckCircle size={12} className="text-emerald-500" />
+                                <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winTrades}</span>
                             </div>
                         </div>
-                        <div className={`w-px h-8 hidden lg:block ${isDarkMode ? 'bg-black' : 'bg-slate-200'}`} />
+                        <div className={`w-px h-6 hidden lg:block ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">Net P&L</span>
-                            <span className={`font-mono font-bold text-lg ${monthlyStats.totalPnL > 0 ? 'text-teal-500' : monthlyStats.totalPnL < 0 ? 'text-rose-500' : isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                            <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Net P&L</span>
+                            <span className={`font-mono font-bold text-sm ${monthlyStats.totalPnL > 0 ? 'text-teal-500' : monthlyStats.totalPnL < 0 ? 'text-rose-500' : isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
                                 {monthlyStats.totalPnL > 0 ? '+' : ''}{userProfile.currencySymbol}{Math.abs(monthlyStats.totalPnL).toLocaleString()}
                             </span>
                         </div>
-                        <div className={`w-px h-8 hidden lg:block ${isDarkMode ? 'bg-black' : 'bg-slate-200'}`} />
+                        <div className={`w-px h-6 hidden lg:block ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
                         <div className="flex flex-col items-end">
-                            <span className="text-[10px] uppercase font-bold opacity-50 tracking-wider">Win Rate</span>
-                            <div className="flex items-center gap-1.5"><Activity size={14} className="text-purple-500" /><span className={`font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winRate.toFixed(0)}%</span></div>
+                            <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Win Rate</span>
+                            <div className="flex items-center gap-1"><Activity size={12} className="text-purple-500" /><span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winRate.toFixed(0)}%</span></div>
                         </div>
                     </div>
                 )}
             </div>
 
-            <div className={`flex-1 overflow-y-auto custom-scrollbar p-6 pb-0 ${isDarkMode ? 'bg-[#000000]' : 'bg-slate-50/50'}`}>
+            <div className={`flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-4 ${isDarkMode ? 'bg-[#000000]' : 'bg-slate-50/50'}`}>
                 {mode === 'month' && (
-                    <div className={`mb-8 border-t border-l border-r rounded-t-2xl overflow-hidden transition-all duration-300 ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <div className={`mb-3 border-t border-l border-r rounded-xl overflow-hidden transition-all duration-300 ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200 shadow-sm'}`}>
                         <button 
                             onClick={() => setIsSummaryOpen(!isSummaryOpen)}
-                            className={`w-full flex items-center justify-between p-4 px-6 hover:bg-black/5 dark:hover:bg-white/5 transition-colors`}
+                            className={`w-full flex items-center justify-between py-2.5 px-4 hover:bg-black/5 dark:hover:bg-white/5 transition-colors`}
                         >
-                            <div className="flex items-center gap-3">
-                                <LayoutPanelTop size={18} className="text-indigo-500" />
-                                <span className={`text-sm font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>Performance Summary</span>
+                            <div className="flex items-center gap-2.5">
+                                <LayoutPanelTop size={15} className="text-indigo-500" />
+                                <span className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>Performance Summary</span>
                             </div>
-                            <ChevronDown size={20} className={`transition-transform duration-300 ${isSummaryOpen ? 'rotate-180' : ''} ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`} />
+                            <ChevronDown size={16} className={`transition-transform duration-300 ${isSummaryOpen ? 'rotate-180' : ''} ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`} />
                         </button>
                         
                         <div className={`transition-all duration-300 overflow-hidden ${isSummaryOpen ? 'max-h-[1000px] border-t dark:border-zinc-800 border-slate-100' : 'max-h-0'}`}>
-                            <div className="p-6 overflow-x-auto">
+                            <div className="p-4 overflow-x-auto">
                                 <table className="w-full text-left">
                                     <thead>
-                                        <tr className={`text-[10px] font-black uppercase tracking-widest border-b dark:border-zinc-800 border-slate-100 ${isDarkMode ? 'text-zinc-200 opacity-40' : 'text-slate-500 opacity-70'}`}>
-                                            <th className="pb-4 font-bold">Day</th>
-                                            <th className="pb-4 font-bold">Net Profits</th>
-                                            <th className="pb-4 font-bold text-center">Winning %</th>
-                                            <th className="pb-4 font-bold text-right">Total Profits</th>
-                                            <th className="pb-4 font-bold text-right pr-4">Total Loss</th>
+                                        <tr className={`text-[9px] font-black uppercase tracking-widest border-b dark:border-zinc-800 border-slate-100 ${isDarkMode ? 'text-zinc-200 opacity-40' : 'text-slate-500 opacity-70'}`}>
+                                            <th className="pb-2.5 font-bold">Day</th>
+                                            <th className="pb-2.5 font-bold">Net Profits</th>
+                                            <th className="pb-2.5 font-bold text-center">Winning %</th>
+                                            <th className="pb-2.5 font-bold text-right">Total Profits</th>
+                                            <th className="pb-2.5 font-bold text-right pr-3">Total Loss</th>
                                         </tr>
                                     </thead>
                                     <tbody className={`text-xs font-bold divide-y dark:divide-zinc-800/50 divide-slate-100 ${isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}>
                                         {weekdayStats.map((wd) => (
                                             <tr key={wd.name} className="group">
-                                                <td className="py-4 opacity-80">{wd.name}</td>
-                                                <td className={`py-4 font-mono font-black ${wd.netProfits > 0 ? 'text-emerald-500' : wd.netProfits < 0 ? 'text-rose-500' : (isDarkMode ? 'opacity-40' : 'text-slate-400')}`}>
+                                                <td className="py-2.5 opacity-80">{wd.name}</td>
+                                                <td className={`py-2.5 font-mono font-black ${wd.netProfits > 0 ? 'text-emerald-500' : wd.netProfits < 0 ? 'text-rose-500' : (isDarkMode ? 'opacity-40' : 'text-slate-400')}`}>
                                                     {wd.netProfits === 0 ? userProfile.currencySymbol + '0.00' : (wd.netProfits > 0 ? '+' : '-') + userProfile.currencySymbol + Math.abs(wd.netProfits).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </td>
-                                                <td className="py-4">
+                                                <td className="py-2.5">
                                                     <div className="flex items-center justify-center">
                                                         {wd.tCount > 0 ? (
-                                                            <div className={`relative w-32 h-2.5 rounded-full overflow-hidden flex ${isDarkMode ? 'bg-black' : 'bg-slate-100'}`}>
+                                                            <div className={`relative w-28 h-2 rounded-full overflow-hidden flex ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-100'}`}>
                                                                 <div className="absolute left-1/2 top-0 bottom-0 w-px bg-zinc-400/30 z-10" />
                                                                 <div className="h-full bg-rose-500/80 ml-auto transition-all" style={{ width: `${wd.lRate / 2}%` }} />
                                                                 <div className="h-full bg-emerald-500/80 transition-all" style={{ width: `${wd.wRate / 2}%` }} />
@@ -303,10 +303,10 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                                                         )}
                                                     </div>
                                                 </td>
-                                                <td className="py-4 text-right font-mono text-emerald-500">
+                                                <td className="py-2.5 text-right font-mono text-emerald-500">
                                                     {userProfile.currencySymbol}{wd.totalProfits.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </td>
-                                                <td className="py-4 text-right pr-4 font-mono text-rose-500">
+                                                <td className="py-2.5 text-right pr-3 font-mono text-rose-500">
                                                     -{userProfile.currencySymbol}{Math.abs(wd.totalLoss).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </td>
                                             </tr>
@@ -320,13 +320,13 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
 
                 {mode === 'month' ? (
                     <>
-                        <div className="grid grid-cols-7 gap-4 text-center mb-4">
+                        <div className="grid grid-cols-7 gap-2 text-center mb-2">
                             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                                <div key={d} className="text-xs font-bold uppercase opacity-30">{d}</div>
+                                <div key={d} className="text-[10px] font-bold uppercase opacity-40">{d}</div>
                             ))}
                         </div>
-                        <div className="grid grid-cols-7 gap-4 auto-rows-fr">
-                            {blanks.map(b => <div key={`blank-${b}`} className="min-h-[115px]" />)}
+                        <div className="grid grid-cols-7 gap-2 auto-rows-fr">
+                            {blanks.map(b => <div key={`blank-${b}`} className="min-h-[70px] sm:min-h-[80px]" />)}
                             {days.map(day => { 
                                 const dayTrades = getTradesForDay(day); 
                                 const hasTrades = dayTrades.length > 0; 
@@ -348,17 +348,17 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                                 };
 
                                 return (
-                                    <div key={day} className={`relative rounded-xl border p-2.5 flex flex-col items-center justify-center min-h-[115px] transition-all duration-200 overflow-hidden group ${getBgColor()} ${isDarkMode ? 'hover:border-zinc-600' : 'hover:shadow-md hover:-translate-y-0.5'} ${isCurrentDay ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-[#000000]' : ''}`}>
-                                        <div className="absolute top-2 right-3 z-10">
-                                            <span className={`text-[10px] font-bold ${isCurrentDay ? 'text-indigo-500' : isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{day}</span>
+                                    <div key={day} className={`relative rounded-lg border p-1.5 sm:p-2 flex flex-col items-center justify-center min-h-[70px] sm:min-h-[80px] transition-all duration-200 overflow-hidden group ${getBgColor()} ${isDarkMode ? 'hover:border-zinc-600' : 'hover:shadow-md hover:-translate-y-0.5'} ${isCurrentDay ? 'ring-1.5 ring-indigo-500 ring-offset-1 ring-offset-[#000000]' : ''}`}>
+                                        <div className="absolute top-1.5 right-2 z-10">
+                                            <span className={`text-[9px] font-bold ${isCurrentDay ? 'text-indigo-400 font-black' : isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{day}</span>
                                         </div>
                                         
                                         {hasTrades ? (
                                             <div className="flex flex-col items-center justify-center gap-0.5 relative z-10">
-                                                <div className={`text-base font-mono font-black tracking-tight ${isPositive ? 'text-emerald-500' : isNegative ? 'text-rose-500' : (isDarkMode ? 'text-zinc-400' : 'text-slate-600')}`}>
+                                                <div className={`text-xs sm:text-sm font-mono font-bold tracking-tight ${isPositive ? 'text-emerald-500' : isNegative ? 'text-rose-500' : (isDarkMode ? 'text-zinc-400' : 'text-slate-600')}`}>
                                                     {dayPnL >= 0 ? '+' : '-'}{userProfile.currencySymbol}{Math.abs(dayPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </div>
-                                                <div className={`text-[10px] font-bold uppercase tracking-widest opacity-40 ${isDarkMode ? 'text-white' : 'text-black'}`}>
+                                                <div className={`text-[9px] font-bold uppercase tracking-wider opacity-40 ${isDarkMode ? 'text-white' : 'text-black'}`}>
                                                     {dayTrades.length} {dayTrades.length === 1 ? 'Trade' : 'Trades'}
                                                 </div>
                                             </div>
@@ -369,7 +369,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                         </div>
                     </>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-in fade-in zoom-in-95">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-in fade-in zoom-in-95">
                         {Array.from({length: 12}).map((_, i) => (
                             <MiniCalendar key={i} year={year} month={i} trades={trades} isDarkMode={isDarkMode} onClick={() => { setCurrentDate(new Date(year, i, 1)); setMode('month'); }} />
                         ))}
@@ -1004,71 +1004,71 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                     </div>
                 </div>
             )}
-            <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <header className="mb-4 flex flex-col md:flex-row md:items-end justify-between gap-3">
                 <div>
-                    <div className="flex items-center gap-3 mb-2">
-                        <h1 className="text-3xl font-bold tracking-tight">Trade Journal</h1>
+                    <div className="flex items-center gap-2 mb-1">
+                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Trade Journal</h1>
                         {isDemoMode && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-amber-500/30 bg-amber-500/10 text-amber-300">
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border border-amber-500/30 bg-amber-500/10 text-amber-300">
                                 Demo Mode
                             </span>
                         )}
                     </div>
-                    <p className={`text-sm ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
+                    <p className={`text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
                         {isDemoMode ? 'Sample trades from January to March are loaded for review.' : 'Detailed history of your market execution.'}
                     </p>
                 </div>
                 {selectedIds.length > 0 ? (
-                    <div className="flex items-center gap-3 animate-in slide-in-from-right-4">
-                        <span className="text-sm font-bold opacity-60 mr-2">{selectedIds.length} Selected</span>
+                    <div className="flex items-center gap-2 animate-in slide-in-from-right-4">
+                        <span className="text-xs font-bold opacity-60 mr-1">{selectedIds.length} Selected</span>
                         {selectedIds.length >= 2 && (
                             <button 
                                 onClick={() => areAllLinkedToSameSetup ? handleDetachSelected() : setIsLinkModalOpen(true)}
-                                className={`p-2 px-4 rounded flex items-center gap-2 text-xs font-bold transition-all shadow-lg ${
+                                className={`py-1.5 px-3 rounded flex items-center gap-1.5 text-xs font-bold transition-all shadow-lg ${
                                     areAllLinkedToSameSetup 
                                     ? 'bg-rose-600 text-white hover:bg-rose-700 shadow-rose-500/20' 
                                     : 'bg-violet-600 text-white hover:bg-violet-700 shadow-violet-500/20'
                                 }`}
                             >
                                 {areAllLinkedToSameSetup ? (
-                                    <><Unlink size={16} /> Unlink Setup</>
+                                    <><Unlink size={14} /> Unlink Setup</>
                                 ) : (
-                                    <><Link size={16} /> Link to Setup</>
+                                    <><Link size={14} /> Link to Setup</>
                                 )}
                             </button>
                         )}
                         {selectedSetupSummary && (
-                            <div className={`hidden lg:flex flex-col gap-0.5 px-4 py-2 rounded-xl border text-left ${selectedSetupSummary.mixedSetupState ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : isDarkMode ? 'border-[#27272a] bg-[#000000] text-zinc-300' : 'border-slate-200 bg-white text-slate-700'}`}>
-                                <span className="text-[9px] font-black uppercase tracking-widest opacity-60">Setup Preview</span>
+                            <div className={`hidden lg:flex flex-col gap-0.5 px-3 py-1.5 rounded-lg border text-left ${selectedSetupSummary.mixedSetupState ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : isDarkMode ? 'border-[#27272a] bg-[#000000] text-zinc-300' : 'border-slate-200 bg-white text-slate-700'}`}>
+                                <span className="text-[8px] font-black uppercase tracking-widest opacity-60">Setup Preview</span>
                                 <span className="text-xs font-bold leading-tight">{selectedSetupSummary.setupName}</span>
-                                <span className="text-[10px] opacity-50">
+                                <span className="text-[9px] opacity-50">
                                     {selectedSetupSummary.tradeCount} trades · {selectedSetupSummary.pairCount} pair{selectedSetupSummary.pairCount === 1 ? '' : 's'}
                                 </span>
                             </div>
                         )}
-                        <button onClick={() => setSelectedIds([])} className={`p-2 rounded flex items-center gap-2 text-xs font-bold transition-all ${isDarkMode ? 'bg-black text-zinc-400 hover:bg-black' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>Cancel</button>
-                        <button onClick={handleBulkDelete} className="p-2 rounded flex items-center gap-2 text-xs font-bold transition-all bg-rose-500 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20"><Trash2 size={16} /> Delete Selected</button>
+                        <button onClick={() => setSelectedIds([])} className={`py-1.5 px-3 rounded flex items-center gap-1.5 text-xs font-bold transition-all ${isDarkMode ? 'bg-black text-zinc-400 hover:bg-black' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>Cancel</button>
+                        <button onClick={handleBulkDelete} className="py-1.5 px-3 rounded flex items-center gap-1.5 text-xs font-bold transition-all bg-rose-500 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20"><Trash2 size={14} /> Delete Selected</button>
                     </div>
                 ) : (
-                    <div className="flex gap-3">
-                        <div className={`flex rounded-lg border overflow-hidden p-1 gap-1 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex gap-2">
+                        <div className={`flex rounded-lg border overflow-hidden p-0.5 gap-0.5 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-white'}`}>
                             <button 
                                 onClick={() => setViewMode('list')} 
                                 aria-label="Switch to List View"
-                                className={`p-2 rounded flex items-center gap-2 text-xs font-bold transition-all ${viewMode === 'list' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                className={`py-1.5 px-2.5 rounded flex items-center gap-1.5 text-xs font-bold transition-all ${viewMode === 'list' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                             >
-                                <List size={16} /> List
+                                <List size={14} /> List
                             </button>
                             <button 
                                 onClick={() => setViewMode('calendar')} 
                                 aria-label="Switch to Calendar View"
-                                className={`p-2 rounded flex items-center gap-2 text-xs font-bold transition-all ${viewMode === 'calendar' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                className={`py-1.5 px-2.5 rounded flex items-center gap-1.5 text-xs font-bold transition-all ${viewMode === 'calendar' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                             >
-                                <CalendarIcon size={16} /> Calendar
+                                <CalendarIcon size={14} /> Calendar
                             </button>
                         </div>
                         <div className="relative">
-                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                             <input 
                                 id="journal-search-input"
                                 name="search"
@@ -1076,15 +1076,15 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 placeholder="Search pair, tag or asset..." 
                                 value={searchTerm} 
                                 onChange={(e) => setSearchTerm(e.target.value)} 
-                                className={`pl-10 pr-4 py-2 rounded-lg border text-sm outline-none w-64 ${isDarkMode ? 'bg-[#000000] border-[#27272a] focus:border-blue-500' : 'bg-white border-slate-200'}`} 
+                                className={`pl-8 pr-3 py-1.5 rounded-lg border text-xs outline-none w-48 sm:w-56 ${isDarkMode ? 'bg-[#000000] border-[#27272a] focus:border-blue-500' : 'bg-white border-slate-200'}`} 
                             />
                         </div>
                         <div className="relative">
                             <button
                                 onClick={() => setShowDateFilter(!showDateFilter)}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all ${dateRange ? 'border-indigo-500 bg-indigo-500/10 text-indigo-500' : isDarkMode ? 'border-[#27272a] hover:border-[#3a3a3e]' : 'border-slate-200 hover:border-slate-300'}`}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${dateRange ? 'border-indigo-500 bg-indigo-500/10 text-indigo-500' : isDarkMode ? 'border-[#27272a] hover:border-[#3a3a3e]' : 'border-slate-200 hover:border-slate-300'}`}
                             >
-                                <CalendarIcon size={16} />
+                                <CalendarIcon size={14} />
                                 <span className="hidden sm:inline">
                                     {dateRange ? `${dateRange.start} - ${dateRange.end}` : 'Date Range'}
                                 </span>
@@ -1094,7 +1094,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                         className="ml-1 p-0.5 rounded hover:bg-indigo-500/20"
                                         aria-label="Clear date range"
                                     >
-                                        <X size={12} />
+                                        <X size={10} />
                                     </button>
                                 )}
                             </button>
