@@ -3,7 +3,7 @@ import { calculateStats } from "../lib/statsUtils";
 import { cleanThinkingTags, isInsideThinkingBlock } from "../lib/thinkingCleaner";
 
 const BASE_URL = "/api/nvidia";
-export const NVIDIA_CHAT_MODEL_ID = "stepfun-ai/step-3.5-flash";
+export const NVIDIA_CHAT_MODEL_ID = "nvidia/nemotron-3.5-lightning-30b-a3b";
 
 type AssistantMode = "research" | "mentor";
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };

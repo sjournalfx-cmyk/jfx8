@@ -11,14 +11,20 @@ const __dirname = path.dirname(__filename);
 const _require = createRequire(import.meta.url);
 
 const readNvidiaKey = () => {
-  try {
-    const envPath = path.resolve(process.cwd(), '.env.local');
-    const contents = fs.readFileSync(envPath, 'utf8');
-    const match = contents.match(/^NVIDIA_API_KEY=(?:"([^"]+)"|([^"\r\n]+))/m);
-    return match?.[1] || match?.[2] || '';
-  } catch {
-    return '';
+  if (process.env.NVIDIA_API_KEY) return process.env.NVIDIA_API_KEY;
+  if (process.env.VITE_NVIDIA_API_KEY) return process.env.VITE_NVIDIA_API_KEY;
+  for (const file of ['.env.local', '.env']) {
+    try {
+      const envPath = path.resolve(process.cwd(), file);
+      if (fs.existsSync(envPath)) {
+        const contents = fs.readFileSync(envPath, 'utf8');
+        const match = contents.match(/^(?:NVIDIA_API_KEY|VITE_NVIDIA_API_KEY)=(?:"([^"]+)"|([^"\r\n]+))/m);
+        const key = match?.[1] || match?.[2] || '';
+        if (key) return key.trim();
+      }
+    } catch {}
   }
+  return '';
 };
 
 const readFmpKey = () => {
