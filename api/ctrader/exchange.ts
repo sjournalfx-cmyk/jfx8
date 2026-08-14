@@ -31,10 +31,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Validate redirect_uri to prevent token interception via unvalidated open redirects
   try {
     const parsedUri = new URL(redirectUri);
-    const allowedHosts = ['localhost', '127.0.0.1', 'www.jfxjournal.site', 'jfxjournal.site', 'jfx8.vercel.app', 'vercel.app'];
-    const isHostAllowed = allowedHosts.some((h) => parsedUri.hostname === h || parsedUri.hostname.endsWith('.' + h));
+    const host = parsedUri.hostname.toLowerCase();
+    const reqHost = ((req.headers['x-forwarded-host'] || req.headers.host || '') as string).split(':')[0].toLowerCase();
+
+    const isHostAllowed =
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === reqHost ||
+      host.endsWith('vercel.app') ||
+      host.endsWith('jfxjournal.site') ||
+      host === 'jfxjournal.site' ||
+      host === 'www.jfxjournal.site';
+
     if (!isHostAllowed) {
-      res.status(400).json({ error: 'Invalid redirect_uri host' });
+      console.error(`[cTrader] Rejected redirect_uri host: ${host}, expected one of allowed hosts or reqHost: ${reqHost}`);
+      res.status(400).json({ error: `Invalid redirect_uri host: ${host}` });
       return;
     }
   } catch {

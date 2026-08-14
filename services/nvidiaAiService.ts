@@ -416,14 +416,21 @@ async function chatCompletion(
     });
 
     if (!response.ok) {
-      const error = await response.text();
+      const errorText = await response.text();
+      let parsedError = '';
+      try {
+        const json = JSON.parse(errorText);
+        parsedError = json?.error?.message || json?.error || json?.details || '';
+      } catch {}
+      console.warn(`[NVIDIA AI] HTTP ${response.status}:`, errorText);
+
       if (response.status === 401) {
-        throw new Error('NVIDIA_API_KEY is missing or invalid. Add NVIDIA_API_KEY to your .env.local file.');
+        throw new Error('NVIDIA API Key is missing or unauthorized.');
       }
-      if (response.status === 410 || response.status === 404) {
-        throw new Error('NVIDIA AI service endpoint is currently updating. Using local fallback analysis.');
+      if (response.status === 404 || response.status === 410) {
+        throw new Error(parsedError || `NVIDIA Model '${model}' was not found or has been deprecated.`);
       }
-      throw new Error(`NVIDIA API error (${response.status})`);
+      throw new Error(parsedError || `NVIDIA API error (${response.status})`);
     }
 
     if (onStream && response.body) {
