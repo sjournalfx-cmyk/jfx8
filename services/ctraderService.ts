@@ -4,8 +4,8 @@ const CTRADER_ID_BASE = 'https://id.ctrader.com';
 const WS_DEMO = `ws://${window.location.host}/ctrader-ws/demo`;
 const WS_LIVE = `ws://${window.location.host}/ctrader-ws/live`;
 
-const CLIENT_ID = import.meta.env.VITE_CTRADER_CLIENT_ID || '';
-const CLIENT_SECRET = import.meta.env.VITE_CTRADER_CLIENT_SECRET || '';
+const CLIENT_ID = import.meta.env.VITE_CTRADER_CLIENT_ID || '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
+const CLIENT_SECRET = import.meta.env.VITE_CTRADER_CLIENT_SECRET || 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
 const CTRADER_VOLUME_CENTS_PER_UNIT = 100;
 const CTRADER_UNITS_PER_LOT = 100000;
 const CTRADER_VOLUME_CENTS_PER_LOT = CTRADER_VOLUME_CENTS_PER_UNIT * CTRADER_UNITS_PER_LOT;

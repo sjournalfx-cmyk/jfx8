@@ -6,7 +6,6 @@ import Journal from './components/Journal';
 import Auth from './components/Auth';
 import BetaSplash from './components/BetaSplash';
 
-import { PartyPopper, MessageSquare } from 'lucide-react';
 import { Trade, Note, DailyBias } from './types';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
@@ -390,19 +389,6 @@ const {
   // UI State
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isQuickLogOpen, setIsQuickLogOpen] = useState(false);
-  const [hasSeenBetaAnnouncement, setHasSeenBetaAnnouncement] = useLocalStorage<boolean>('jfx_beta_announcement_shown', false);
-  const [showBetaAnnouncement, setShowBetaAnnouncement] = useState(false);
-
-  // Show announcement when onboarded but hasn't seen it yet
-  useEffect(() => {
-    if (userProfile?.onboarded && !hasSeenBetaAnnouncement) {
-      const timer = setTimeout(() => {
-        setShowBetaAnnouncement(true);
-      }, 1500); // Small delay for better UX
-      return () => clearTimeout(timer);
-    }
-  }, [userProfile?.onboarded, hasSeenBetaAnnouncement]);
-
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -1200,55 +1186,6 @@ const onLogout = async () => {
           onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
           isDarkMode={isDarkMode}
         />
-        {showBetaAnnouncement && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-300">
-            <div
-              className={`w-full max-w-lg rounded-[32px] p-10 shadow-2xl relative overflow-hidden ${isDarkMode ? 'bg-[#0f111a] text-white border border-zinc-800' : 'bg-white text-gray-900 border border-gray-100'
-                } transform transition-all animate-in zoom-in-95 duration-300`}
-            >
-              <div className="absolute top-[-10%] right-[-10%] w-40 h-40 bg-[#FF4F01]/10 rounded-full blur-3xl" />
-              <div className="absolute bottom-[-10%] left-[-10%] w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl" />
-
-              <div className="relative z-10 flex flex-col items-center text-center">
-                <div className="w-20 h-20 bg-gradient-to-br from-[#FF4F01] to-orange-600 rounded-[24px] flex items-center justify-center text-white mb-8 shadow-2xl rotate-3">
-                  <PartyPopper size={40} />
-                </div>
-
-                <h2 className="text-4xl font-black mb-4 tracking-tight">Welcome to the Beta!</h2>
-                <p className={`text-base mb-8 leading-relaxed px-4 ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>
-                  Thank you for joining the <span className="text-[#FF4F01] font-bold">JournalFX Beta Program</span>.
-                  As a beta tester, you have full access to all <span className="text-indigo-400 font-bold">Pro</span> and <span className="text-purple-400 font-bold">Premium</span> features for free.
-                </p>
-
-                <div className={`w-full p-6 rounded-2xl mb-8 text-left ${isDarkMode ? 'bg-white/5 border border-white/5' : 'bg-slate-50 border border-slate-100'}`}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="p-2 bg-[#FF4F01]/10 text-[#FF4F01] rounded-lg">
-                      <MessageSquare size={18} />
-                    </div>
-                    <h4 className="font-bold text-sm">How to provide feedback:</h4>
-                  </div>
-                  <p className="text-xs opacity-60 leading-relaxed">
-                    Found a bug or have a suggestion? Go to <span className="font-bold">Settings &gt; Help & Feedback</span> to send us a direct message. Your feedback directly shapes the future of JournalFX.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => {
-                    setShowBetaAnnouncement(false);
-                    setHasSeenBetaAnnouncement(true);
-                  }}
-                  className="w-full py-5 bg-[#FF4F01] hover:bg-[#e64601] text-white rounded-2xl font-black text-sm shadow-xl shadow-[#FF4F01]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  LET'S START TRADING
-                </button>
-
-                <p className="mt-6 text-[10px] font-bold uppercase tracking-[0.2em] opacity-30">
-                  JournalFX v1.0.0-beta.1
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </ErrorBoundary>
   );

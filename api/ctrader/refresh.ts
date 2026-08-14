@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 
-const CLIENT_ID = process.env.VITE_CTRADER_CLIENT_ID || process.env.CTRADER_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';
+const CLIENT_ID = process.env.VITE_CTRADER_CLIENT_ID || process.env.CTRADER_CLIENT_ID || '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
+const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');

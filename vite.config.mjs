@@ -44,16 +44,23 @@ const readFinnhubKey = () => {
 };
 
 const readCtraderEnv = (key) => {
-  try {
-    const envPath = path.resolve(process.cwd(), '.env.local');
-    const contents = fs.readFileSync(envPath, 'utf8');
-    const match = contents.match(new RegExp(`^${key}=("(?:[^"\\\\]|\\\\.)*"|[^"\\r\\n]+)`, 'm'));
-    if (!match) return '';
-    const val = match[1];
-    return val.startsWith('"') && val.endsWith('"') ? val.slice(1, -1) : val;
-  } catch {
-    return '';
+  if (process.env[key]) return process.env[key];
+  for (const file of ['.env.local', '.env']) {
+    try {
+      const envPath = path.resolve(process.cwd(), file);
+      if (fs.existsSync(envPath)) {
+        const contents = fs.readFileSync(envPath, 'utf8');
+        const match = contents.match(new RegExp(`^${key}=("(?:[^"\\\\]|\\\\.)*"|[^"\\r\\n]+)`, 'm'));
+        if (match) {
+          const val = match[1].trim();
+          return val.startsWith('"') && val.endsWith('"') ? val.slice(1, -1) : val;
+        }
+      }
+    } catch {}
   }
+  if (key === 'VITE_CTRADER_CLIENT_ID') return '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
+  if (key === 'VITE_CTRADER_CLIENT_SECRET') return 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
+  return '';
 };
 
 function runPythonScript(scriptName, args = []) {
@@ -514,18 +521,7 @@ const mt5PythonPlugin = () => {
         }
       });
 
-const readCtraderEnv = (key) => {
-  try {
-    const envPath = path.resolve(process.cwd(), '.env.local');
-    const contents = fs.readFileSync(envPath, 'utf8');
-    const match = contents.match(new RegExp(`^${key}=("[^"]*"|[^"\\r\\n]+)`, 'm'));
-    if (!match) return '';
-    const val = match[1];
-    return val.startsWith('"') && val.endsWith('"') ? val.slice(1, -1) : val;
-  } catch {
-    return '';
-  }
-};
+const readCtraderEnvScoped = (key) => readCtraderEnv(key);
 
       // Redirect cTrader OAuth callback to root so Vite serves the SPA through its normal pipeline
       server.middlewares.use('/api/ctrader/callback', async (req, res) => {

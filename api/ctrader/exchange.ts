@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 
-const CLIENT_ID = process.env.VITE_CTRADER_CLIENT_ID || process.env.CTRADER_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.VITE_CTRADER_CLIENT_SECRET || process.env.CTRADER_CLIENT_SECRET || '';
+const CLIENT_ID = process.env.VITE_CTRADER_CLIENT_ID || process.env.CTRADER_CLIENT_ID || '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
+const CLIENT_SECRET = process.env.VITE_CTRADER_CLIENT_SECRET || process.env.CTRADER_CLIENT_SECRET || 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -31,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Validate redirect_uri to prevent token interception via unvalidated open redirects
   try {
     const parsedUri = new URL(redirectUri);
-    const allowedHosts = ['localhost', '127.0.0.1', 'jfx-journal-3-3-beta.vercel.app', 'vercel.app'];
+    const allowedHosts = ['localhost', '127.0.0.1', 'www.jfxjournal.site', 'jfxjournal.site', 'jfx8.vercel.app', 'vercel.app'];
     const isHostAllowed = allowedHosts.some((h) => parsedUri.hostname === h || parsedUri.hostname.endsWith('.' + h));
     if (!isHostAllowed) {
       res.status(400).json({ error: 'Invalid redirect_uri host' });
