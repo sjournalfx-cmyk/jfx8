@@ -4,10 +4,18 @@ import { applyCorsHeaders } from '../_lib/cors';
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 
-// Server-only credentials. Never hardcode or fall back to client VITE_* values:
-// the client secret must never be shipped to the browser.
-const CLIENT_ID = process.env.CTRADER_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';
+// Vite deployments already use VITE_CTRADER_* values. Accept those legacy
+// names at the API boundary too, so a deployment does not fail after the OAuth
+// redirect merely because the variables were renamed for server use. New
+// deployments should still set the unprefixed CTRADER_* variables: a VITE_*
+// secret is bundled into the browser and must be rotated once clients no
+// longer depend on it.
+function getCredentials() {
+  return {
+    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
+    clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '',
+  };
+}
 
 // Exact-match allowlist for redirect_uri hosts (port stripped). Suffix matching
 // (e.g. "endsWith('.vercel.app')") and trusting the Host / x-forwarded-host
@@ -70,8 +78,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    res.status(500).json({ error: 'cTrader OAuth credentials not configured on the server' });
+  const { clientId, clientSecret } = getCredentials();
+  if (!clientId || !clientSecret) {
+    // This is a deployment configuration problem, not an unexpected function
+    // failure. Returning a clear response means the UI no longer masks it as
+    // an unexplained HTTP 500.
+    const missing = [!clientId && 'CTRADER_CLIENT_ID', !clientSecret && 'CTRADER_CLIENT_SECRET']
+      .filter(Boolean);
+    console.error('[cTrader] Missing production OAuth configuration:', missing.join(', '));
+    res.status(503).json({
+      error: 'cTrader OAuth is not configured for this deployment',
+      missing,
+    });
     return;
   }
 
@@ -80,8 +98,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     tokenUrl.searchParams.set('grant_type', 'authorization_code');
     tokenUrl.searchParams.set('code', code);
     tokenUrl.searchParams.set('redirect_uri', redirectUri);
-    tokenUrl.searchParams.set('client_id', CLIENT_ID);
-    tokenUrl.searchParams.set('client_secret', CLIENT_SECRET);
+    tokenUrl.searchParams.set('client_id', clientId);
+    tokenUrl.searchParams.set('client_secret', clientSecret);
 
     const tokenRes = await fetch(tokenUrl.toString(), {
       headers: { Accept: 'application/json' },

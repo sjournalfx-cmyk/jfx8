@@ -225,13 +225,13 @@ const Settings: React.FC<SettingsProps> = ({
     ? 'bg-[#000000] border-white/[0.08] shadow-[0_20px_60px_rgba(0,0,0,0.25)]'
     : 'bg-white border-slate-200 shadow-[0_24px_80px_rgba(15,23,42,0.08)]';
 
-  const inputClass = `w-full rounded-2xl border px-4 py-3.5 text-sm outline-none transition-all ${
+  const compactInputClass = `w-full rounded-xl border px-3.5 py-2.5 text-sm outline-none transition-all ${
     isDarkMode
       ? 'bg-white/[0.03] border-white/[0.08] text-zinc-100 placeholder:text-zinc-500 focus:border-[#FF4F01]'
       : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-[#FF4F01] focus:bg-white'
   }`;
 
-  const labelClass = 'text-[10px] font-black uppercase tracking-[0.22em] opacity-50 block mb-2';
+  const compactLabelClass = 'text-[10px] font-black uppercase tracking-[0.2em] opacity-50 block mb-1.5';
 
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
@@ -242,12 +242,12 @@ const Settings: React.FC<SettingsProps> = ({
   );
 
   const renderAvatarGrid = (avatars: string[]) => (
-    <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+    <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
       {avatars.map((url) => (
         <button
           key={url}
           onClick={() => setFormData({ ...formData, avatarUrl: url })}
-          className={`aspect-square overflow-hidden rounded-2xl border-2 transition-all hover:-translate-y-0.5 hover:shadow-lg ${
+          className={`aspect-square overflow-hidden rounded-xl border-2 transition-all hover:-translate-y-0.5 hover:shadow-lg ${
             formData.avatarUrl === url
               ? 'border-[#FF4F01] ring-2 ring-[#FF4F01]/15'
               : isDarkMode
@@ -386,74 +386,74 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
 
             {activeTab === 'profile' && (
-              <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-                <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
-                  <div className="mb-6 flex items-center gap-4">
-                    <div className="h-20 w-20 overflow-hidden rounded-[24px] bg-gradient-to-br from-[#FF4F01] to-orange-500 shadow-lg shadow-[#FF4F01]/20">
+              <div className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
+                <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="mb-5 flex items-center gap-3.5">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-[20px] bg-gradient-to-br from-[#FF4F01] to-orange-500 shadow-lg shadow-[#FF4F01]/20">
                       {formData.avatarUrl ? (
                         <img src={formData.avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-white">
-                          <User size={32} />
+                          <User size={26} />
                         </div>
                       )}
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-40">Current Persona</p>
-                      <h3 className="mt-1 truncate text-xl font-black">{formData.name}</h3>
-                      <p className="mt-1 text-sm font-medium text-[#FF4F01]">{formData.plan}</p>
+                      <h3 className="mt-0.5 truncate text-lg font-black">{formData.name}</h3>
+                      <p className="mt-0.5 text-[13px] font-medium text-[#FF4F01]">{formData.plan}</p>
                     </div>
                   </div>
 
-                  <div className="space-y-5">
+                  <div className="space-y-4">
                     <div>
-                      <label htmlFor="settings-full-name" className={labelClass}>
+                      <label htmlFor="settings-full-name" className={compactLabelClass}>
                         Full Name
                       </label>
                       <input
                         id="settings-full-name"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className={inputClass}
+                        className={compactInputClass}
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>Email Address</label>
+                      <label className={compactLabelClass}>Email Address</label>
                       <div className="relative">
-                        <Mail className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-                        <input value={userEmail || ''} readOnly className={`${inputClass} cursor-not-allowed pl-10 opacity-70`} />
+                        <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
+                        <input value={userEmail || ''} readOnly className={`${compactInputClass} cursor-not-allowed pl-9 opacity-70`} />
                       </div>
                     </div>
                     <div>
-                      <label htmlFor="settings-country" className={labelClass}>
+                      <label htmlFor="settings-country" className={compactLabelClass}>
                         Country
                       </label>
                       <div className="relative">
-                        <Globe className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                        <Globe className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
                         <input
                           id="settings-country"
                           value={formData.country}
                           onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                          className={`${inputClass} pl-10`}
+                          className={`${compactInputClass} pl-9`}
                         />
                       </div>
                     </div>
                     <div>
-                      <label className={labelClass}>
+                      <label className={compactLabelClass}>
                         Timezone
                       </label>
                       <div className="relative">
-                        <Clock className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                        <Clock className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
                         <input
                           value={formData.timezone || getDefaultTimezone()}
                           readOnly
-                          className={`${inputClass} cursor-not-allowed pl-10 opacity-70`}
+                          className={`${compactInputClass} cursor-not-allowed pl-9 opacity-70`}
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div>
-                        <label className={labelClass}>Trading Style</label>
+                        <label className={compactLabelClass}>Trading Style</label>
                         <Select
                           value={formData.tradingStyle}
                           onChange={(val) => setFormData({ ...formData, tradingStyle: val as UserProfile['tradingStyle'] })}
@@ -462,7 +462,7 @@ const Settings: React.FC<SettingsProps> = ({
                         />
                       </div>
                       <div>
-                        <label className={labelClass}>Experience Level</label>
+                        <label className={compactLabelClass}>Experience Level</label>
                         <Select
                           value={formData.experienceLevel}
                           onChange={(val) => setFormData({ ...formData, experienceLevel: val as UserProfile['experienceLevel'] })}
@@ -475,52 +475,52 @@ const Settings: React.FC<SettingsProps> = ({
 
                 </section>
 
-                <section className="space-y-6">
-                  <div className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
-                    <div className="mb-4 flex items-center justify-between">
+                <section className="space-y-5">
+                  <div className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
+                    <div className="mb-3.5 flex items-center justify-between">
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-40">Avatar Library</p>
-                        <h3 className="mt-1 text-lg font-black">Choose Your Avatar</h3>
+                        <h3 className="mt-0.5 text-base font-black">Choose Your Avatar</h3>
                       </div>
-                      <div className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] opacity-60">
+                      <div className="rounded-full border px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] opacity-60">
                         {formData.plan.includes('FREE') ? 'Free' : formData.plan.includes('PRO') ? 'Pro' : 'Premium'}
                       </div>
                     </div>
 
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                       {formData.plan === 'FREE TIER (JOURNALER)' && (
                         <div>
-                          <p className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Journaler Bots</p>
+                          <p className="mb-2.5 text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Journaler Bots</p>
                           {renderAvatarGrid(freeAvatars)}
                         </div>
                       )}
 
                       {formData.plan === 'PRO TIER (ANALYSTS)' && (
                         <div>
-                          <p className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Analyst Set</p>
+                          <p className="mb-2.5 text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Analyst Set</p>
                           {renderAvatarGrid(proAvatars)}
                         </div>
                       )}
 
                       {formData.plan === 'PREMIUM (MASTERS)' && (
                         <div>
-                          <p className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Master Set</p>
+                          <p className="mb-2.5 text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Master Set</p>
                           {renderAvatarGrid(premiumAvatars)}
                         </div>
                       )}
                     </div>
 
-                    <div className={`mt-6 flex items-center justify-between gap-4 border-t pt-5 ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}>
-                      <p className="text-xs opacity-50">
+                    <div className={`mt-5 flex items-center justify-between gap-4 border-t pt-4 ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}>
+                      <p className="text-[11px] opacity-50">
                         Save persona changes before leaving this section.
                       </p>
                       <button
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#FF4F01] px-5 py-3 text-sm font-black text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-4 py-2.5 text-[13px] font-black text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {isSaving ? 'Saving...' : 'Save Settings'}
-                        <Save size={16} />
+                        <Save size={14} />
                       </button>
                     </div>
                   </div>
@@ -529,22 +529,22 @@ const Settings: React.FC<SettingsProps> = ({
             )}
 
             {activeTab === 'account' && (
-              <div className="space-y-6">
-                <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
-                  <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-5">
+                <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                      <label htmlFor="settings-account-name" className={labelClass}>
+                      <label htmlFor="settings-account-name" className={compactLabelClass}>
                         Primary Account Name
                       </label>
                       <input
                         id="settings-account-name"
                         value={formData.accountName}
                         onChange={(e) => setFormData({ ...formData, accountName: e.target.value })}
-                        className={inputClass}
+                        className={compactInputClass}
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>Base Currency</label>
+                      <label className={compactLabelClass}>Base Currency</label>
                       <Select
                         value={formData.currency}
                         onChange={(val) => {
@@ -567,11 +567,11 @@ const Settings: React.FC<SettingsProps> = ({
                     <div>
                       {isFreeTier ? (
                         <>
-                          <label htmlFor="settings-initial-balance" className={labelClass}>
+                          <label htmlFor="settings-initial-balance" className={compactLabelClass}>
                             Initial Balance
                           </label>
                           <div className="relative">
-                            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-mono font-black text-[#FF4F01]">
+                            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-black text-[#FF4F01]">
                               {formData.currencySymbol}
                             </span>
                             <input
@@ -581,14 +581,14 @@ const Settings: React.FC<SettingsProps> = ({
                               onChange={(e) =>
                                 setFormData({ ...formData, initialBalance: Number(e.target.value) || 0 })
                               }
-                              className={`${inputClass} pl-10 font-mono`}
+                              className={`${compactInputClass} pl-9 font-mono`}
                             />
                           </div>
                         </>
                       ) : (
                         <>
-                          <label className={labelClass}>Account Balance</label>
-                          <div className={`flex h-[52px] items-center gap-3 rounded-2xl border px-4 ${
+                          <label className={compactLabelClass}>Account Balance</label>
+                          <div className={`flex h-[44px] items-center gap-3 rounded-xl border px-3.5 ${
                             isDarkMode ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-emerald-200 bg-emerald-50'
                           }`}>
                             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -601,15 +601,15 @@ const Settings: React.FC<SettingsProps> = ({
                               }
                             </span>
                           </div>
-                          <p className="mt-1.5 text-[10px] opacity-40">
+                          <p className="mt-1 text-[10px] opacity-40">
                             Your balance is pulled directly from your broker. To adjust it, update from within your trading platform.
                           </p>
                         </>
                       )}
                     </div>
                     <div>
-                      <label className={labelClass}>Sync Method</label>
-                      <div className={`flex h-[52px] items-center justify-between rounded-2xl border px-4 ${
+                      <label className={compactLabelClass}>Sync Method</label>
+                      <div className={`flex h-[44px] items-center justify-between rounded-xl border px-3.5 ${
                         isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-white'
                       }`}>
                         <div className="flex items-center gap-3">
@@ -630,17 +630,17 @@ const Settings: React.FC<SettingsProps> = ({
                 </section>
 
                 {formData.syncMethod === 'EA_CONNECT' && (
-                  <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
+                  <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-40">Sync Key</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-3">
-                          <code className="rounded-2xl border px-4 py-3 font-mono text-sm font-bold tracking-wider text-[#FF4F01]">
+                        <div className="mt-2 flex flex-wrap items-center gap-2.5">
+                          <code className="rounded-xl border px-3.5 py-2.5 font-mono text-sm font-bold tracking-wider text-[#FF4F01]">
                             {formData.syncKey || 'real-sync-key'}
                           </code>
                           <button
                             onClick={handleCopyKey}
-                            className={`rounded-2xl border px-3 py-3 transition-all ${
+                            className={`rounded-xl border px-2.5 py-2.5 transition-all ${
                               copiedKey
                                 ? 'border-emerald-500 bg-emerald-500 text-white'
                                 : isDarkMode
@@ -649,7 +649,7 @@ const Settings: React.FC<SettingsProps> = ({
                             }`}
                             title="Copy sync key"
                           >
-                            {copiedKey ? <Check size={16} /> : <Copy size={16} />}
+                            {copiedKey ? <Check size={15} /> : <Copy size={15} />}
                           </button>
                           <button
                             onClick={() => {
@@ -659,20 +659,20 @@ const Settings: React.FC<SettingsProps> = ({
                                 .toUpperCase()}`;
                               setFormData({ ...formData, syncKey: newKey });
                             }}
-                            className={`rounded-2xl border px-3 py-3 transition-all ${
+                            className={`rounded-xl border px-2.5 py-2.5 transition-all ${
                               isDarkMode
                                 ? 'border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06]'
                                 : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
                             }`}
                             title="Regenerate sync key"
                           >
-                            <Zap size={16} />
+                            <Zap size={15} />
                           </button>
                         </div>
                       </div>
 
                       <div
-                        className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${
+                        className={`flex items-center gap-3 rounded-xl border px-3.5 py-2.5 ${
                           isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-slate-50'
                         }`}
                       >
@@ -698,9 +698,9 @@ const Settings: React.FC<SettingsProps> = ({
                 )}
 
                 {localBrokerInfo && (
-                  <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
-                    <h3 className="text-xs font-black uppercase tracking-[0.2em] mb-4 text-[#FF4F01]">Connected Broker Status</h3>
-                    <div className="grid gap-4 md:grid-cols-2">
+                  <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                    <h3 className="text-xs font-black uppercase tracking-[0.2em] mb-3 text-[#FF4F01]">Connected Broker Status</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
                       <div>
                         <p className="text-[10px] uppercase font-bold text-zinc-500">Account Login</p>
                         <p className="text-sm font-semibold">{localBrokerInfo.login}</p>
@@ -726,7 +726,7 @@ const Settings: React.FC<SettingsProps> = ({
                 )}
 
                 {onDeduplicate && (
-                  <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                  <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                     <div className="flex items-center gap-3">
                       <Trash2 size={18} className="text-[#FF4F01]" />
                       <div className="flex-1">
@@ -735,7 +735,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                       <button
                         onClick={onDeduplicate}
-                        className={`rounded-2xl px-4 py-3 text-xs font-black uppercase tracking-[0.16em] transition-all ${
+                        className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-[0.16em] transition-all ${
                           isDarkMode
                             ? 'bg-white/[0.06] text-white hover:bg-white/[0.1]'
                             : 'bg-white text-slate-700 hover:bg-slate-50'
@@ -750,36 +750,36 @@ const Settings: React.FC<SettingsProps> = ({
             )}
 
             {activeTab === 'appearance' && (
-              <div className="space-y-6">
-                <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="space-y-4">
+                <section className={`rounded-3xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-4">
-                      <div className="rounded-2xl bg-[#FF4F01]/10 p-3 text-[#FF4F01]">
-                        <Moon size={22} />
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-lg bg-[#FF4F01]/10 p-2 text-[#FF4F01]">
+                        <Moon size={16} />
                       </div>
                       <div>
-                        <p className="text-sm font-bold">Workspace Mode</p>
-                        <p className="mt-1 text-sm opacity-60">
+                        <p className="text-[13px] font-bold">Workspace Mode</p>
+                        <p className="mt-0.5 text-[13px] opacity-60">
                           Obsidian mode is the default workspace look. Premium themes are available for Masters.
                         </p>
                       </div>
                     </div>
-                    <div className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] opacity-60">
+                    <div className="rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] opacity-60">
                       Locked
                     </div>
                   </div>
                 </section>
 
                 {formData.plan === 'PREMIUM (MASTERS)' && (
-                  <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
-                    <div className="mb-4 flex items-center gap-3">
-                      <Crown size={18} className="text-amber-500" />
-                      <h3 className="text-lg font-black">Premium Themes</h3>
-                      <span className="ml-auto rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-500">
+                  <section className={`rounded-3xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
+                    <div className="mb-3 flex items-center gap-2.5">
+                      <Crown size={15} className="text-amber-500" />
+                      <h3 className="text-[15px] font-black">Premium Themes</h3>
+                      <span className="ml-auto rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-amber-500">
                         Masters only
                       </span>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid gap-2 md:grid-cols-2">
                       {[
                         { id: 'obsidian', label: 'Obsidian', desc: 'Deep dark panels with orange accents.' },
                         { id: 'cosmic', label: 'Cosmic', desc: 'Dark violet canvas with sharper contrast.' },
@@ -789,7 +789,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <button
                             key={theme.id}
                             onClick={() => setFormData({ ...formData, themePreference: theme.id as UserProfile['themePreference'] })}
-                            className={`rounded-[24px] border p-4 text-left transition-all ${
+                            className={`rounded-xl border p-2.5 text-left transition-all ${
                               selected
                                 ? 'border-[#FF4F01] bg-[#FF4F01]/5'
                                 : isDarkMode
@@ -797,17 +797,17 @@ const Settings: React.FC<SettingsProps> = ({
                                   : 'border-slate-200 bg-slate-50 hover:border-slate-300'
                             }`}
                           >
-                            <div className="mb-4 rounded-2xl border border-white/10 bg-[#000000] p-4">
-                              <div className="mb-2 h-2 w-1/2 rounded-full bg-[#FF4F01]/60" />
-                              <div className="mb-2 h-2 w-1/3 rounded-full bg-white/10" />
-                              <div className="h-2 w-2/3 rounded-full bg-white/10" />
+                            <div className="mb-2.5 rounded-lg border border-white/10 bg-[#000000] p-2.5">
+                              <div className="mb-1.5 h-1.5 w-1/2 rounded-full bg-[#FF4F01]/60" />
+                              <div className="mb-1.5 h-1.5 w-1/3 rounded-full bg-white/10" />
+                              <div className="h-1.5 w-2/3 rounded-full bg-white/10" />
                             </div>
                             <div className="flex items-center justify-between">
                               <div>
-                                <p className="font-bold">{theme.label}</p>
-                                <p className="text-xs opacity-50">{theme.desc}</p>
+                                <p className="text-[13px] font-bold">{theme.label}</p>
+                                <p className="text-[11px] opacity-50">{theme.desc}</p>
                               </div>
-                              {selected && <CheckCircle2 size={16} className="text-[#FF4F01]" />}
+                              {selected && <CheckCircle2 size={14} className="text-[#FF4F01]" />}
                             </div>
                           </button>
                         );
@@ -816,27 +816,27 @@ const Settings: React.FC<SettingsProps> = ({
                   </section>
                 )}
 
-                <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
-                  <div className="mb-4 flex items-center gap-3">
-                    <Zap size={18} className="text-indigo-500" />
-                    <h3 className="text-lg font-black">Performance</h3>
+                <section className={`rounded-3xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="mb-3 flex items-center gap-2.5">
+                    <Zap size={15} className="text-indigo-500" />
+                    <h3 className="text-[15px] font-black">Performance</h3>
                   </div>
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-3.5 md:flex-row md:items-center md:justify-between">
                     <div className="max-w-2xl">
-                      <p className="text-sm font-bold">Keep charts alive in background</p>
-                      <p className="mt-1 text-sm opacity-60">
+                      <p className="text-[13px] font-bold">Keep charts alive in background</p>
+                      <p className="mt-0.5 text-[13px] opacity-60">
                         Preserve chart state when moving between pages. Turn it off if the interface feels heavy.
                       </p>
                     </div>
                     <button
                       onClick={() => setFormData({ ...formData, keepChartsAlive: !formData.keepChartsAlive })}
-                      className={`relative h-7 w-14 rounded-full transition-all ${
+                      className={`relative h-6 w-12 rounded-full transition-all ${
                         formData.keepChartsAlive ? 'bg-indigo-500' : 'bg-black'
                       }`}
                     >
                       <span
-                        className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
-                          formData.keepChartsAlive ? 'right-1' : 'left-1'
+                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                          formData.keepChartsAlive ? 'right-0.5' : 'left-0.5'
                         }`}
                       />
                     </button>
@@ -846,41 +846,41 @@ const Settings: React.FC<SettingsProps> = ({
             )}
 
             {activeTab === 'billing' && (
-              <div className="space-y-6">
-                <section className="rounded-[32px] border border-[#FF4F01]/25 bg-[#FF4F01]/6 p-6">
+              <div className="space-y-4">
+                <section className="rounded-3xl border border-[#FF4F01]/25 bg-[#FF4F01]/6 p-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="max-w-2xl">
                       <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#FF4F01]">Current Plan</p>
-                      <h3 className="mt-2 text-3xl font-black tracking-tight">{formData.plan}</h3>
-                      <p className="mt-3 text-sm leading-relaxed opacity-70">
+                      <h3 className="mt-1 text-xl font-black tracking-tight">{formData.plan}</h3>
+                      <p className="mt-1.5 text-[13px] leading-relaxed opacity-70">
                         {formData.plan === 'FREE TIER (JOURNALER)' && 'Manual journaling for lean trade tracking.'}
                         {formData.plan === 'PRO TIER (ANALYSTS)' && 'EA sync and workflow tools for active traders.'}
                         {formData.plan === 'PREMIUM (MASTERS)' && 'Full-capacity logging and advanced workspace control.'}
                       </p>
                     </div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className={`min-w-[110px] rounded-2xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className={`min-w-[88px] rounded-xl border p-2.5 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
                         <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">Trades</p>
-                        <p className="mt-2 text-lg font-black">{tradesThisMonth}</p>
-                        <div className="mt-3">{renderPlanProgress(tradesThisMonth, formData.plan === 'PRO TIER (ANALYSTS)' ? 500 : 50)}</div>
+                        <p className="mt-1 text-sm font-black">{tradesThisMonth}</p>
+                        <div className="mt-1.5">{renderPlanProgress(tradesThisMonth, formData.plan === 'PRO TIER (ANALYSTS)' ? 500 : 50)}</div>
                       </div>
-                      <div className={`min-w-[110px] rounded-2xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
+                      <div className={`min-w-[88px] rounded-xl border p-2.5 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
                         <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">Notes</p>
-                        <p className="mt-2 text-lg font-black">{formData.plan === 'FREE TIER (JOURNALER)' ? totalNotes : 'Unlimited'}</p>
-                        <div className="mt-3">{renderPlanProgress(totalNotes, 1)}</div>
+                        <p className="mt-1 text-sm font-black">{formData.plan === 'FREE TIER (JOURNALER)' ? totalNotes : 'Unlimited'}</p>
+                        <div className="mt-1.5">{renderPlanProgress(totalNotes, 1)}</div>
                       </div>
-                      <div className={`min-w-[110px] rounded-2xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
+                      <div className={`min-w-[88px] rounded-xl border p-2.5 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-white'}`}>
                         <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">Images</p>
-                        <p className="mt-2 text-lg font-black">
+                        <p className="mt-1 text-sm font-black">
                           {formData.plan === 'FREE TIER (JOURNALER)' ? '0' : formData.plan === 'PREMIUM (MASTERS)' ? 'Unlimited' : totalImages}
                         </p>
-                        <div className="mt-3">{renderPlanProgress(totalImages, 1000)}</div>
+                        <div className="mt-1.5">{renderPlanProgress(totalImages, 1000)}</div>
                       </div>
                     </div>
                   </div>
                 </section>
 
-                <section className="grid gap-4">
+                <section className="grid gap-3">
                   {[
                     {
                       id: 'FREE TIER (JOURNALER)',
@@ -903,7 +903,7 @@ const Settings: React.FC<SettingsProps> = ({
                     return (
                       <div
                         key={plan.id}
-                        className={`rounded-[28px] border p-5 transition-all ${
+                        className={`rounded-2xl border p-3 transition-all ${
                           active
                             ? 'border-[#FF4F01] bg-[#FF4F01]/5'
                             : isDarkMode
@@ -911,19 +911,19 @@ const Settings: React.FC<SettingsProps> = ({
                               : 'border-slate-200 bg-slate-50'
                         }`}
                       >
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                          <div className="flex items-start gap-4">
-                            <div className={`rounded-2xl p-3 ${active ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'bg-white/[0.04] text-zinc-300' : 'bg-white text-slate-600'}`}>
-                              {plan.id === 'PREMIUM (MASTERS)' ? <Crown size={18} /> : <Zap size={18} />}
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="flex items-start gap-3">
+                            <div className={`rounded-lg p-2 ${active ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'bg-white/[0.04] text-zinc-300' : 'bg-white text-slate-600'}`}>
+                              {plan.id === 'PREMIUM (MASTERS)' ? <Crown size={14} /> : <Zap size={14} />}
                             </div>
                             <div>
-                              <h4 className="font-bold">{plan.id}</h4>
-                              <p className="mt-1 text-sm opacity-60">{plan.desc}</p>
-                              <div className="mt-4 flex flex-wrap gap-2">
+                              <h4 className="text-sm font-bold">{plan.id}</h4>
+                              <p className="mt-0.5 text-[13px] opacity-60">{plan.desc}</p>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
                                 {plan.features.map((feature) => (
                                   <span
                                     key={feature}
-                                    className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${
+                                    className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] ${
                                       isDarkMode
                                         ? 'border-white/[0.08] bg-white/[0.03] text-zinc-300'
                                         : 'border-slate-200 bg-white text-slate-600'
@@ -936,19 +936,19 @@ const Settings: React.FC<SettingsProps> = ({
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2.5">
                             <div className="text-right">
                               {plan.id === 'FREE TIER (JOURNALER)' ? (
-                                <p className="text-lg font-black">$0</p>
+                                <p className="text-sm font-black">$0</p>
                               ) : (
-                                <p className="text-sm font-black text-[#FF4F01]">FREE BETA</p>
+                                <p className="text-[13px] font-black text-[#FF4F01]">FREE BETA</p>
                               )}
-                              <p className="text-[10px] font-bold uppercase opacity-40">per month</p>
+                              <p className="text-[9px] font-bold uppercase opacity-40">per month</p>
                             </div>
                             <button
                             onClick={() => { void handlePlanSwitch(plan.id); }}
                             disabled={active}
-                            className={`rounded-2xl px-4 py-3 text-xs font-black uppercase tracking-[0.16em] transition-all ${
+                            className={`rounded-lg px-2.5 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] transition-all ${
                               active
                                   ? 'cursor-default bg-black text-zinc-400'
                                   : 'bg-[#FF4F01] text-white hover:scale-[1.02]'
@@ -966,25 +966,25 @@ const Settings: React.FC<SettingsProps> = ({
             )}
 
             {activeTab === 'security' && (
-              <div className="space-y-6">
-                <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="space-y-5">
+                <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="rounded-2xl bg-amber-500/10 p-3 text-amber-500">
-                        <Lock size={20} />
+                    <div className="flex items-start gap-3.5">
+                      <div className="rounded-xl bg-amber-500/10 p-2.5 text-amber-500">
+                        <Lock size={18} />
                       </div>
                       <div>
                         <p className="text-sm font-bold">Two-factor authentication</p>
                         <p className="mt-1 text-sm opacity-60">Account-level protection is handled through your login provider.</p>
                       </div>
                     </div>
-                    <div className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] opacity-60">
+                    <div className="rounded-full border px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] opacity-60">
                       Enabled
                     </div>
                   </div>
                 </section>
 
-                <section className={`rounded-2xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black' : 'border-slate-200 bg-white'}`}>
+                <section className={`rounded-xl border p-3.5 ${isDarkMode ? 'border-white/[0.08] bg-black' : 'border-slate-200 bg-white'}`}>
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div>
                       <p className="text-sm font-bold">Session control</p>
@@ -1002,8 +1002,8 @@ const Settings: React.FC<SettingsProps> = ({
             )}
 
             {activeTab === 'help' && (
-              <div className="space-y-6">
-                <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-4">
+                <section className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                   {supportLinks.map((item) => {
                     const Icon = item.icon;
                     const disabled = !item.href;
@@ -1011,18 +1011,18 @@ const Settings: React.FC<SettingsProps> = ({
                     return disabled ? (
                       <div
                         key={item.title}
-                        className={`rounded-[28px] border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'} opacity-60`}
+                        className={`rounded-2xl border p-3 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'} opacity-60`}
                       >
-                        <div className="mb-3 flex items-center gap-3">
-                          <div className="rounded-2xl bg-white/[0.04] p-3 text-zinc-400">
-                            <Icon size={16} />
+                        <div className="mb-2 flex items-center gap-2.5">
+                          <div className="rounded-lg bg-white/[0.04] p-2 text-zinc-400">
+                            <Icon size={14} />
                           </div>
                           <div>
-                            <h4 className="font-bold">{item.title}</h4>
-                            <p className="text-[11px] uppercase tracking-[0.16em] opacity-40">Coming soon</p>
+                            <h4 className="text-[13px] font-bold">{item.title}</h4>
+                            <p className="text-[10px] uppercase tracking-[0.16em] opacity-40">Coming soon</p>
                           </div>
                         </div>
-                        <p className="text-sm opacity-60">{item.desc}</p>
+                        <p className="text-[13px] opacity-60">{item.desc}</p>
                       </div>
                     ) : (
                       <a
@@ -1030,30 +1030,30 @@ const Settings: React.FC<SettingsProps> = ({
                         href={item.href}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`rounded-[28px] border p-5 transition-all hover:-translate-y-0.5 hover:shadow-lg ${
+                        className={`rounded-2xl border p-3 transition-all hover:-translate-y-0.5 hover:shadow-lg ${
                           isDarkMode ? 'border-white/[0.08] bg-black/20 hover:border-white/[0.14]' : 'border-slate-200 bg-white hover:border-slate-300'
                         }`}
                       >
-                        <div className="mb-3 flex items-center gap-3">
-                          <div className="rounded-2xl bg-[#FF4F01]/10 p-3 text-[#FF4F01]">
-                            <Icon size={16} />
+                        <div className="mb-2 flex items-center gap-2.5">
+                          <div className="rounded-lg bg-[#FF4F01]/10 p-2 text-[#FF4F01]">
+                            <Icon size={14} />
                           </div>
                           <div className="flex-1">
-                            <h4 className="font-bold">{item.title}</h4>
-                            <p className="text-sm opacity-60">{item.desc}</p>
+                            <h4 className="text-[13px] font-bold">{item.title}</h4>
+                            <p className="text-[13px] opacity-60">{item.desc}</p>
                           </div>
-                          <ExternalLink size={14} className="opacity-30" />
+                          <ExternalLink size={13} className="opacity-30" />
                         </div>
                       </a>
                     );
                   })}
                 </section>
 
-                <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
-                  <div className="mb-4 flex items-center justify-between gap-3">
+                <section className={`rounded-3xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-40">FAQ</p>
-                      <h3 className="mt-1 text-lg font-black">Frequently asked questions</h3>
+                      <h3 className="mt-0.5 text-[15px] font-black">Frequently asked questions</h3>
                     </div>
                     {migrationVersion && (
                       <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">
@@ -1061,45 +1061,45 @@ const Settings: React.FC<SettingsProps> = ({
                       </p>
                     )}
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {faqItems.map((faq) => (
                       <FAQItem key={faq.q} question={faq.q} answer={faq.a} isDarkMode={isDarkMode} />
                     ))}
                   </div>
                 </section>
 
-                <section className={`rounded-[28px] border p-6 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
-                  <div className="mb-5 flex items-center gap-3">
-                    <MessageSquare size={18} className="text-[#FF4F01]" />
-                    <h3 className="text-lg font-black">Send feedback</h3>
+                <section className={`rounded-3xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
+                  <div className="mb-3.5 flex items-center gap-2.5">
+                    <MessageSquare size={15} className="text-[#FF4F01]" />
+                    <h3 className="text-[15px] font-black">Send feedback</h3>
                   </div>
 
                   {feedbackSuccess ? (
-                    <div className="rounded-[24px] border border-emerald-500/20 bg-emerald-500/5 px-6 py-10 text-center">
-                      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
-                        <CheckCircle2 size={28} />
+                    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-6 text-center">
+                      <div className="mx-auto mb-2.5 flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
+                        <CheckCircle2 size={22} />
                       </div>
-                      <h4 className="text-xl font-black">Feedback received</h4>
-                      <p className="mx-auto mt-2 max-w-md text-sm opacity-60">
+                      <h4 className="text-lg font-black">Feedback received</h4>
+                      <p className="mx-auto mt-1.5 max-w-md text-sm opacity-60">
                         Your message has been logged. Thanks for helping shape the next version of JournalFX.
                       </p>
                     </div>
                   ) : (
-                    <div className="grid gap-5">
-                      <div className={`rounded-2xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-slate-50'}`}>
-                        <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="grid gap-4">
+                      <div className={`rounded-xl border p-3 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-slate-50'}`}>
+                        <div className="mb-2 flex items-center justify-between gap-3">
                           <div>
                             <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-40">Category</p>
-                            <p className="mt-1 text-sm font-bold">Choose the closest match</p>
+                            <p className="mt-0.5 text-[13px] font-bold">Choose the closest match</p>
                           </div>
                           <span className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">Direct message</span>
                         </div>
-                        <div className="grid gap-2 sm:grid-cols-4">
+                        <div className="grid gap-1.5 sm:grid-cols-4">
                           {['Bug Report', 'Feature Request', 'Improvement', 'Other'].map((item) => (
                             <button
                               key={item}
                               onClick={() => setFeedbackCategory(item)}
-                              className={`rounded-2xl border px-3 py-3 text-[10px] font-black uppercase tracking-[0.16em] transition-all ${
+                              className={`rounded-lg border px-2 py-1.5 text-[9px] font-black uppercase tracking-[0.16em] transition-all ${
                                 feedbackCategory === item
                                   ? 'border-[#FF4F01] bg-[#FF4F01] text-white'
                                   : isDarkMode
@@ -1113,10 +1113,10 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                       </div>
 
-                      <div className="grid gap-5 lg:grid-cols-[1fr_minmax(240px,0.7fr)]">
-                        <div className="space-y-5">
+                      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(220px,0.7fr)]">
+                        <div className="space-y-4">
                           <div>
-                            <label htmlFor="feedback-subject" className={labelClass}>
+                            <label htmlFor="feedback-subject" className={compactLabelClass}>
                               Subject
                             </label>
                             <input
@@ -1124,56 +1124,56 @@ const Settings: React.FC<SettingsProps> = ({
                               value={feedbackSubject}
                               onChange={(e) => setFeedbackSubject(e.target.value)}
                               placeholder="What should we look at?"
-                              className={inputClass}
+                              className={compactInputClass}
                             />
                           </div>
 
                           <div>
-                            <label htmlFor="feedback-message" className={labelClass}>
+                            <label htmlFor="feedback-message" className={compactLabelClass}>
                               Message
                             </label>
                             <textarea
                               id="feedback-message"
                               value={feedbackMessage}
                               onChange={(e) => setFeedbackMessage(e.target.value)}
-                              rows={7}
+                              rows={5}
                               placeholder="Share the issue, idea, or improvement."
-                              className={`${inputClass} min-h-[220px] resize-none`}
+                              className={`${compactInputClass} min-h-[120px] resize-none`}
                             />
                           </div>
                         </div>
 
-                        <div className={`rounded-[24px] border p-5 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-slate-50'}`}>
+                        <div className={`rounded-xl border p-3 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.03]' : 'border-slate-200 bg-slate-50'}`}>
                           <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-40">Send details</p>
-                          <div className="mt-4 space-y-3 text-sm">
+                          <div className="mt-2.5 space-y-2 text-sm">
                             <div
-                              className={`rounded-2xl border px-4 py-3 ${
+                              className={`rounded-lg border px-3 py-2 ${
                                 isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'
                               }`}
                             >
                               <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">Category</p>
-                              <p className="mt-1 font-bold">{feedbackCategory}</p>
+                              <p className="mt-0.5 font-bold">{feedbackCategory}</p>
                             </div>
                             <div
-                              className={`rounded-2xl border px-4 py-3 ${
+                              className={`rounded-lg border px-3 py-2 ${
                                 isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'
                               }`}
                             >
                               <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">Subject</p>
-                              <p className="mt-1 font-bold">{feedbackSubject.trim() || 'No subject yet'}</p>
+                              <p className="mt-0.5 font-bold">{feedbackSubject.trim() || 'No subject yet'}</p>
                             </div>
                             <div
-                              className={`rounded-2xl border px-4 py-3 ${
+                              className={`rounded-lg border px-3 py-2 ${
                                 isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'
                               }`}
                             >
                               <p className="text-[10px] font-black uppercase tracking-[0.18em] opacity-40">Message</p>
-                              <p className="mt-1 line-clamp-4 text-sm opacity-70">
+                              <p className="mt-0.5 line-clamp-4 text-sm opacity-70">
                                 {feedbackMessage.trim() || 'Your message preview will appear here.'}
                               </p>
                             </div>
                           </div>
-                          <p className="mt-4 text-xs opacity-50">
+                          <p className="mt-3 text-xs opacity-50">
                             Keep it short and specific. Screenshots are not required for this version.
                           </p>
                         </div>
@@ -1186,16 +1186,16 @@ const Settings: React.FC<SettingsProps> = ({
                         <button
                           onClick={handleFeedbackSubmit}
                           disabled={isSubmittingFeedback || !feedbackMessage.trim()}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#FF4F01] px-5 py-3 text-sm font-bold text-white transition-all hover:bg-[#e64901] disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#FF4F01] px-3.5 py-2 text-[13px] font-bold text-white transition-all hover:bg-[#e64901] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {isSubmittingFeedback ? (
                             <>
-                              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                              <div className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                               Sending...
                             </>
                           ) : (
                             <>
-                              <Send size={16} />
+                              <Send size={14} />
                               Submit Feedback
                             </>
                           )}
@@ -1207,7 +1207,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
-            <div className={`mt-8 flex flex-col gap-4 border-t pt-6 md:flex-row md:items-center md:justify-between ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}>
+            <div className={`mt-6 flex flex-col gap-4 border-t pt-5 md:flex-row md:items-center md:justify-between ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}>
               <div className="min-h-[24px]">
                 {saveMessage && (
                   <div className="flex items-center gap-2 text-sm font-bold text-emerald-500">
@@ -1219,10 +1219,10 @@ const Settings: React.FC<SettingsProps> = ({
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#FF4F01] px-6 py-3.5 text-sm font-black text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-5 py-3 text-sm font-black text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSaving ? 'Saving...' : 'Save Settings'}
-                <Save size={16} />
+                <Save size={15} />
               </button>
             </div>
           </main>
@@ -1237,16 +1237,16 @@ const FAQItem: React.FC<{ question: string; answer: string; isDarkMode: boolean 
 
   return (
     <div
-      className={`overflow-hidden rounded-2xl border transition-all ${
+      className={`overflow-hidden rounded-xl border transition-all ${
         isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'
       }`}
     >
-      <button onClick={() => setIsOpen(!isOpen)} className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left">
-        <span className="text-sm font-bold">{question}</span>
-        <ChevronDown size={16} className={`shrink-0 text-zinc-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      <button onClick={() => setIsOpen(!isOpen)} className="flex w-full items-center justify-between gap-4 px-3 py-2.5 text-left">
+        <span className="text-[13px] font-bold">{question}</span>
+        <ChevronDown size={14} className={`shrink-0 text-zinc-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       <div className={`overflow-hidden transition-all ${isOpen ? 'max-h-40' : 'max-h-0'}`}>
-        <p className="px-4 pb-4 text-sm opacity-60">{answer}</p>
+        <p className="px-3 pb-2.5 text-[13px] opacity-60">{answer}</p>
       </div>
     </div>
   );

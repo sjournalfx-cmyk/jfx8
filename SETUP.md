@@ -32,7 +32,12 @@
    CTRADER_CLIENT_ID=your_ctrader_client_id
    CTRADER_CLIENT_SECRET=your_ctrader_client_secret
    ```
-4. For Vercel deployments, add the server-side keys above to the project's Environment Variables.
+4. For Vercel deployments, add the server-side keys above to the project's Environment Variables for **Production** (and Preview if you test there). The API has a temporary compatibility fallback for existing `VITE_CTRADER_*` deployments, but `CTRADER_CLIENT_SECRET` is the required secure configuration. Rotate the secret after removing the browser-side `VITE_CTRADER_CLIENT_SECRET` dependency.
+5. In the cTrader Open API portal, add the exact production callback URL to the application's Redirect URIs:
+   ```
+   https://jfxjournal.site/api/ctrader/callback
+   ```
+   Add `https://www.jfxjournal.site/api/ctrader/callback` too only if users can authenticate on the `www` domain. Each Vercel preview hostname needs its own registered cTrader redirect URI and must be listed in `CTRADER_ALLOWED_REDIRECT_HOSTS`; use the production domain for normal sign-ins.
 
 ## Database Setup
 1. Create a new Supabase project.
