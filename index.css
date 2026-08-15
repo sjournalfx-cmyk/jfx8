@@ -536,6 +536,62 @@ canvas, svg {
   background: rgba(120, 120, 120, 0.3);
 }
 
+/* Keep the settings navigation unchanged while making the tab content denser. */
+.settings-content-scale {
+  /* The settings UI is intentionally denser than the navigation rail. */
+  zoom: 0.78;
+}
+
+/* Developer Tools contains setup instructions and code samples; keep it at
+   readable, normal UI scale even when the surrounding Settings content is
+   compacted. */
+.settings-developer-tools {
+  zoom: 1.282;
+}
+
+/* Stable, high-contrast modal treatment for API-key actions. */
+.api-key-modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+}
+
+.api-key-modal-card {
+  width: min(100%, 32rem);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  border-radius: 1.5rem;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.52);
+}
+
+.api-key-modal-card h3 {
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.api-key-modal-card p {
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.api-key-modal-card label {
+  font-size: 0.875rem;
+}
+
+.api-key-modal-card input,
+.api-key-modal-card select {
+  min-height: 2.9rem;
+  font-size: 0.95rem;
+}
+
+.api-key-modal-card button {
+  min-height: 2.75rem;
+  font-size: 0.875rem;
+}
+
 /* AI Chat Demo Premium Animations */
 @keyframes chat-blink {
   0%, 100% { opacity: 1; }

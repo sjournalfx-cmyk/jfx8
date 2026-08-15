@@ -24,12 +24,14 @@ import {
   Zap,
   ExternalLink,
   Clock,
+  Code2,
 } from 'lucide-react';
 import { UserProfile, EASession } from '../types';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
 import { Select } from './Select';
 import { normalizeThemePreference } from '../lib/theme';
 import { getDefaultTimezone } from '../lib/timeUtils';
+import { ApiKeysPanel } from './ApiKeysPanel';
 
 const freeAvatars = [
   'https://api.dicebear.com/7.x/bottts/svg?seed=1&backgroundColor=f1f5f9',
@@ -58,7 +60,7 @@ const premiumAvatars = [
   'https://api.dicebear.com/7.x/adventurer/svg?seed=3&backgroundColor=c7d2fe',
 ];
 
-type SettingsTab = 'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'help';
+type SettingsTab = 'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'developer-tools' | 'help';
 
 interface SettingsProps {
   isDarkMode: boolean;
@@ -82,6 +84,7 @@ const tabs: Array<{ id: SettingsTab; label: string; icon: React.ElementType; des
   { id: 'appearance', label: 'Appearance', icon: Palette, desc: 'Theme and motion' },
   { id: 'billing', label: 'Plan & Billing', icon: CreditCard, desc: 'Usage and plan' },
   { id: 'security', label: 'Security', icon: Shield, desc: 'Access and session' },
+  { id: 'developer-tools', label: 'Developer Tools', icon: Code2, desc: 'API keys and integrations' },
   { id: 'help', label: 'Help & Feedback', icon: HelpCircle, desc: 'Docs and support' },
 ];
 
@@ -265,7 +268,7 @@ const Settings: React.FC<SettingsProps> = ({
     <div className={`h-screen overflow-hidden ${containerBg}`}>
       <div className="flex h-full w-full flex-col gap-5 p-4 sm:p-5 lg:p-6">
         <header className={`rounded-[28px] border p-5 md:p-6 ${shellCard}`}>
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="settings-content-scale flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
               <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#FF4F01]">Preferences</p>
               <h1 className="mt-2 text-4xl font-black tracking-tight md:text-5xl">Settings</h1>
@@ -349,6 +352,7 @@ const Settings: React.FC<SettingsProps> = ({
           </aside>
 
           <main className={`flex min-h-0 flex-col overflow-y-auto rounded-[28px] border p-5 md:p-6 ${shellCard} custom-scrollbar`}>
+            <div className="settings-content-scale">
             <div
               className={`mb-5 flex flex-col gap-3 border-b pb-4 ${
                 isDarkMode ? 'border-white/[0.06]' : 'border-slate-200'
@@ -1001,6 +1005,12 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
+            {activeTab === 'developer-tools' && (
+              <div className="settings-developer-tools space-y-5">
+                <ApiKeysPanel isDarkMode={isDarkMode} />
+              </div>
+            )}
+
             {activeTab === 'help' && (
               <div className="space-y-4">
                 <section className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -1224,6 +1234,7 @@ const Settings: React.FC<SettingsProps> = ({
                 {isSaving ? 'Saving...' : 'Save Settings'}
                 <Save size={15} />
               </button>
+            </div>
             </div>
           </main>
         </div>

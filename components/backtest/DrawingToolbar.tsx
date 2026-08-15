@@ -1,10 +1,27 @@
 import React, { useState, useCallback } from 'react';
 import {
-    MousePointer2, Slash, ArrowRight, ArrowUpRight,
-    Minus, Columns, Square, Layers, Trash2, GripVertical, Magnet,
+    MousePointer2, Slash, ArrowRight,
+    Minus, Square, Layers, Trash2, GripVertical, Magnet,
     Lock, Unlock, TrendingUp, TrendingDown, Undo, Redo, MoreHorizontal
 } from 'lucide-react';
 import { ToolType } from './types';
+
+// Drawing-tool glyphs styled after TradingView's compact chart toolbar.
+// The ray keeps a visible arrowhead at its open end, while the vertical line
+// uses small caps so it cannot be confused with the rectangle tool.
+const RayToolIcon = ({ size = 16, strokeWidth = 1.8 }: { size?: number; strokeWidth?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 20 19.5 4.5" />
+        <path d="M13.5 4.5h6v6" />
+    </svg>
+);
+
+const VerticalLineToolIcon = ({ size = 16, strokeWidth = 1.8 }: { size?: number; strokeWidth?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 3v18" />
+        <path d="M8 4h8M8 20h8" />
+    </svg>
+);
 
 interface DrawingToolbarProps {
     activeTool: ToolType;
@@ -40,10 +57,10 @@ const TOOL_COLORS = [
 const TOOLS = [
     { id: 'cursor', icon: MousePointer2, title: 'Cursor', shortcut: 'V' },
     { id: 'trendline', icon: Slash, title: 'Trend Line', shortcut: 'T' },
-    { id: 'ray', icon: ArrowUpRight, title: 'Ray', shortcut: 'R' },
+    { id: 'ray', icon: RayToolIcon, title: 'Ray', shortcut: 'R' },
     { id: 'arrow', icon: ArrowRight, title: 'Arrow', shortcut: 'A' },
     { id: 'horizontal', icon: Minus, title: 'Horizontal Line', shortcut: 'H' },
-    { id: 'vertical', icon: Columns, title: 'Vertical Line', shortcut: 'N' },
+    { id: 'vertical', icon: VerticalLineToolIcon, title: 'Vertical Line', shortcut: 'N' },
     { id: 'rect', icon: Square, title: 'Rectangle', shortcut: 'B' },
     { id: 'long', icon: TrendingUp, title: 'Long Position', shortcut: 'L' },
     { id: 'short', icon: TrendingDown, title: 'Short Position', shortcut: 'S' },
