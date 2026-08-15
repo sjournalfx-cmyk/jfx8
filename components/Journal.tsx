@@ -4,7 +4,8 @@ import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Activity, 
   Brain, ShieldCheck, ArrowUpRight, ArrowDownRight, Edit3,
   ChevronDown, Clock, CheckCircle2, Trash2, CheckSquare, Square, 
-  Trophy, CheckCircle, LayoutPanelTop, Target, Star, Eye, Layers, Link, Unlink, RefreshCw, Mic
+  Trophy, CheckCircle, LayoutPanelTop, Target, Star, Eye, Layers, Link, Unlink, RefreshCw, Mic,
+  Pencil, Check
 } from 'lucide-react';
 import { Trade, UserProfile } from '../types';
 import { getSASTDateTime, getDefaultTimezone } from '../lib/timeUtils';
@@ -641,6 +642,8 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
 
     const [previewImage, setPreviewImage] = useState<{ url: string, title: string } | null>(null);
     const [editingComment, setEditingComment] = useState<{ tradeId: string; field: 'notes' | 'exitComment'; value: string } | null>(null);
+    const [editingStrategy, setEditingStrategy] = useState<{ tradeId: string; value: string } | null>(null);
+    const [editingRating, setEditingRating] = useState<{ tradeId: string; value: number; hoverValue?: number } | null>(null);
 
     const beginCommentEdit = (trade: Trade, field: 'notes' | 'exitComment') => {
         setEditingComment({
@@ -657,6 +660,29 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
             [editingComment.field]: editingComment.value
         });
         setEditingComment(null);
+    };
+
+    const saveStrategyEdit = (trade: Trade) => {
+        if (!editingStrategy || editingStrategy.tradeId !== trade.id) return;
+        const trimmed = editingStrategy.value.trim();
+        const newTags = trimmed ? trimmed.split(',').map(s => s.trim()).filter(Boolean) : [];
+        onUpdateTrade({
+            ...trade,
+            tags: newTags
+        });
+        setEditingStrategy(null);
+    };
+
+    const saveRatingEdit = (trade: Trade, directValue?: number) => {
+        const val = directValue !== undefined 
+            ? directValue 
+            : (editingRating?.hoverValue !== undefined ? editingRating.hoverValue : (editingRating?.value ?? trade.rating ?? 0));
+        
+        onUpdateTrade({
+            ...trade,
+            rating: val
+        });
+        setEditingRating(null);
     };
 
     const renderTradeDetails = (trade: Trade) => (
@@ -917,7 +943,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
 
     const renderTradeRow = (trade: Trade, isGrouped = false, isFirst = false, isLast = false, rowKey?: string) => (
         <React.Fragment key={rowKey || `${isGrouped ? 'grouped' : 'standalone'}-${trade.id}-${trade.date}-${trade.time}`}>
-            <div className={`grid grid-cols-[40px_1.5fr_1fr_1fr_1.2fr_1.2fr_1fr_1.5fr_0.8fr_1.2fr_40px] px-2 py-4 border-b items-center transition-all rounded-xl ${isGrouped ? (isDarkMode ? 'bg-white/[0.02] mt-0 rounded-none first:rounded-t-xl last:rounded-b-xl last:border-b-0' : 'bg-black/[0.01] mt-0 rounded-none first:rounded-t-xl last:rounded-b-xl last:border-b-0') : 'mt-1'} ${expandedTradeId === trade.id ? (isDarkMode ? 'bg-black/50 border-indigo-500/50' : 'bg-slate-50 border-indigo-200 shadow-inner') : (isDarkMode ? 'border-[#27272a] hover:bg-black/30' : 'border-slate-100 hover:bg-slate-50')} ${selectedIds.includes(trade.id) ? (isDarkMode ? 'bg-indigo-900/10' : 'bg-indigo-50') : ''}`}>
+            <div className={`grid grid-cols-[40px_1.4fr_1fr_0.9fr_1.1fr_1.1fr_0.9fr_1.3fr_1.4fr_1.2fr_40px] px-2 py-4 border-b items-center transition-all rounded-xl ${isGrouped ? (isDarkMode ? 'bg-white/[0.02] mt-0 rounded-none first:rounded-t-xl last:rounded-b-xl last:border-b-0' : 'bg-black/[0.01] mt-0 rounded-none first:rounded-t-xl last:rounded-b-xl last:border-b-0') : 'mt-1'} ${expandedTradeId === trade.id ? (isDarkMode ? 'bg-black/50 border-indigo-500/50' : 'bg-slate-50 border-indigo-200 shadow-inner') : (isDarkMode ? 'border-[#27272a] hover:bg-black/30' : 'border-slate-100 hover:bg-slate-50')} ${selectedIds.includes(trade.id) ? (isDarkMode ? 'bg-indigo-900/10' : 'bg-indigo-50') : ''}`}>
                 <div className="col-span-1 flex items-center justify-center self-stretch relative min-h-[64px]">
                     {isGrouped ? (
                         <div className="absolute inset-0 flex flex-col items-center">
@@ -956,15 +982,207 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                 <div className="col-span-1 text-xs font-mono font-bold opacity-60 cursor-pointer" onClick={() => toggleExpand(trade.id)}>
                     {formatDuration(trade.openTime, trade.closeTime) || '---'}
                 </div>
-        <div className="col-span-1 flex flex-wrap gap-1 cursor-pointer" onClick={() => toggleExpand(trade.id)}>
-          {(trade.tags || []).slice(0, 2).map((tag, i) => (
-            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded border ${isDarkMode ? 'border-zinc-700 bg-black' : 'border-slate-200 bg-slate-100'}`}>{tag}</span>
-          ))}
-          {(trade.tags || []).length > 2 && <span className="text-[10px] opacity-50">+{(trade.tags || []).length - 2}</span>}
-        </div>
-                <div className="col-span-1 cursor-pointer" onClick={() => toggleExpand(trade.id)}>
-                    <ReadOnlyStarRating rating={trade.rating || 0} isDarkMode={isDarkMode} />
+        <div 
+            className="col-span-1 flex items-center gap-1.5 group/strategy min-w-0" 
+            onClick={(e) => {
+                e.stopPropagation();
+            }}
+        >
+            {editingStrategy?.tradeId === trade.id ? (
+                <div 
+                    className="flex items-center gap-1 w-full"
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                >
+                    <input
+                        type="text"
+                        autoFocus
+                        value={editingStrategy.value}
+                        onChange={(e) => setEditingStrategy({ tradeId: trade.id, value: e.target.value })}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                saveStrategyEdit(trade);
+                            } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setEditingStrategy(null);
+                            }
+                        }}
+                        placeholder="Strategy..."
+                        className={`w-full min-w-0 px-2 py-0.5 text-xs rounded border outline-none transition-all ${
+                            isDarkMode 
+                                ? 'bg-black border-zinc-700 text-zinc-100 focus:border-indigo-500' 
+                                : 'bg-white border-slate-300 text-slate-900 focus:border-indigo-500 shadow-sm'
+                        }`}
+                    />
+                    <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            saveStrategyEdit(trade);
+                        }}
+                        className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors shrink-0"
+                        title="Save Strategy"
+                    >
+                        <Check size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setEditingStrategy(null);
+                        }}
+                        className={`p-1 rounded transition-colors shrink-0 ${isDarkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/10' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+                        title="Cancel"
+                    >
+                        <X size={12} />
+                    </button>
                 </div>
+            ) : (
+                <div 
+                    className="flex items-center gap-1.5 min-w-0 max-w-full cursor-pointer"
+                    onClick={() => toggleExpand(trade.id)}
+                >
+                    <span 
+                        className={`text-xs font-medium truncate ${
+                            (trade.tags && trade.tags.length > 0) 
+                                ? (isDarkMode ? 'text-zinc-300' : 'text-slate-700') 
+                                : 'opacity-40 italic'
+                        }`}
+                        title={trade.tags?.join(', ')}
+                    >
+                        {trade.tags && trade.tags.length > 0 ? trade.tags.join(', ') : 'No Strategy'}
+                    </span>
+                    <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setEditingStrategy({ tradeId: trade.id, value: trade.tags?.join(', ') || '' });
+                        }}
+                        className={`p-1 rounded opacity-0 group-hover/strategy:opacity-100 transition-opacity shrink-0 ${
+                            isDarkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+                        }`}
+                        title="Edit Strategy"
+                    >
+                        <Pencil size={12} />
+                    </button>
+                </div>
+            )}
+        </div>
+        <div 
+            className="col-span-1 relative z-20 flex items-center min-w-0"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+        >
+            {editingRating?.tradeId === trade.id ? (
+                <div 
+                    className="flex items-center gap-1.5 whitespace-nowrap bg-black/60 dark:bg-black/80 px-2 py-1 rounded-xl border border-indigo-500/40 shadow-xl relative z-30"
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                >
+                    <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((star) => {
+                            const currentVal = editingRating.hoverValue !== undefined ? editingRating.hoverValue : editingRating.value;
+                            return (
+                                <button
+                                    key={star}
+                                    type="button"
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                    }}
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        saveRatingEdit(trade, star);
+                                    }}
+                                    onMouseEnter={() => setEditingRating(prev => prev ? { ...prev, hoverValue: star } : null)}
+                                    onMouseLeave={() => setEditingRating(prev => prev ? { ...prev, hoverValue: undefined } : null)}
+                                    className="p-1 hover:scale-125 transition-transform cursor-pointer"
+                                    title={`Set ${star} star${star > 1 ? 's' : ''}`}
+                                >
+                                    <Star 
+                                        size={14} 
+                                        className={`${
+                                            star <= currentVal
+                                                ? 'text-amber-400 fill-amber-400' 
+                                                : isDarkMode ? 'text-zinc-700 hover:text-amber-400/50' : 'text-slate-400 hover:text-amber-400/50'
+                                        }`} 
+                                    />
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <button
+                        type="button"
+                        onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            saveRatingEdit(trade);
+                        }}
+                        className="p-1 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all shrink-0 cursor-pointer shadow-sm ml-0.5"
+                        title="Save Rating"
+                    >
+                        <Check size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setEditingRating(null);
+                        }}
+                        className={`p-1 rounded-md transition-all shrink-0 cursor-pointer ${isDarkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
+                        title="Cancel"
+                    >
+                        <X size={13} />
+                    </button>
+                </div>
+            ) : (
+                <div 
+                    className="flex items-center gap-1.5 group/rating cursor-pointer min-w-0"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingRating({ tradeId: trade.id, value: trade.rating || 0 });
+                    }}
+                    title="Click to edit rating"
+                >
+                    <ReadOnlyStarRating rating={trade.rating || 0} isDarkMode={isDarkMode} />
+                    <button
+                        type="button"
+                        onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setEditingRating({ tradeId: trade.id, value: trade.rating || 0 });
+                        }}
+                        className={`p-1 rounded opacity-0 group-hover/rating:opacity-100 transition-opacity shrink-0 ${
+                            isDarkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+                        }`}
+                        title="Edit Rating"
+                    >
+                        <Pencil size={12} />
+                    </button>
+                </div>
+            )}
+        </div>
                 <div className="col-span-1 text-right cursor-pointer" onClick={() => toggleExpand(trade.id)}>
                     <p className={`font-mono font-bold ${safePnL(trade.pnl) > 0 ? 'text-emerald-500' : safePnL(trade.pnl) < 0 ? 'text-rose-500' : ''}`}>
                         {safePnL(trade.pnl) > 0 ? '+' : safePnL(trade.pnl) < 0 ? '-' : ''}{userProfile.currencySymbol}{Math.abs(safePnL(trade.pnl)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1197,7 +1415,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                     <CalendarView isDarkMode={isDarkMode} trades={trades} userProfile={userProfile} />
                 ) : (
                     <>
-                        <div className={`grid grid-cols-[40px_1.5fr_1fr_1fr_1.2fr_1.2fr_1fr_1.5fr_0.8fr_1.2fr_40px] px-6 py-4 border-b text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'border-[#27272a] text-zinc-500' : 'border-slate-100 text-slate-400'}`}>
+                        <div className={`grid grid-cols-[40px_1.4fr_1fr_0.9fr_1.1fr_1.1fr_0.9fr_1.3fr_1.4fr_1.2fr_40px] px-6 py-4 border-b text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'border-[#27272a] text-zinc-500' : 'border-slate-100 text-slate-400'}`}>
                             <div className="col-span-1 flex items-center justify-center">
                                 <button onClick={handleSelectAll} className="opacity-50 hover:opacity-100">
                                     {selectedIds.length > 0 && selectedIds.length === filteredTrades.length ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -1233,7 +1451,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     if (group.type === 'pending') {
                                         const trade = group.trades[0];
                                         return (
-                                            <div key={group.id} className={`grid grid-cols-[40px_1.5fr_1fr_1fr_1.2fr_1.2fr_1fr_1.5fr_0.8fr_1.2fr_40px] px-2 py-4 border-b items-center transition-all rounded-xl opacity-60 border-dashed ${isDarkMode ? 'border-indigo-500/20 bg-indigo-500/5' : 'border-indigo-200 bg-indigo-50/30'}`}>
+                                            <div key={group.id} className={`grid grid-cols-[40px_1.4fr_1fr_0.9fr_1.1fr_1.1fr_0.9fr_1.3fr_1.4fr_1.2fr_40px] px-2 py-4 border-b items-center transition-all rounded-xl opacity-60 border-dashed ${isDarkMode ? 'border-indigo-500/20 bg-indigo-500/5' : 'border-indigo-200 bg-indigo-50/30'}`}>
                                                 <div className="col-span-1 flex items-center justify-center">
                                                     <RefreshCw size={14} className="text-indigo-500 animate-spin" />
                                                 </div>
@@ -1277,7 +1495,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
 
                                     return (
                                         <div key={group.id} className="mt-1 border-b dark:border-zinc-800/50 pb-1">
-                                            <div className={`grid grid-cols-[40px_1.5fr_1fr_1fr_1.2fr_1.2fr_1fr_1.5fr_0.8fr_1.2fr_40px] px-2 py-4 items-center transition-all rounded-xl bg-violet-500/5 border-2 ${isExpanded ? 'border-violet-500/30' : 'border-transparent'}`}>
+                                            <div className={`grid grid-cols-[40px_1.4fr_1fr_0.9fr_1.1fr_1.1fr_0.9fr_1.3fr_1.4fr_1.2fr_40px] px-2 py-4 items-center transition-all rounded-xl bg-violet-500/5 border-2 ${isExpanded ? 'border-violet-500/30' : 'border-transparent'}`}>
                                                 <div className="col-span-1 flex items-center justify-center">
                                                     <button onClick={() => handleSelectSetup(group.setupId!, tradeIds)} className={`${allSelected ? 'text-indigo-500' : 'text-zinc-500 hover:text-zinc-300'}`}>
                                                         {allSelected ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -1303,7 +1521,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                                 <div className="col-span-1 text-xs opacity-50">---</div>
         <div className="col-span-1 flex flex-wrap gap-1">
           {(group.trades[0].tags || []).slice(0, 1).map((tag, i) => (
-            <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded border ${isDarkMode ? 'border-zinc-700 bg-black' : 'border-slate-200 bg-slate-100'}`}>{tag}</span>
+            <span key={i} className={`text-xs font-medium ${isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}>{tag}</span>
           ))}
         </div>
                                                 <div className="col-span-1">
