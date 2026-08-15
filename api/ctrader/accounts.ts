@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import WebSocket from 'ws';
-import { applyCorsHeaders } from '../_lib/cors';
 
 // Server-only credentials. The client secret must never be shipped to the browser.
 const CLIENT_ID = process.env.CTRADER_CLIENT_ID || '';
@@ -121,7 +120,8 @@ function fetchAccountsFromHost(
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Content-Type', 'application/json');
-  applyCorsHeaders(res, req.headers);
+  // This is called by the same-origin SPA. Avoid a shared startup dependency
+  // here so this Vercel Function can always initialize independently.
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 

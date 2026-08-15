@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCorsHeaders } from '../_lib/cors';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
@@ -9,7 +8,8 @@ const CLIENT_ID = process.env.CTRADER_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCorsHeaders(res, req.headers);
+  // Same-origin endpoint; do not depend on the shared CORS helper at function
+  // startup because a failed import makes the whole Vercel Function return 500.
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

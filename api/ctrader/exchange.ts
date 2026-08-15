@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCorsHeaders } from '../_lib/cors';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
@@ -50,7 +49,9 @@ function isAllowedRedirectUri(redirectUri: string): boolean {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCorsHeaders(res, req.headers);
+  // This endpoint is only called by the same-origin SPA. Keeping it
+  // dependency-free is intentional: a failed shared helper import prevents a
+  // Vercel Function from starting and surfaces as FUNCTION_INVOCATION_FAILED.
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
