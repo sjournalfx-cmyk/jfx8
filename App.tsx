@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
+import { safeLazy } from './lib/safeLazy';
 import Sidebar from './components/Sidebar';
 import LogTrade from './components/LogTrade';
 import Dashboard from './components/Dashboard';
@@ -34,11 +35,11 @@ import { demoDailyBias, demoEASession, demoNotes, demoTrades, getDemoProfile } f
 import { resolveBridgeBackedBalance } from './lib/bridgeBalance';
 
 // Lazy load heavy components for performance
-const Analytics = lazy(() => import('./components/Analytics'));
-const AIChat = lazy(() => import('./components/AIChat'));
-const BacktestLab = lazy(() => import('./components/BacktestLab'));
-const ChartGrid = lazy(() => import('./components/ChartGrid'));
-const Notes = lazy(() => import('./components/Notes'));
+const Analytics = safeLazy(() => import('./components/Analytics'));
+const AIChat = safeLazy(() => import('./components/AIChat'));
+const BacktestLab = safeLazy(() => import('./components/BacktestLab'));
+const ChartGrid = safeLazy(() => import('./components/ChartGrid'));
+const Notes = safeLazy(() => import('./components/Notes'));
 
 const AppContent: React.FC = () => {
   const [currentView, setCurrentView] = useState(() => {
