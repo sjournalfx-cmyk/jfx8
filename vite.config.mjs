@@ -166,6 +166,11 @@ const mt5PythonPlugin = () => {
       server.middlewares.use('/api/fmp/price-change', makeFmpHandler('https://financialmodelingprep.com/stable/stock-price-change'));
       server.middlewares.use('/api/fmp/dcf', makeFmpHandler('https://financialmodelingprep.com/stable/discounted-cash-flow'));
 
+      // In-memory cache for economic calendar to prevent rate-limiting
+      let cachedCalendarEvents = null;
+      let lastCalendarFetchTime = 0;
+      const CALENDAR_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
       server.middlewares.use('/api/economic-calendar', async (req, res) => {
         try {
           if (req.method !== 'GET' && req.method !== 'OPTIONS') {
@@ -184,22 +189,86 @@ const mt5PythonPlugin = () => {
             return;
           }
 
+          const now = Date.now();
+          let allEvents = [];
+
+          // Use cache if fresh
+          if (cachedCalendarEvents && (now - lastCalendarFetchTime < CALENDAR_CACHE_TTL)) {
+            allEvents = cachedCalendarEvents;
+          } else {
+            const FF_HEADERS = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+            };
+
+            try {
+              const upstream = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
+                headers: FF_HEADERS,
+              });
+
+              if (upstream.ok) {
+                const raw = await upstream.json();
+                if (Array.isArray(raw)) {
+                  for (const item of raw) {
+                    const d = new Date(item.date);
+                    if (isNaN(d.getTime())) continue;
+                    allEvents.push({
+                      event: item.title || '',
+                      currency: item.country || '',
+                      date: d.toISOString().split('T')[0],
+                      time: d.toISOString().split('T')[1].slice(0, 8),
+                      impact: (item.impact || 'Low').toLowerCase(),
+                      forecast: item.forecast || '',
+                      previous: item.previous || '',
+                      actual: item.actual || '',
+                      source: 'forexfactory-cdn',
+                    });
+                  }
+
+                  if (allEvents.length > 0) {
+                    cachedCalendarEvents = allEvents;
+                    lastCalendarFetchTime = now;
+                  }
+                }
+              }
+            } catch (fetchErr) {
+              console.warn('[EconomicCalendar] CDN fetch warning:', fetchErr.message);
+            }
+
+            // If fetch failed or was empty, fall back to stale cache
+            if (allEvents.length === 0 && cachedCalendarEvents && cachedCalendarEvents.length > 0) {
+              allEvents = cachedCalendarEvents;
+            }
+          }
+
+          // Filter to requested date range if provided
           const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
-          const from = requestUrl.searchParams.get('from') || undefined;
-          const to = requestUrl.searchParams.get('to') || undefined;
-          const tz = requestUrl.searchParams.get('tz') || undefined;
+          const from = requestUrl.searchParams.get('from');
+          const to = requestUrl.searchParams.get('to');
 
-          const args = [];
-          if (from) args.push('--start', from);
-          if (to) args.push('--end', to);
-          if (tz) args.push('--tz', tz);
-
-          const payload = await runPythonScript('get_forexfactory_calendar.py', args);
+          let filtered = allEvents;
+          if (from || to) {
+            const rangeFiltered = allEvents.filter(e => {
+              if (!e.date) return false;
+              if (from && e.date < from) return false;
+              if (to && e.date > to) return false;
+              return true;
+            });
+            // If date filter matched events, use them; otherwise return all available weekly events
+            if (rangeFiltered.length > 0) {
+              filtered = rangeFiltered;
+            }
+          }
 
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Content-Type', 'application/json');
           res.statusCode = 200;
-          res.end(JSON.stringify(payload));
+          res.end(JSON.stringify({
+            data: filtered,
+            source: 'ForexFactory CDN',
+            cached: cachedCalendarEvents ? true : false,
+            timestamp: Date.now()
+          }));
         } catch (error) {
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Content-Type', 'application/json');

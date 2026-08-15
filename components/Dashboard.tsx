@@ -209,8 +209,12 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
 
         try {
             const now = new Date();
-            const from = new Date(now.getTime() - 1 * 86400000).toISOString().split('T')[0];
-            const to = new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0];
+            // Start from the beginning of the current ISO week (Monday) so we always
+            // capture the full week from the ForexFactory CDN, not just from yesterday.
+            const monday = new Date(now);
+            monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+            const from = monday.toISOString().split('T')[0];
+            const to = new Date(now.getTime() + 14 * 86400000).toISOString().split('T')[0]; // 2 weeks ahead
             const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
             const response = await fetch(`/api/economic-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&tz=${encodeURIComponent(userTz)}`);
             const payload = await response.json().catch(() => ({}));
