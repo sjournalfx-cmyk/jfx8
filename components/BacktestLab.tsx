@@ -5,7 +5,7 @@ import {
     TrendingUp, TrendingDown, XCircle, X,
     Settings, Zap, ArrowLeftToLine, StepForward, ChevronDown, Database,
     Trash2, Lock, Unlock, Check, Search, Download, FileUp, RefreshCw, Clock, Brain,
-    ZoomIn, ZoomOut
+    ZoomIn, ZoomOut, Calendar
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { DrawingToolbar } from './backtest/DrawingToolbar';
@@ -86,6 +86,26 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'ctrader' | 'none'>('jfx_backtest_data_source', 'none');
     const [isCtraderFetching, setIsCtraderFetching] = useState(false);
     const [showCtraderAuthModal, setShowCtraderAuthModal] = useState(false);
+
+    // cTrader Historical Date Configuration
+    const [ctraderFetchSymbol, setCtraderFetchSymbol] = useState(symbol);
+    const [ctraderFetchTimeframe, setCtraderFetchTimeframe] = useState(timeframe);
+    const [ctraderFetchDate, setCtraderFetchDate] = useState(() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 30);
+        return d.toISOString().slice(0, 10);
+    });
+    const [ctraderFetchTime, setCtraderFetchTime] = useState('00:00');
+    const [ctraderFetchCount, setCtraderFetchCount] = useState(500);
+    const [ctraderStartReplayAtFirst, setCtraderStartReplayAtFirst] = useState(true);
+
+    useEffect(() => {
+        setCtraderFetchSymbol(symbol);
+    }, [symbol]);
+
+    useEffect(() => {
+        setCtraderFetchTimeframe(timeframe);
+    }, [timeframe]);
 
     // Check for cached data at initialization to prevent flash
     const hasCachedData = (() => {
@@ -236,9 +256,18 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [isSelectBarMode, setIsSelectBarMode] = useState(false);
     const [isTFMenuOpen, setIsTFMenuOpen] = useState(false);
 
-    // Feature: Context Menu
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, drawing: Drawing } | null>(null);
     const [clipboard, setClipboard] = useState<Drawing | null>(null);
+
+    const resetDrawingInteractionState = useCallback(() => {
+        setSelectedDrawingId(null);
+        setHoveredDrawingId(null);
+        setCurrentDrawing(null);
+        setContextMenu(null);
+        setClipboard(null);
+        setDragState(null);
+        setDragStartPos(null);
+    }, []);
 
 // Undo/Redo State
     const [historyStates, setHistoryStates] = useLocalStorage<Drawing[][]>('jfx_backtest_drawing_states', []);
@@ -591,14 +620,24 @@ setAllData(validData);
         }
     }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe]);
 
-    const handleFetchCtraderData = useCallback(async (overrideSymbol?: string, overrideTimeframe?: string) => {
+    const handleFetchCtraderData = useCallback(async (
+        overrideSymbol?: string, 
+        overrideTimeframe?: string,
+        customOptions?: {
+            fromTimestamp?: number;
+            toTimestamp?: number;
+            count?: number;
+            startAtFirstBar?: boolean;
+        }
+    ) => {
         setIsPlaying(false);
         const activeSymbol = overrideSymbol || symbol;
         const activeTF = overrideTimeframe || timeframe;
         setIsCtraderFetching(true);
 
-        // Check local cache first for instant switching
-        const cached = loadFromLocalCache(activeSymbol, activeTF, { notify: false });
+        const hasCustomFilter = Boolean(customOptions?.fromTimestamp || customOptions?.toTimestamp);
+        // Check local cache first for instant switching if not querying a specific historical date
+        const cached = !hasCustomFilter ? loadFromLocalCache(activeSymbol, activeTF, { notify: false }) : null;
         if (cached) {
             setDataSource('ctrader');
             setShowWelcome(false);
@@ -629,14 +668,24 @@ setAllData(validData);
             }
 
             const account = accounts[0];
-            const candles = await fetchCtraderCandles(account.ctidTraderAccountId, activeSymbol, activeTF, 500, account.isDemo);
+            const candleCount = customOptions?.count || 500;
+            const candles = await fetchCtraderCandles(
+                account.ctidTraderAccountId,
+                activeSymbol,
+                activeTF,
+                candleCount,
+                account.isDemo,
+                3,
+                customOptions?.fromTimestamp,
+                customOptions?.toTimestamp
+            );
 
             if (!candles || candles.length === 0) {
                 if (!cached) {
                     addToast({
                         type: 'warning',
                         title: 'No cTrader Bars',
-                        message: `No trendbars returned for ${activeSymbol} ${activeTF}.`
+                        message: `No trendbars returned for ${activeSymbol} ${activeTF} for the selected period.`
                     });
                 }
                 setIsCtraderFetching(false);
@@ -644,7 +693,9 @@ setAllData(validData);
             }
 
             setAllData(candles);
-            if (!cached) {
+            if (customOptions?.startAtFirstBar) {
+                setCurrentIdx(Math.min(50, candles.length - 1));
+            } else if (!cached) {
                 setCurrentIdx(Math.min(candles.length - 1, 50));
             }
             setHistory([]);
@@ -657,10 +708,15 @@ setAllData(validData);
             saveToLocalCache(candles, activeSymbol, activeTF);
             setDataSource('ctrader');
             setShowWelcome(false);
+
+            const firstDate = candles[0]?.time ? new Date(candles[0].time * 1000).toLocaleDateString() : '';
+            const lastDate = candles[candles.length - 1]?.time ? new Date(candles[candles.length - 1].time * 1000).toLocaleDateString() : '';
+            const rangeStr = firstDate && lastDate ? ` (${firstDate} – ${lastDate})` : '';
+
             addToast({
                 type: 'success',
-                title: 'cTrader Candles Loaded',
-                message: `Loaded ${candles.length} historical bars for ${activeSymbol} (${activeTF}).`
+                title: 'cTrader Data Loaded',
+                message: `Loaded ${candles.length} historical bars for ${activeSymbol} (${activeTF})${rangeStr}.`
             });
         } catch (err: any) {
             if (!cached) {
@@ -673,7 +729,36 @@ setAllData(validData);
         } finally {
             setIsCtraderFetching(false);
         }
-    }, [symbol, timeframe, setAllData, setCurrentIdx, saveToLocalCache, addToast]);
+    }, [symbol, timeframe, setAllData, setCurrentIdx, saveToLocalCache, loadFromLocalCache, setDataSource, setShowWelcome, resetDrawingInteractionState, addToast]);
+
+    const handleApplyCtraderDatePreset = (daysAgo: number) => {
+        const d = new Date();
+        d.setDate(d.getDate() - daysAgo);
+        setCtraderFetchDate(d.toISOString().slice(0, 10));
+        setCtraderFetchTime('00:00');
+    };
+
+    const handleExecuteCtraderDateFetch = () => {
+        let fromTimestamp: number | undefined;
+
+        if (ctraderFetchDate) {
+            const parsed = new Date(`${ctraderFetchDate}T${ctraderFetchTime || '00:00'}:00`);
+            fromTimestamp = !isNaN(parsed.getTime()) ? parsed.getTime() : undefined;
+        }
+
+        if (ctraderFetchSymbol !== symbol) {
+            setSymbol(ctraderFetchSymbol);
+        }
+        if (ctraderFetchTimeframe !== timeframe) {
+            setTimeframe(ctraderFetchTimeframe);
+        }
+
+        handleFetchCtraderData(ctraderFetchSymbol, ctraderFetchTimeframe, {
+            fromTimestamp,
+            count: ctraderFetchCount,
+            startAtFirstBar: ctraderStartReplayAtFirst
+        });
+    };
 
     const handleFetchActiveSourceData = useCallback(async (overrideSymbol?: string, overrideTimeframe?: string) => {
         if (dataSource === 'ctrader') {
@@ -729,16 +814,6 @@ setAllData(validData);
         historyPointerRef.current = nextPointer;
         setHistoryStates(trimmedHistory);
         setHistoryStep(nextPointer);
-    }, []);
-
-    const resetDrawingInteractionState = useCallback(() => {
-        setSelectedDrawingId(null);
-        setHoveredDrawingId(null);
-        setCurrentDrawing(null);
-        setContextMenu(null);
-        setClipboard(null);
-        setDragState(null);
-        setDragStartPos(null);
     }, []);
 
     const resetDrawingHistory = useCallback((snapshot: Drawing[] = []) => {
@@ -1475,9 +1550,9 @@ setAllData(validData);
                         {isFetching ? 'Syncing...' : 'MT5 Sync'}
                     </button>
                     <button
-                        onClick={() => handleFetchCtraderData()}
+                        onClick={() => handleExecuteCtraderDateFetch()}
                         disabled={isCtraderFetching}
-                        title="Fetch historical candles from cTrader Open API"
+                        title="Fetch historical candles by date from cTrader Open API"
                         className={`h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
                             isCtraderFetching
                                 ? 'bg-black text-zinc-500 cursor-wait'
@@ -1487,7 +1562,7 @@ setAllData(validData);
                         {isCtraderFetching ? (
                             <><RefreshCw size={12} className="animate-spin" /> Fetching...</>
                         ) : (
-                            <><Zap size={12} /> cTrader</>
+                            <><Calendar size={12} /> cTrader</>
                         )}
                     </button>
                 </div>
@@ -1670,40 +1745,150 @@ setAllData(validData);
                                         </div>
                                     </div>
 
-                                    {/* Option 4: cTrader Historical */}
+                                    {/* Option 4: cTrader Historical Card */}
                                     <div
-                                        onClick={() => handleFetchCtraderData()}
-                                        className={`p-8 rounded-3xl border-2 border-dashed flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] group ${
+                                        className={`p-6 rounded-3xl border-2 border-dashed flex flex-col justify-between gap-4 transition-all group overflow-hidden ${
                                             isDarkMode
                                                 ? 'bg-black/80 border-zinc-800 hover:border-[#0061FF]/50 hover:bg-[#0061FF]/5'
                                                 : 'bg-white border-slate-200 hover:border-[#0061FF]/50'
                                         }`}
                                     >
-                                        <div className={`p-6 rounded-2xl border-2 border-dashed transition-all group-hover:scale-110 ${
-                                            isDarkMode
-                                                ? 'bg-black border-zinc-800 group-hover:border-[#0061FF] group-hover:text-[#0061FF] text-zinc-600'
-                                                : 'bg-slate-50 border-slate-200 group-hover:border-[#0061FF] group-hover:text-[#0061FF] text-slate-400'
-                                        }`}>
-                                            <Zap size={48} />
+                                        <div className="flex flex-col items-center gap-3 w-full">
+                                            <div className={`p-4 rounded-2xl border-2 border-dashed transition-all group-hover:scale-105 ${
+                                                isDarkMode
+                                                    ? 'bg-black border-zinc-800 group-hover:border-[#0061FF] group-hover:text-[#60efff] text-zinc-600'
+                                                    : 'bg-slate-50 border-slate-200 group-hover:border-[#0061FF] group-hover:text-[#0061FF] text-slate-400'
+                                            }`}>
+                                                <Zap size={36} />
+                                            </div>
+                                            <div className="text-center space-y-1">
+                                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${
+                                                    isDarkMode ? 'text-[#60efff]' : 'text-[#0061FF]'
+                                                }`}>Historical Data</p>
+                                                <h3 className={`text-xl font-black uppercase tracking-tight ${
+                                                    isDarkMode ? 'text-white' : 'text-slate-900'
+                                                }`}>cTrader API</h3>
+                                            </div>
                                         </div>
-                                        <div className="text-center space-y-2">
-                                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${
-                                                isDarkMode ? 'text-[#60efff]' : 'text-[#0061FF]'
-                                            }`}>Historical Data</p>
-                                            <h3 className={`text-xl font-black uppercase tracking-tight ${
-                                                isDarkMode ? 'text-white' : 'text-slate-900'
-                                            }`}>cTrader API</h3>
-                                            <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${
-                                                isDarkMode ? 'text-zinc-500' : 'text-slate-400'
-                                            }`}>Fetch directly from cTrader<br />Requires cTrader auth</p>
+
+                                        {/* In-Card Date Selection Controls */}
+                                        <div className="w-full space-y-2.5 bg-black/20 p-3 rounded-2xl border border-zinc-800/60">
+                                            {/* Quick Date Presets */}
+                                            <div>
+                                                <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500 mb-1">
+                                                    <span>Jump to Date</span>
+                                                    <span className="text-[#60efff] font-mono">{ctraderFetchDate}</span>
+                                                </div>
+                                                <div className="grid grid-cols-4 gap-1">
+                                                    {[
+                                                        { label: '7D', days: 7 },
+                                                        { label: '1M', days: 30 },
+                                                        { label: '3M', days: 90 },
+                                                        { label: '1Y', days: 365 },
+                                                    ].map(p => (
+                                                        <button
+                                                            key={p.label}
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleApplyCtraderDatePreset(p.days);
+                                                            }}
+                                                            className={`py-1 rounded-lg text-[9px] font-black uppercase transition-all ${
+                                                                isDarkMode
+                                                                    ? 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-[#0061FF]/50'
+                                                                    : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                                                            }`}
+                                                        >
+                                                            {p.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Date Picker Input */}
+                                            <div className="space-y-1">
+                                                <label className="text-[8px] font-black uppercase tracking-widest text-zinc-500 flex items-center gap-1">
+                                                    <Calendar size={10} className="text-[#0061FF]" /> Select Date
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    value={ctraderFetchDate}
+                                                    onChange={(e) => setCtraderFetchDate(e.target.value)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none border transition-all ${
+                                                        isDarkMode
+                                                            ? 'bg-black border-zinc-800 text-white focus:border-[#0061FF]'
+                                                            : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0061FF]'
+                                                    }`}
+                                                />
+                                            </div>
+
+                                            {/* Timeframe & Candle Count */}
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div className="space-y-1">
+                                                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 block">TF</span>
+                                                    <select
+                                                        value={ctraderFetchTimeframe}
+                                                        onChange={(e) => {
+                                                            e.stopPropagation();
+                                                            setCtraderFetchTimeframe(e.target.value);
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${
+                                                            isDarkMode
+                                                                ? 'bg-black border-zinc-800 text-white'
+                                                                : 'bg-slate-50 border-slate-200 text-slate-800'
+                                                        }`}
+                                                    >
+                                                        {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
+                                                            <option key={tf} value={tf}>{tf}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 block">Bars</span>
+                                                    <select
+                                                        value={ctraderFetchCount}
+                                                        onChange={(e) => {
+                                                            e.stopPropagation();
+                                                            setCtraderFetchCount(Number(e.target.value));
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${
+                                                            isDarkMode
+                                                                ? 'bg-black border-zinc-800 text-white'
+                                                                : 'bg-slate-50 border-slate-200 text-slate-800'
+                                                        }`}
+                                                    >
+                                                        <option value={250}>250</option>
+                                                        <option value={500}>500</option>
+                                                        <option value={1000}>1000</option>
+                                                        <option value={2000}>2000</option>
+                                                    </select>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className={`px-6 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${
-                                            isDarkMode
-                                                ? 'bg-black border-zinc-700 text-zinc-400 group-hover:text-[#60efff]'
-                                                : 'bg-white border-slate-200 text-slate-500 group-hover:text-[#0061FF]'
-                                        }`}>
-                                            {isCtraderFetching ? 'Fetching...' : 'Pull Data'}
-                                        </div>
+
+                                        {/* In-Card Pull Action Button */}
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleExecuteCtraderDateFetch();
+                                            }}
+                                            disabled={isCtraderFetching}
+                                            className={`w-full py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md ${
+                                                isCtraderFetching
+                                                    ? 'bg-black border-zinc-800 text-zinc-500 cursor-wait'
+                                                    : 'bg-gradient-to-r from-[#0061FF] to-[#60efff] text-white border-transparent shadow-[#0061FF]/25 hover:opacity-95'
+                                            }`}
+                                        >
+                                            {isCtraderFetching ? (
+                                                <><RefreshCw size={12} className="animate-spin" /> Pulling Data...</>
+                                            ) : (
+                                                <><Calendar size={12} /> Pull from Date</>
+                                            )}
+                                        </button>
                                     </div>
                                 </div>
                             </div>

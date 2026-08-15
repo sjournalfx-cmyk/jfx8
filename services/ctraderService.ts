@@ -906,7 +906,9 @@ export async function fetchCtraderCandles(
   timeframe: string,
   count: number = 500,
   isDemo: boolean = true,
-  maxRetries: number = 3
+  maxRetries: number = 3,
+  fromTimestamp?: number,
+  toTimestamp?: number
 ): Promise<Candle[]> {
   let lastError: any;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -922,7 +924,7 @@ export async function fetchCtraderCandles(
       const digits = match?.digits ? Number(match.digits) : (cleanSym.includes('JPY') ? 3 : 5);
       const period = mapTimeframeToCtraderPeriod(timeframe);
 
-      return await getTrendbars(ctidTraderAccountId, symbolId, period, undefined, undefined, count, digits, isDemo);
+      return await getTrendbars(ctidTraderAccountId, symbolId, period, fromTimestamp, toTimestamp, count, digits, isDemo);
     } catch (err) {
       lastError = err;
       if (attempt < maxRetries) {
