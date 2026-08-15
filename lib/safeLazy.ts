@@ -15,6 +15,15 @@ const isChunkLoadError = (error: unknown): boolean => {
   return CHUNK_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 };
 
+function reloadForFreshBuild(): void {
+  const url = new URL(window.location.href);
+  // A normal reload may still receive a cached HTML document. A unique query
+  // parameter makes Vercel serve the current index.html, whose chunk hashes
+  // match the active deployment.
+  url.searchParams.set('jfx_chunk_reload', String(Date.now()));
+  window.location.replace(url.toString());
+}
+
 /**
  * Wraps React.lazy so a stale code-split chunk doesn't crash the app.
  *
@@ -24,22 +33,31 @@ const isChunkLoadError = (error: unknown): boolean => {
  * dynamic import fails with a 404 ("Failed to fetch dynamically imported
  * module"). Instead of letting that error bubble up, we reload the page once
  * so the browser picks up the fresh index.html (and therefore the new chunk
- * hashes). The reload is guarded with a session flag to avoid an infinite
- * reload loop if the chunk is genuinely broken.
+ * hashes). The reload is guarded to avoid an infinite loop if the chunk is
+ * genuinely broken, and the guard is cleared after a successful lazy import.
  */
 export function safeLazy<T extends ComponentType<any>>(
   factory: () => Promise<{ default: T }>
 ): LazyExoticComponent<T> {
   return lazy(() =>
-    factory().catch((error: unknown) => {
+    factory().then((module) => {
+      try {
+        sessionStorage.removeItem(CHUNK_RELOAD_FLAG);
+      } catch {
+        // Storage can be unavailable, for example in private browsing.
+      }
+      return module;
+    }).catch((error: unknown) => {
       if (isChunkLoadError(error)) {
         try {
           if (!sessionStorage.getItem(CHUNK_RELOAD_FLAG)) {
             sessionStorage.setItem(CHUNK_RELOAD_FLAG, '1');
-            window.location.reload();
+            reloadForFreshBuild();
           }
         } catch {
-          // sessionStorage may be unavailable (e.g. private mode) — fall through
+          // Storage may be unavailable. A cache-busting reload is still the
+          // best recovery path and avoids leaving the user on a crash UI.
+          reloadForFreshBuild();
         }
       }
       throw error;
