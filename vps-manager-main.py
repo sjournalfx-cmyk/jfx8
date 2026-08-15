@@ -8,6 +8,7 @@ import os
 import subprocess
 import time
 import json
+import hmac
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -39,6 +40,7 @@ class BrokerState:
         self.last_error: Optional[str] = None
         self.sync_key: Optional[str] = None
         self.connected_at: Optional[str] = None
+        self.id_token: Optional[str] = None  # User's Supabase JWT, forwarded on sync
 
 user_states: dict[str, BrokerState] = {}
 
@@ -58,7 +60,8 @@ app.add_middleware(
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_key(api_key: str = Security(api_key_header)):
-    if not api_key or api_key != VPS_API_KEY:
+    # Constant-time comparison to avoid timing side-channels on the shared key.
+    if not api_key or not hmac.compare_digest(api_key.encode(), VPS_API_KEY.encode()):
         raise HTTPException(status_code=401, detail="Invalid API key")
     return api_key
 
@@ -79,6 +82,7 @@ class CredentialsBody(BaseModel):
     server: str
     login: str
     password: str
+    id_token: Optional[str] = None  # Supabase JWT of the connecting user
 
 class SyncBody(BaseModel):
     user_id: str
@@ -243,6 +247,7 @@ async def store_credentials(
     state.password = body.password
     state.status = "credentials_stored"
     state.last_error = None
+    state.id_token = body.id_token or None
     return {"status": "ok", "message": "Credentials stored"}
 
 @app.post("/api/broker/sync")
@@ -276,15 +281,21 @@ async def broker_sync(
             "user_id": user_id,
         }
 
+        # Forward the user's own Supabase JWT (captured when credentials were
+        # stored) so the sync-trades edge function can verify the caller. The
+        # anon key is never used as an Authorization credential.
+        auth_headers = {
+            "Content-Type": "application/json",
+            "Sync-Key": sync_key,
+        }
+        if state.id_token:
+            auth_headers["Authorization"] = f"Bearer {state.id_token}"
+
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 SYNC_EDGE_FUNCTION,
                 json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-                    "Sync-Key": sync_key,
-                },
+                headers=auth_headers,
             )
 
         if resp.status_code == 200:
@@ -363,18 +374,9 @@ async def sync_trades(api_key: str = Depends(verify_key)):
         "timestamp": None,
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            SYNC_EDGE_FUNCTION,
-            json=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-                "Sync-Key": api_key,
-            },
-        )
-
-    return {"synced": resp.status_code == 200, "status": resp.status_code}
+    # Legacy endpoint: without a verified user JWT the sync-trades edge function
+    # rejects the request, so nothing can be written anonymously.
+    return {"synced": False, "status": 401, "error": "Unauthenticated legacy sync is disabled"}
 
 @app.on_event("startup")
 async def startup():

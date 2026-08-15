@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { applyCorsHeaders } from '../_lib/cors';
 
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
 
@@ -42,7 +43,7 @@ const getFmpErrorMessage = (status: number, details: unknown) => {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCorsHeaders(res, req.headers);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -56,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const apiKey = process.env.FMP_API_KEY || process.env.VITE_FMP_API_KEY;
+  const apiKey = process.env.FMP_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: 'Missing FMP_API_KEY environment variable' });
     return;

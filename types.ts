@@ -127,6 +127,8 @@ export interface Trade {
   setupId?: string;
   setupName?: string;
   deletedAt?: string;
+  chartCandles?: Candle[];
+  chartTimeframe?: string;
 }
 
 export interface Note {
@@ -360,6 +362,8 @@ export interface DBTrade {
   setup_id?: string;
   setup_name?: string;
   deleted_at?: string;
+  chart_candles?: Candle[] | null;
+  chart_timeframe?: string | null;
 }
 
 export interface DBGoal {

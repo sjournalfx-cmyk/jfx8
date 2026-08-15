@@ -54,6 +54,8 @@ export const mapTradeFromDB = (dbTrade: DBTrade): Trade => normalizeTrade({
   setupId: dbTrade.setup_id,
   setupName: dbTrade.setup_name,
   deletedAt: dbTrade.deleted_at,
+  chartCandles: dbTrade.chart_candles || undefined,
+  chartTimeframe: dbTrade.chart_timeframe || undefined,
 });
 
 // Helper to map App Trade to DB Trade
@@ -103,6 +105,8 @@ const buildTradeDbPayload = (trade: Partial<Trade>, userId: string, fallback: Pa
     setup_id: merged.setupId || null,
     setup_name: merged.setupName || null,
     deleted_at: merged.deletedAt,
+    chart_candles: merged.chartCandles || null,
+    chart_timeframe: merged.chartTimeframe || null,
   };
 };
 

@@ -401,10 +401,13 @@ async function chatCompletion(
 ): Promise<string> {
   const combined = createCombinedSignal(signal, timeoutMs);
   try {
+  const { getSessionToken } = await import("../lib/supabase");
+  const token = await getSessionToken();
   const response = await fetch(BASE_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({
         model,

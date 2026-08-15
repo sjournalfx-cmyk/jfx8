@@ -19,8 +19,11 @@ export const openaiService = {
       if (options.language) formData.append('language', options.language);
       formData.append('response_format', 'text');
 
+      const { getSessionToken } = await import('../lib/supabase');
+      const token = await getSessionToken();
       const res = await fetch('/api/transcribe', {
         method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: formData,
       });
 

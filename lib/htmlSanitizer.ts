@@ -73,11 +73,13 @@ export const sanitizeRichTextHtml = (html?: string | null) => {
   if (!html) return '';
 
   if (typeof DOMParser === 'undefined') {
+    // Non-DOM environments (SSR/tests): strip ALL markup so no tag, event
+    // handler, or javascript: URL can survive. Plain text is returned instead
+    // of sanitized HTML — safe by construction. Browsers use the DOMParser
+    // path above, which preserves the allowed rich-text subset.
     return html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/on\w+="[^"]*"/gi, '')
-      .replace(/on\w+='[^']*'/gi, '')
-      .replace(/href\s*=\s*["']\s*javascript:[^"']*["']/gi, '');
+      .replace(/<[^>]*>/g, '');
   }
 
   const parser = new DOMParser();

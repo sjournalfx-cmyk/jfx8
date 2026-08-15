@@ -1,0 +1,2132 @@
+[
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "5",
+  "snip": "VITE_SUPABASE_ANON_KEY=your_supabase_anon_key"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "10",
+  "snip": "SUPABASE_ANON_KEY=your_supabase_anon_key"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "14",
+  "snip": "NVIDIA_API_KEY=your_nvidia_api_key"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "17",
+  "snip": "OPENAI_API_KEY=your_openai_api_key"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "20",
+  "snip": "MODAL_RESEARCH_API_KEY=your_modal_api_key"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "23",
+  "snip": "FMP_API_KEY=your_fmp_api_key"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "24",
+  "snip": "FINNHUB_API_KEY=your_finnhub_api_key"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "33",
+  "snip": "CTRADER_CLIENT_SECRET=your_ctrader_client_secret"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "43",
+  "snip": "VITE_CTRADER_CLIENT_SECRET=your_ctrader_client_secret"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "46",
+  "snip": "VERCEL_TOKEN=your_vercel_token"
+ },
+ {
+  "file": ".env.example",
+  "slug": "env-exposure",
+  "lines": "49",
+  "snip": "FIREHOSE_API_KEY=your_firehose_api_key"
+ },
+ {
+  "file": ".env",
+  "slug": "env-exposure",
+  "lines": "3",
+  "snip": "VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx3bGlraGpnd2F6eXJhaHVjYXRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTM5"
+ },
+ {
+  "file": ".env",
+  "slug": "env-exposure",
+  "lines": "7",
+  "snip": "VITE_CTRADER_CLIENT_SECRET=B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd"
+ },
+ {
+  "file": ".env",
+  "slug": "env-exposure",
+  "lines": "8",
+  "snip": "CTRADER_CLIENT_SECRET=B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd"
+ },
+ {
+  "file": ".env",
+  "slug": "env-exposure",
+  "lines": "12",
+  "snip": "VITE_NVIDIA_API_KEY=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"
+ },
+ {
+  "file": ".env",
+  "slug": "env-exposure",
+  "lines": "13",
+  "snip": "NVIDIA_API_KEY=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"
+ },
+ {
+  "file": ".env.local",
+  "slug": "env-exposure",
+  "lines": "3",
+  "snip": "VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx3bGlraGpnd2F6eXJhaHVjYXRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTM5"
+ },
+ {
+  "file": ".env.local",
+  "slug": "env-exposure",
+  "lines": "7",
+  "snip": "VITE_CTRADER_CLIENT_SECRET=B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd"
+ },
+ {
+  "file": ".env.local",
+  "slug": "env-exposure",
+  "lines": "8",
+  "snip": "CTRADER_CLIENT_SECRET=B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd"
+ },
+ {
+  "file": ".env.local",
+  "slug": "env-exposure",
+  "lines": "12",
+  "snip": "VITE_NVIDIA_API_KEY=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"
+ },
+ {
+  "file": ".env.local",
+  "slug": "env-exposure",
+  "lines": "13",
+  "snip": "NVIDIA_API_KEY=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"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "auth-bypass",
+  "lines": "132",
+  "snip": "} const authHeader = req.headers['authorization'] || ''; const accessToken = authHeader.replace(/^Bearer\\s+/i, '').trim();"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "missing-auth",
+  "lines": "121",
+  "snip": "} export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Content-Type', 'application/json'); res.setHeader('Access-Cont"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "secret-in-fallback",
+  "lines": "6",
+  "snip": "// Server-only credentials. The client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET ="
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "env-var-as-bool",
+  "lines": "6",
+  "snip": "// Server-only credentials. The client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET ="
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "cors-wildcard",
+  "lines": "123",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Content-Type', 'application/json'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "process-env-access",
+  "lines": "5",
+  "snip": "// Server-only credentials. The client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET ="
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "process-env-access",
+  "lines": "6",
+  "snip": "const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';"
+ },
+ {
+  "file": "api/ctrader/callback.ts",
+  "slug": "missing-auth",
+  "lines": "10",
+  "snip": "* (App.tsx) can intercept it and call /api/ctrader/exchange. */ export default function handler(req: VercelRequest, res: VercelResponse) { const code = req.quer"
+ },
+ {
+  "file": "api/ctrader/callback.ts",
+  "slug": "oauth-flow",
+  "lines": "7,12",
+  "snip": "* * cTrader ID redirects back to this URL after the user authorises. * We simply forward the ?code= to the SPA root so the React app * (App.tsx) can intercept i"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "missing-auth",
+  "lines": "43",
+  "snip": "} export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Cont"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "insecure-crypto",
+  "lines": "13,94,106,107",
+  "snip": "// Exact-match allowlist for redirect_uri hosts (port stripped). Suffix matching // (e.g. \"endsWith('.vercel.app')\") and trusting the Host / x-forwarded-host //"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "jwt-handling",
+  "lines": "120,122",
+  "snip": "// readable by JavaScript (mitigates XSS token theft). The access token is // returned to the client and kept in memory only. if (body.refreshToken) { res.setHe"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "secret-in-fallback",
+  "lines": "9",
+  "snip": "// the client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET = process.env.CTRADER_CLIE"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "secret-in-log",
+  "lines": "113",
+  "snip": "if (!body.accessToken) { res.status(502).json({ error: 'cTrader exchange returned no access token' }); return;"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "oauth-flow",
+  "lines": "11,59,62,67,68,81",
+  "snip": "const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || ''; // Exact-match allowlist for redirect_uri hosts (port stripped). Suffix matching // (e.g. \"endsWi"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "oauth-flow",
+  "lines": "79",
+  "snip": "try { const tokenUrl = new URL(CTRADER_TOKEN_URL); tokenUrl.searchParams.set('grant_type', 'authorization_code'); tokenUrl.searchParams.set('code', code); token"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "env-var-as-bool",
+  "lines": "9",
+  "snip": "// the client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET = process.env.CTRADER_CLIE"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "cors-wildcard",
+  "lines": "44",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "process-env-access",
+  "lines": "8",
+  "snip": "// the client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET = process.env.CTRADER_CLIE"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "process-env-access",
+  "lines": "9",
+  "snip": "const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "process-env-access",
+  "lines": "22",
+  "snip": "function getAllowedRedirectHosts(): Set<string> { const fromEnv = (process.env.CTRADER_ALLOWED_REDIRECT_HOSTS || '') .split(',')"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "session-cookie-config",
+  "lines": "121",
+  "snip": "if (body.refreshToken) { res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=${encodeURIComponent(String(body.refreshToken))}; HttpOnly; Secure; SameSite=Lax; Path"
+ },
+ {
+  "file": "api/ctrader/logout.ts",
+  "slug": "missing-auth",
+  "lines": "5",
+  "snip": "const REFRESH_COOKIE = 'jfx_ctrader_refresh'; export default function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Ori"
+ },
+ {
+  "file": "api/ctrader/logout.ts",
+  "slug": "cors-wildcard",
+  "lines": "6",
+  "snip": "export default function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Control-Allo"
+ },
+ {
+  "file": "api/ctrader/logout.ts",
+  "slug": "session-cookie-config",
+  "lines": "20",
+  "snip": "res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`, ]); res.status(200).json({ ok: true }); }"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "missing-auth",
+  "lines": "10",
+  "snip": "const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || ''; export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('A"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "jwt-handling",
+  "lines": "27,28,41",
+  "snip": "// The refresh token is only ever read from the httpOnly cookie set during the // exchange — never from the request body, which a script attacker could supply. "
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "secret-in-fallback",
+  "lines": "8",
+  "snip": "// Server-only credentials. The client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET ="
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "oauth-flow",
+  "lines": "40",
+  "snip": "try { const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID,"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "env-var-as-bool",
+  "lines": "8",
+  "snip": "// Server-only credentials. The client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET ="
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "cors-wildcard",
+  "lines": "11",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "process-env-access",
+  "lines": "7",
+  "snip": "// Server-only credentials. The client secret must never be shipped to the browser. const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET ="
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "process-env-access",
+  "lines": "8",
+  "snip": "const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "session-cookie-config",
+  "lines": "66",
+  "snip": "if (tokens.refresh_token) { res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=${encodeURIComponent(String(tokens.refresh_token))}; HttpOnly; Secure; SameSite=Lax"
+ },
+ {
+  "file": "api/economic-calendar.ts",
+  "slug": "missing-auth",
+  "lines": "16",
+  "snip": "Array.isArray(value) ? value[0] : value; export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Or"
+ },
+ {
+  "file": "api/economic-calendar.ts",
+  "slug": "cors-wildcard",
+  "lines": "17",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "missing-auth",
+  "lines": "30",
+  "snip": "}; export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Con"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "ssrf",
+  "lines": "77",
+  "snip": "try { const upstream = await fetch(`${FINNHUB_BASE}${endpoint}?${params.toString()}`); const payload = await upstream.json().catch(() => null);"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "insecure-crypto",
+  "lines": "59",
+  "snip": "} if (SYMBOL_REQUIRED.includes(suffix)) { const symbol = getSingle(req.query?.symbol); if (!symbol) {"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "secret-in-log",
+  "lines": "67",
+  "snip": "const params = new URLSearchParams({ token: apiKey }); if (req.query) {"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "env-var-as-bool",
+  "lines": "45",
+  "snip": "} const apiKey = process.env.FINNHUB_API_KEY; if (!apiKey) { res.status(500).json({ error: 'Missing FINNHUB_API_KEY environment variable' });"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "cors-wildcard",
+  "lines": "31",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "process-env-access",
+  "lines": "45",
+  "snip": "const apiKey = process.env.FINNHUB_API_KEY; if (!apiKey) {"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "missing-auth",
+  "lines": "44",
+  "snip": "}; export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Con"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "ssrf",
+  "lines": "92",
+  "snip": "try { const upstream = await fetch(`${FMP_BASE}${endpoint}?${params.toString()}`); const payload = await upstream.json().catch(() => null);"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "insecure-crypto",
+  "lines": "31,73",
+  "snip": "} if (status === 403 || status === 404) { return 'This endpoint requires a paid FMP plan. The free plan provides Quote, Profile, Treasury Rates, and Earnings Ca"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "env-var-as-bool",
+  "lines": "59",
+  "snip": "} const apiKey = process.env.FMP_API_KEY; if (!apiKey) { res.status(500).json({ error: 'Missing FMP_API_KEY environment variable' });"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "cors-wildcard",
+  "lines": "45",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "process-env-access",
+  "lines": "59",
+  "snip": "const apiKey = process.env.FMP_API_KEY; if (!apiKey) {"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "missing-auth",
+  "lines": "22",
+  "snip": "const MODAL_CHAT_URL = 'https://api.us-west-2.modal.direct/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelResponse) "
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "insecure-crypto",
+  "lines": "75",
+  "snip": "upstream.headers.forEach((value, key) => { const lower = key.toLowerCase(); if (['content-length', 'connection', 'transfer-encoding', 'content-encoding'].includ"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "secret-in-log",
+  "lines": "67",
+  "snip": "'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, },"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "env-var-as-bool",
+  "lines": "44",
+  "snip": "} const apiKey = process.env.MODAL_RESEARCH_API_KEY; if (!apiKey) { res.status(500).json({ error: 'Modal API key is not configured on the server' });"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "cors-wildcard",
+  "lines": "23",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "expensive-api-abuse",
+  "lines": "20",
+  "snip": "}; const MODAL_CHAT_URL = 'https://api.us-west-2.modal.direct/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelRespons"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "process-env-access",
+  "lines": "44",
+  "snip": "const apiKey = process.env.MODAL_RESEARCH_API_KEY; if (!apiKey) {"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "missing-auth",
+  "lines": "22",
+  "snip": "const NVIDIA_CHAT_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelResponse) {"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "insecure-crypto",
+  "lines": "77",
+  "snip": "upstream.headers.forEach((value, key) => { const lower = key.toLowerCase(); if (['content-length', 'connection', 'transfer-encoding', 'content-encoding'].includ"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "secret-in-log",
+  "lines": "69",
+  "snip": "'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, },"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "env-var-as-bool",
+  "lines": "46",
+  "snip": "// Server-only key. Never fall back to a hardcoded or VITE_* value — VITE_* vars // get inlined into the client bundle. const apiKey = process.env.NVIDIA_API_KE"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "cors-wildcard",
+  "lines": "23",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "expensive-api-abuse",
+  "lines": "20",
+  "snip": "}; const NVIDIA_CHAT_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelResponse"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "process-env-access",
+  "lines": "46",
+  "snip": "// get inlined into the client bundle. const apiKey = process.env.NVIDIA_API_KEY; if (!apiKey) {"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "missing-auth",
+  "lines": "12",
+  "snip": "const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "secret-in-log",
+  "lines": "50",
+  "snip": "headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': req.headers['content-type'] || 'multipart/form-data',"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "env-var-as-bool",
+  "lines": "40",
+  "snip": "} const apiKey = process.env.OPENAI_API_KEY; if (!apiKey) { res.status(500).json({ error: 'OpenAI API key not configured on server' });"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "cors-wildcard",
+  "lines": "13",
+  "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "process-env-access",
+  "lines": "40",
+  "snip": "const apiKey = process.env.OPENAI_API_KEY; if (!apiKey) {"
+ },
+ {
+  "file": "api/_lib/auth.ts",
+  "slug": "secret-in-fallback",
+  "lines": "4",
+  "snip": "const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''; const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VIT"
+ },
+ {
+  "file": "api/_lib/auth.ts",
+  "slug": "env-var-as-bool",
+  "lines": "4",
+  "snip": "const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''; const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VIT"
+ },
+ {
+  "file": "api/_lib/auth.ts",
+  "slug": "process-env-access",
+  "lines": "3",
+  "snip": "const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''; const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VIT"
+ },
+ {
+  "file": "api/_lib/auth.ts",
+  "slug": "process-env-access",
+  "lines": "4",
+  "snip": "const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''; const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VIT"
+ },
+ {
+  "file": "App.tsx",
+  "slug": "xss",
+  "lines": "982",
+  "snip": "</div> )} <div className={`compact-scale flex h-screen w-full transition-colors duration-300 ${isDemoMode ? 'pt-16' : ''} ${isDarkMode ? 'text-zinc-100' : 'bg-s"
+ },
+ {
+  "file": "App.tsx",
+  "slug": "insecure-crypto",
+  "lines": "33,54,152,161,171,205,206,225,267,281,308,346,368,371,374,395,404,416,425,426,428,432,446,453,455,463,474,492,494,498,502,507,511,522,525,529,534,536,539,540,541,543,546,547,548,552,558,560,565,566,571,573,577,584,588,595,602,606,615,619,720,780,810,816,911,919,935,941,975,993,1007,1020,1036,1052,1059,1070,1072,1073,1083,1140,1144,1145,1156,1159,1180",
+  "snip": "import { getSafePnL } from './lib/trade-normalization'; import { normalizeThemePreference } from './lib/theme'; import { demoDailyBias, demoEASession, demoNotes"
+ },
+ {
+  "file": "components/ai/AIWidgets.tsx",
+  "slug": "xss",
+  "lines": "623,684",
+  "snip": "try { if (containerRef.current) { containerRef.current.innerHTML = ''; containerRef.current.style.width = ''; containerRef.current.style.maxWidth = '';"
+ },
+ {
+  "file": "components/ai/AIWidgets.tsx",
+  "slug": "xss",
+  "lines": "391,395,399,402,408,413,419,429,454,471,477,761,764,768,771,811,815,816,840,842,844,847,848,851,870",
+  "snip": "> {/* Header */} <div className={`px-4 py-3 border-b flex items-center justify-between ${ isDarkMode ? 'border-white/8 bg-white/[0.03]' : 'border-slate-200 bg-s"
+ },
+ {
+  "file": "components/ai/AIWidgets.tsx",
+  "slug": "insecure-crypto",
+  "lines": "28,68,73,78,93,145,158",
+  "snip": "}; const MERMAID_KEYWORD_LINE_PATTERN = /^(graph\\s|flowchart\\s|sequenceDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|pie\\s|journey\\s|mindmap\\s|title\\b|participan"
+ },
+ {
+  "file": "components/ai/AIWidgets.tsx",
+  "slug": "insecure-crypto",
+  "lines": "653,665",
+  "snip": "(mermaid as any).parseError = () => {}; const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`; const candidates = buildMermaidCandidates(draftCode, ty"
+ },
+ {
+  "file": "components/ai/AIWidgets.tsx",
+  "slug": "dangerous-html",
+  "lines": "623",
+  "snip": "let lastTriedCandidate: string | null = null; try { if (containerRef.current) { containerRef.current.innerHTML = ''; containerRef.current.style.width = ''; cont"
+ },
+ {
+  "file": "components/ai/AIWidgets.tsx",
+  "slug": "dangerous-html",
+  "lines": "684",
+  "snip": "} if (containerRef.current && isMounted) { containerRef.current.innerHTML = svg; const svgElement = containerRef.current.querySelector('svg'); if (svgElement) {"
+ },
+ {
+  "file": "components/ai/TradingPlanBento.tsx",
+  "slug": "xss",
+  "lines": "224,228,261,262,295,312,330,331,337,354,373,391,413,444,449,464,483,489,517,522,591",
+  "snip": "> <div className=\"flex items-center gap-3\"> <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-black/40' : 'bg-white shadow-sm border border-slate-200'} ${confi"
+ },
+ {
+  "file": "components/ai/TradingPlanBento.tsx",
+  "slug": "insecure-crypto",
+  "lines": "150,337,346",
+  "snip": "filtered = filtered.filter(([key, cfg]) => { const content = sections[key]?.toLowerCase() || ''; return cfg.label.toLowerCase().includes(query) || content.inclu"
+ },
+ {
+  "file": "components/ai/TradingPlanWizard/TradingPlanWizardSteps.tsx",
+  "slug": "xss",
+  "lines": "42,43,48,60,67,99,100,105,116,136,137,142,161,181,193,221,222,237,239,241,255,256,261,278,285,297,312,313,319,331,345,377,378,383,395,402,414,429,430,433,441,446,450,455",
+  "snip": "<Target size={32} className=\"text-white\" /> </div> <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Trader Identity & Market"
+ },
+ {
+  "file": "components/ai/TradingPlanWizard/TradingPlanWizardSteps.tsx",
+  "slug": "insecure-crypto",
+  "lines": "73,79,163,211,230,237,241,267,273,351,357,378,443,452",
+  "snip": "key={market} onClick={() => { const next = data.markets.includes(market) ? data.markets.filter(m => m !== market) : [...data.markets, market];"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "xss",
+  "lines": "455,457,470,473,611,612,628,630,635,729,734,865,866,891,895,896,2476,2483,2514,2515,2526,2565,2567,2571,2585,2586,2587,2595,2598,2611,2612,2613,2621,2624,2635,2636,2637,2658,2664,2678,2680,2684,2692,2754,2764,2782,2783,2788,2800,2807,2839,2840,2845,2856,2876,2877,2882,2901,2921,2933,2964,2965,2970,2987,2994,3006,3021,3022,3028,3040,3054,3086,3087,3092,3104,3111,3123,3138,3139,3142,3150,3152,3156,3158,3221,3222,3241,3243,3288,3326,3341,3363,3365,3379,3381,3408,3425,3431,3433,3437,3448,3457,3460,3461,3519,3525,3535,3660,3667,3676,3679",
+  "snip": "return ( <div className={`rounded-xl border px-2 py-1.5 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white/80'}`}> <audio ref={audioRef} p"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "1810",
+  "snip": "const from = new Date().toISOString().split('T')[0]; const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]; const calRes = await fetch(`/ap"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2022",
+  "snip": "if (kind === 'statements' && symbol) { const [incRes, balRes, cfRes] = await Promise.all([ fetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2023",
+  "snip": "const [incRes, balRes, cfRes] = await Promise.all([ fetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() "
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2024",
+  "snip": "fetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))), fetch(`/api/fmp/balance-sheet?symbol=${en"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2029",
+  "snip": "} else if (kind === 'ratios' && symbol) { const [ratRes, groRes] = await Promise.all([ fetch(`/api/fmp/ratios?symbol=${encodeURIComponent(symbol)}`).then(r => r"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2030",
+  "snip": "const [ratRes, groRes] = await Promise.all([ fetch(`/api/fmp/ratios?symbol=${encodeURIComponent(symbol)}`).then(r => r.json().catch(() => ({}))), fetch(`/api/fm"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2112",
+  "snip": "const from = new Date().toISOString().split('T')[0]; const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]; const response = await fetch(`/"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "insecure-crypto",
+  "lines": "95,97,205,206,207,208,209,210,211,212,216,217,220,222,223,224,227,228,229,234,235,236,239,255,256,257,262,303,304,306,498,840,856,871,896,907,908,909,910,916,917,921,922,1019,1024,1025,1026,1027,1028,1029,1030,1031,1032,1034,1035,1036,1037,1038,1039,1040,1041,1042,1043,1046,1053,1054,1055,1056,1057,1058,1074,1079,1081,1083,1084,1087,1089,1161,1168,1277,1599,1760,1761,1769,1781,1835,1850,1852,1854,1856,1873,1875,1877,1879,1885,1886,1887,1888,1890,1893,1904,2239,2256,2334,2368,2387,2403,2421,2581,2586,2612,2630,2631,2633,2636,2813,2819,2903,2976,2982,3060,3066,3087,3151,3157,3243,3365,3409,3487,3519,3709,3721,3737,3756",
+  "snip": "}; const rawLines = normalized.includes('\\n') ? normalized.split('\\n') : normalized.includes('|')"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "untrusted-redirect-following",
+  "lines": "2036",
+  "snip": "const url = symbol ? `${baseUrl}?symbol=${encodeURIComponent(symbol)}` : baseUrl; const response = await fetch(url); const payload = await response.json().catch"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "untrusted-redirect-following",
+  "lines": "2080",
+  "snip": "const url = paramStr ? `${baseUrl}?${paramStr}` : baseUrl; const response = await fetch(url); const payload = await response.json().catch(() => ({}));"
+ },
+ {
+  "file": "components/analytics/CashTransactionsView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "43,60,97,111,132,141,165,269,303,352,442,445,446,453,464,476,521,584,604,617,644,667,750,765",
+  "snip": "type: CashTransactionType; date: string; description?: string; };"
+ },
+ {
+  "file": "components/analytics/CashTransactionsView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "102",
+  "snip": "const saved = { ...transactionToSave, id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }; setLocalTransactions(prev => [saved, ...prev.filter"
+ },
+ {
+  "file": "components/analytics/ComparisonView.tsx",
+  "slug": "xss",
+  "lines": "257,340,343,359,363,401,406,414,423,424,425,427,428,429",
+  "snip": "return ( <div className=\"space-y-8 pb-20\"> {/* Comparison Mode Switcher */} <div className={`p-1.5 rounded-2xl border flex items-center w-fit gap-1 mx-auto ${is"
+ },
+ {
+  "file": "components/analytics/ComparisonView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "14,19,22,24,25,26,27,39,41,44,47,104,140,141,143,144,148,150,151,153,154,158,160,161,163,164,167,168,170,171,173,174,177,178,181,182,187,191,192,193,194,227,230,238,239,262,348,354,371,378,387,388,425,429",
+  "snip": "interface ComparisonViewProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/CurrencyStrengthMeter.tsx",
+  "slug": "xss",
+  "lines": "125,127,152",
+  "snip": "> <div className=\"w-12 flex flex-col items-center\"> <span className={`text-xs font-black ${hoveredCur === item.cur ? 'text-indigo-500' : ''}`}>{item.cur}</span>"
+ },
+ {
+  "file": "components/analytics/CurrencyStrengthMeter.tsx",
+  "slug": "insecure-crypto",
+  "lines": "8,12,25,30,91,103,113",
+  "snip": "interface CurrencyStrengthMeterProps { isDarkMode: boolean; trades: Trade[]; onInfoClick?: () => void; }"
+ },
+ {
+  "file": "components/analytics/DetailedStatistics.tsx",
+  "slug": "xss",
+  "lines": "27,28,29,83,86",
+  "snip": "const StatRow = ({ label, value, isNegative = false }: { label: string, value: any, isNegative?: boolean }) => ( <div className={`flex justify-between items-cen"
+ },
+ {
+  "file": "components/analytics/DetailedStatistics.tsx",
+  "slug": "insecure-crypto",
+  "lines": "37,40,41,42,43,51,52,53,54,60",
+  "snip": "const leftColumn = [ { label: 'Total P&L', value: formatCurrency(stats.netProfit), isNegative: stats.netProfit < 0 }, { label: 'Average Daily Volume', value: (s"
+ },
+ {
+  "file": "components/analytics/DrawdownOverTimeWidget.tsx",
+  "slug": "xss",
+  "lines": "71,84",
+  "snip": "return ( <div className={`py-4 px-0 sm:p-6 rounded-none sm:rounded-[24px] border flex flex-col min-h-[350px] relative h-full ${isDarkMode ? 'bg-black border-zin"
+ },
+ {
+  "file": "components/analytics/DrawdownOverTimeWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "5,8,15,20,22,26,32,88",
+  "snip": "import { Trade, UserProfile } from '../../types'; import { Tooltip } from '../ui/Tooltip'; import { sortTradesChronologically } from '../../lib/analyticsUtils';"
+ },
+ {
+  "file": "components/analytics/EquityCurveWidget.tsx",
+  "slug": "xss",
+  "lines": "34,104,118,129,140,149,155,263,269,276,278,283,307,311,312,320",
+  "snip": "<div className=\"h-[200px] flex items-end gap-1 px-2\"> {[...Array(24)].map((_, i) => ( <div key={i} className=\"flex-1 bg-black rounded-t\" style={{ height: `${15 "
+ },
+ {
+  "file": "components/analytics/EquityCurveWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,16,264,313",
+  "snip": "interface EquityCurveWidgetProps { trades: Trade[]; equityData: number[]; isDarkMode: boolean;"
+ },
+ {
+  "file": "components/analytics/EquityCurveWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "34",
+  "snip": "<div className=\"h-[200px] flex items-end gap-1 px-2\"> {[...Array(24)].map((_, i) => ( <div key={i} className=\"flex-1 bg-black rounded-t\" style={{ height: `${15 "
+ },
+ {
+  "file": "components/analytics/ExecutionPerformanceTable.tsx",
+  "slug": "xss",
+  "lines": "74,78,85,97,101,119,136,148",
+  "snip": "return ( <div className={`rounded-none sm:rounded-[24px] overflow-hidden border-y sm:border h-full ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-"
+ },
+ {
+  "file": "components/analytics/ExecutionPerformanceTable.tsx",
+  "slug": "insecure-crypto",
+  "lines": "9,12,18,36,68,69,70,71,78,86",
+  "snip": "import { Trade } from '../../types'; import { dataService } from '../../services/dataService'; import { sortTradesChronologically } from '../../lib/analyticsUti"
+ },
+ {
+  "file": "components/analytics/LargestWinLossWidget.tsx",
+  "slug": "xss",
+  "lines": "92,93,136,137",
+  "snip": "</div> <div className={clsx(\"h-2 rounded-full overflow-hidden flex\", isDarkMode ? \"bg-black\" : \"bg-slate-100\")}> <div className=\"h-full bg-emerald-500\" style={{"
+ },
+ {
+  "file": "components/analytics/LargestWinLossWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "14,20,22,23,24,29,30,38,66,83,87,110,127,131",
+  "snip": "interface LargestWinLossWidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/MomentumStreakWidget.tsx",
+  "slug": "xss",
+  "lines": "83",
+  "snip": "return ( <div className={`p-4 rounded-[20px] border h-full flex flex-col ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`"
+ },
+ {
+  "file": "components/analytics/MomentumStreakWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,12,14,18,19,25,26,27,80,86",
+  "snip": "interface MomentumStreakWidgetProps { trades: Trade[]; isDarkMode: boolean; onInfoClick?: () => void;"
+ },
+ {
+  "file": "components/analytics/OutcomeDistributionWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "16,23,39,40,41,43,44,45,65,69",
+  "snip": "interface OutcomeDistributionWidgetProps { trades: Trade[] isDarkMode: boolean onInfoClick?: () => void"
+ },
+ {
+  "file": "components/analytics/PairDistributionTreemapWidget.tsx",
+  "slug": "xss",
+  "lines": "123,135,141",
+  "snip": "<div className={`py-4 px-0 sm:p-8 rounded-none sm:rounded-[32px] border flex flex-col items-center min-h-[400px] h-full bg-[#000000] border-zinc-800 shadow-2xl`"
+ },
+ {
+  "file": "components/analytics/PairDistributionTreemapWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "20,70,97,99,111,175",
+  "snip": "} interface P { trades: Trade[]; isDarkMode: boolean; currencySymbol: string; onInfoClick?: () => void; } const calculateTreemap = (items: BoxData[], width: num"
+ },
+ {
+  "file": "components/analytics/PerformanceByPairWidget.tsx",
+  "slug": "xss",
+  "lines": "85,140,158,171",
+  "snip": ") : ( <div className=\"flex-1 flex relative overflow-hidden\"> <div className={`w-14 flex flex-col justify-between text-[10px] font-mono opacity-40 py-4 h-full z-"
+ },
+ {
+  "file": "components/analytics/PerformanceByPairWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,13,26,29,52",
+  "snip": "interface PerformanceByPairWidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/PerformanceBySession.tsx",
+  "slug": "insecure-crypto",
+  "lines": "6,11,20,29,38",
+  "snip": "interface PerformanceBySessionProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/PLByMindsetWidget.tsx",
+  "slug": "xss",
+  "lines": "110",
+  "snip": "<div className=\"text-[14px] font-semibold text-white mb-1\">{tooltip.label}</div> <div className=\"text-[13px] text-[#c0c5cc]\">{tooltip.count} trade{tooltip.count"
+ },
+ {
+  "file": "components/analytics/PLByMindsetWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "12,29,34,35,39,52",
+  "snip": "interface PLByMindsetWidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/PLByPlanAdherenceWidget.tsx",
+  "slug": "xss",
+  "lines": "115",
+  "snip": "<div className=\"text-[14px] font-semibold text-white mb-1\">{tooltip.label}</div> <div className=\"text-[13px] text-[#c0c5cc]\">{tooltip.count} trade{tooltip.count"
+ },
+ {
+  "file": "components/analytics/PLByPlanAdherenceWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "12,34,39,40,44,57",
+  "snip": "interface PLByPlanAdherenceWidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/PsychologicalSlipWidget.tsx",
+  "slug": "xss",
+  "lines": "51,156",
+  "snip": "return ( <div className={`p-8 rounded-[32px] border flex flex-col h-full min-h-[400px] ${isDarkMode ? 'bg-black border-zinc-800 shadow-2xl' : 'bg-white border-s"
+ },
+ {
+  "file": "components/analytics/PsychologicalSlipWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,13,17,20,30,61,136",
+  "snip": "interface PsychologicalSlipProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/ReportView.tsx",
+  "slug": "xss",
+  "lines": "46",
+  "snip": "return ( <div className=\"print-container print-section bg-white text-black p-8 sm:p-12 w-full max-w-[210mm] mx-auto hidden print:block overflow-visible\"> <style"
+ },
+ {
+  "file": "components/analytics/ReportView.tsx",
+  "slug": "xss",
+  "lines": "139,349,355",
+  "snip": "<div className=\"p-6 border-2 border-black rounded-3xl bg-emerald-50/30\"> <div className=\"text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-2\">Net "
+ },
+ {
+  "file": "components/analytics/ReportView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "22,32,42,121,126,157,158,165,175,180,194,197,207,209,217,221,231,233,241,243,251,253,259,263,267,284,286,294,296,304,308,315,317,334,344,349",
+  "snip": "interface ReportViewProps { trades: Trade[]; userProfile: UserProfile; monthStr: string;"
+ },
+ {
+  "file": "components/analytics/ReportView.tsx",
+  "slug": "dangerous-html",
+  "lines": "46",
+  "snip": "return ( <div className=\"print-container print-section bg-white text-black p-8 sm:p-12 w-full max-w-[210mm] mx-auto hidden print:block overflow-visible\"> <style"
+ },
+ {
+  "file": "components/analytics/RevenueMatrixWidget.tsx",
+  "slug": "xss",
+  "lines": "200,210,211,216,217,280",
+  "snip": "<div className=\"flex items-center gap-4 flex-wrap justify-end\"> {/* Net P&L Summary Pill */} <div className={`px-3 py-1.5 rounded-lg text-xs font-bold flex item"
+ },
+ {
+  "file": "components/analytics/RevenueMatrixWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,42,53,55,57,58,82,85,159,189,193",
+  "snip": "interface RevenueMatrixWidgetProps { trades?: Trade[]; isDarkMode: boolean; currencySymbol?: string;"
+ },
+ {
+  "file": "components/analytics/RobustnessLab.tsx",
+  "slug": "insecure-crypto",
+  "lines": "17,24,26,35,53,55,86,97,127,184,186,192,196,197,198,210",
+  "snip": "interface RobustnessLabProps { isDarkMode: boolean; trades: Trade[]; userProfile: UserProfile; isLocked?: boolean;"
+ },
+ {
+  "file": "components/analytics/RobustnessLab.tsx",
+  "slug": "insecure-crypto",
+  "lines": "33,36,37,38",
+  "snip": "// Create a \"hill\" shaped profit surface with some noise const dist = Math.sqrt(Math.pow(x - 30, 2) + Math.pow(y - 25, 2)); const multiplier = Math.max(0.2, 1 -"
+ },
+ {
+  "file": "components/analytics/SessionWidgets.tsx",
+  "slug": "auth-bypass",
+  "lines": "48",
+  "snip": "const getTradeSession = (trade: Trade) => { const session = (trade.session && trade.session !== 'Session' ? trade.session : '') || ''; if (session) return sessi"
+ },
+ {
+  "file": "components/analytics/SessionWidgets.tsx",
+  "slug": "xss",
+  "lines": "171,320,363",
+  "snip": "<Bar dataKey=\"pnl\" radius={[4, 4, 0, 0]}> {data.map((entry, index) => ( <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#10B981' : '#EF4444'} /> ))} </Bar>"
+ },
+ {
+  "file": "components/analytics/SessionWidgets.tsx",
+  "slug": "insecure-crypto",
+  "lines": "31,46,98,107,108,126,143,192,201,208,229,237,264,284,312,358,364,365,375,382,395,402,415,416,443,457,463,469,471,496,525,534,549",
+  "snip": "interface WidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/StrategyPerformancePieChart.tsx",
+  "slug": "xss",
+  "lines": "163,170,174,175,181",
+  "snip": "return ( <div className={`p-4 rounded-xl border shadow-2xl ${isDarkMode ? 'bg-[#000000] border-zinc-800 text-zinc-100' : 'bg-white border-slate-200 text-slate-9"
+ },
+ {
+  "file": "components/analytics/StrategyPerformancePieChart.tsx",
+  "slug": "insecure-crypto",
+  "lines": "12,27,33,39,44,48,62,66,79,82,94,97,103,116,170,171,197,213,239,266,273",
+  "snip": "Card, CardContent, CardDescription, CardHeader, CardTitle,"
+ },
+ {
+  "file": "components/analytics/SymbolPerformanceWidget.tsx",
+  "slug": "xss",
+  "lines": "47,49,65,70",
+  "snip": "return ( <div className={`py-4 px-0 sm:p-6 rounded-none sm:rounded-[24px] border h-full ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200 s"
+ },
+ {
+  "file": "components/analytics/SymbolPerformanceWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,13,15,17,37,70,71",
+  "snip": "interface SymbolPerformanceWidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/TiltScoreWidget.tsx",
+  "slug": "xss",
+  "lines": "43,46,49,55,56,57,89,91,95",
+  "snip": "return ( <div className={`rounded-[18px] border p-7 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white shadow-sm'}`}> <div className=\"flex i"
+ },
+ {
+  "file": "components/analytics/TiltScoreWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "6,11,13,37",
+  "snip": "interface TiltScoreWidgetProps { trades: Trade[]; isDarkMode: boolean; onInfoClick?: () => void;"
+ },
+ {
+  "file": "components/analytics/TimeAnalysisMatrixWidget.tsx",
+  "slug": "xss",
+  "lines": "122,141,145,196,224",
+  "snip": "return ( <div className={`p-6 rounded-3xl border flex flex-col h-full overflow-visible relative ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-sla"
+ },
+ {
+  "file": "components/analytics/TimeAnalysisMatrixWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "10,16,31,43,52,59,75,135,139,151,222,231,238,245,252,277",
+  "snip": "interface TimeAnalysisMatrixProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/TradeGradeDistributionWidget.tsx",
+  "slug": "xss",
+  "lines": "30",
+  "snip": "return ( <div className={`p-6 rounded-[32px] border flex flex-col h-full ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200 shadow-sm'}`}> <"
+ },
+ {
+  "file": "components/analytics/TradeGradeDistributionWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,12,15,27,33,48,60,61",
+  "snip": "interface TradeGradeDistributionProps { trades: Trade[]; isDarkMode: boolean; onInfoClick?: () => void;"
+ },
+ {
+  "file": "components/analytics/TradingMistakesBarChartWidget.tsx",
+  "slug": "xss",
+  "lines": "150,178,197,204,208,212,224",
+  "snip": "return ( <div className={`rounded-2xl border p-4 shadow-2xl backdrop-blur ${isDarkMode ? 'bg-[#111114] border-zinc-800 text-zinc-100' : 'bg-white border-slate-2"
+ },
+ {
+  "file": "components/analytics/TradingMistakesBarChartWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "11,24,52,64,65,66,80,86,99,115,132,159,188,190,193,197,205,209,213,216,229,231,287,300,318",
+  "snip": "Card, CardContent, CardDescription, CardHeader, CardTitle,"
+ },
+ {
+  "file": "components/Analytics.tsx",
+  "slug": "xss",
+  "lines": "585,587,591,633,642,651,660,676,746,755,799,803,806",
+  "snip": "className={`relative overflow-hidden rounded-[8px] border px-4 py-3.5 ${toneClasses.shell} shadow-[0_1px_0_rgba(255,255,255,0.03)]`} > <div className={`absolute"
+ },
+ {
+  "file": "components/Analytics.tsx",
+  "slug": "insecure-crypto",
+  "lines": "72,262,274,275,276,277,279,309,310,314,320,323,327,353,364,386,388,400,403,404,411,416,420,421,422,436,449,454,464,624,625,634,636,643,652,654,661,663,668,669,670,671,672,673,674,684,685,686,717,728,747,749,756,767,811,824,827,830,841,844,848,881,893,906,912",
+  "snip": "import { useLocalStorage } from '../hooks/useLocalStorage'; import { calculateStats } from '../lib/statsUtils'; import { getCompletedTrades, sortTradesChronolog"
+ },
+ {
+  "file": "components/Auth.tsx",
+  "slug": "xss",
+  "lines": "68,102,115,118,177",
+  "snip": "return ( <div className={`flex min-h-dvh w-full ${bgColor} ${textColor} transition-colors duration-500`}> {/* Left Panel - Visuals */}"
+ },
+ {
+  "file": "components/Auth.tsx",
+  "slug": "insecure-crypto",
+  "lines": "117,147,204",
+  "snip": "<div className={`w-full border-t ${borderColor}`}></div> </div> <div className=\"relative flex justify-center text-[10px] font-black uppercase tracking-widest\"> "
+ },
+ {
+  "file": "components/Auth.tsx",
+  "slug": "secret-in-log",
+  "lines": "153",
+  "snip": "type={showPassword ? \"text\" : \"password\"} value={password} onChange={(e) => setPassword(e.target.value)}"
+ },
+ {
+  "file": "components/backtest/DrawingToolbar.tsx",
+  "slug": "xss",
+  "lines": "138,155,172,189,203,227,241,260,269,270,277,292,302,315",
+  "snip": "return ( <div className={`absolute z-30 drawing-toolbar-root transition-all duration-200 ease-out`} style={style}> <div className={`flex items-center gap-1 roun"
+ },
+ {
+  "file": "components/backtest/OptimizationHeatmap.tsx",
+  "slug": "xss",
+  "lines": "60,67,78,80,163",
+  "snip": "return ( <div className={`w-full h-full flex flex-col p-6 rounded-[32px] border transition-all duration-500 overflow-hidden ${ isDarkMode ? 'bg-black border-zin"
+ },
+ {
+  "file": "components/backtest/OptimizationHeatmap.tsx",
+  "slug": "insecure-crypto",
+  "lines": "79,123,135,148,151,160",
+  "snip": "<div className=\"flex items-center gap-4\"> <div className={`px-4 py-2 rounded-2xl border ${isDarkMode ? 'bg-black/50 border-zinc-800' : 'bg-slate-50 border-slate"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "xss",
+  "lines": "1437,1438,1449,1454,1461,1462,1476,1477,1480,1502,1521,1530,1544,1575,1579,1590,1652,1656,1657,1658,1660,1675,1679,1680,1681,1683,1693,1697,1698,1699,1720,1757,1765,1768,1943,1959,1986,1994,2019,2022,2024,2025,2026,2027,2028,2037,2038,2039,2040,2042,2056,2061,2063,2072,2082,2083,2089,2102,2105,2107,2110,2124,2130,2133,2141,2149,2155,2159,2169,2180,2199,2213,2215,2219,2221,2223",
+  "snip": "return ( <div className={`w-full h-full flex flex-col overflow-hidden font-sans ${isDarkMode ? 'bg-black text-zinc-200' : 'bg-white text-slate-900'}`} onMouseUp"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "ssrf",
+  "lines": "152",
+  "snip": "try { // no-cors avoids CSP blocking localhost; opaque response = server is reachable await fetch(`${MT5_BRIDGE_URL}/ping`, { mode: 'no-cors' }); if (cancelled)"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "insecure-crypto",
+  "lines": "255,385,401,403,439,441,455,456,586,588,592,600,605,624,634,763,765,767,788,1423,1465,1471,1481,1511,1549,1556,1574,1629,1658,1660,1681,1683,1699,1710,1727,1778,1810,1829,1849,1880,1926,1951,1990,2010,2023,2033,2038,2047,2055,2071",
+  "snip": "const [toolbarOrientation, setToolbarOrientation] = useLocalStorage<'horizontal' | 'vertical'>('jfx_backtest_toolbar_orientation', 'horizontal'); // Replay Mode"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "insecure-crypto",
+  "lines": "303,304,305,306",
+  "snip": "paramXValue: x, paramYValue: y, equity: Math.max(20000, baseEquity + (Math.random() * 5000)), drawdown: Math.min(45, (dist / 2) + (Math.random() * 5)), winrate:"
+ },
+ {
+  "file": "components/BetaSplash.tsx",
+  "slug": "insecure-crypto",
+  "lines": "77",
+  "snip": "<button onClick={() => handleFinalize()} className=\"text-[13px] font-bold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-widest cursor-p"
+ },
+ {
+  "file": "components/ChartGrid.tsx",
+  "slug": "xss",
+  "lines": "370,373,375,398,415,419,420,421,422,423,424,427,463,465,467,468,469,541,551,552,556,557,581,585,593",
+  "snip": "return ( <div className={`w-full h-full flex flex-col relative ${isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-slate-100 text-slate-900'}`}> <div className=\"f"
+ },
+ {
+  "file": "components/ChartGrid.tsx",
+  "slug": "insecure-crypto",
+  "lines": "254,361,362,590",
+  "snip": "e.stopPropagation(); setStarredSymbols(prev => prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]"
+ },
+ {
+  "file": "components/ChecklistModal.tsx",
+  "slug": "xss",
+  "lines": "57,78,95,111,112,121,140",
+  "snip": "return ( <div className=\"fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4\"> <div className={`w-full max-w-md rounded-2xl "
+ },
+ {
+  "file": "components/ConfirmationModal.tsx",
+  "slug": "xss",
+  "lines": "149",
+  "snip": "<div className=\"p-5 sm:p-6\"> <div className=\"flex flex-col gap-4 sm:flex-row sm:items-start\"> <div className={`w-11 h-11 shrink-0 rounded-xl flex items-center j"
+ },
+ {
+  "file": "components/ConfirmationModal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,20,124,138,157,158",
+  "snip": "isOpen: boolean; title: string; description: string; confirmText?: string; cancelText?: string;"
+ },
+ {
+  "file": "components/CustomChart.tsx",
+  "slug": "insecure-crypto",
+  "lines": "8,27,787",
+  "snip": "interface CustomChartProps { data: Candle[]; trades: Trade[]; drawings: Drawing[]; isDarkMode: boolean;"
+ },
+ {
+  "file": "components/DailyQuote.tsx",
+  "slug": "xss",
+  "lines": "14,20,24,32,37",
+  "snip": "return ( <div className={`w-full p-6 rounded-2xl border mb-8 flex flex-col md:flex-row items-center gap-6 relative overflow-hidden transition-all ${ isDarkMode "
+ },
+ {
+  "file": "components/DailyQuote.tsx",
+  "slug": "insecure-crypto",
+  "lines": "37",
+  "snip": "\"{quote.text}\" </p> <p className={`text-xs font-black uppercase tracking-widest opacity-40 ${ isDarkMode ? 'text-zinc-500' : 'text-slate-500' }`}>"
+ },
+ {
+  "file": "components/Dashboard.tsx",
+  "slug": "xss",
+  "lines": "81,89,93,106,113,140,142,146,152,154,312,354,368,379,387,410,414,415,420,425,431,435,439,495,591,604,621,658,706,711,720,754,759,768",
+  "snip": "<div className=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6\"> {[1, 2, 3, 4].map(i => ( <div key={i} className={`h-32 p-6 rounded-2xl border ${isDarkMod"
+ },
+ {
+  "file": "components/Dashboard.tsx",
+  "slug": "ssrf",
+  "lines": "219",
+  "snip": "const to = new Date(now.getTime() + 14 * 86400000).toISOString().split('T')[0]; // 2 weeks ahead const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone"
+ },
+ {
+  "file": "components/Dashboard.tsx",
+  "slug": "insecure-crypto",
+  "lines": "32,62,114,420,425,432,436,440,544,545,546,549,560,562,576,582,646,649,650,651,665,670,683,697,700,703,714,723,747,759,763,769,776,794,797,807,810,826,827,831,833,834",
+  "snip": "import { Tooltip } from './ui/Tooltip'; import { getSASTDateTime } from '../lib/timeUtils'; import { sortTradesChronologically } from '../lib/analyticsUtils'; i"
+ },
+ {
+  "file": "components/DiagramEditor.tsx",
+  "slug": "xss",
+  "lines": "488",
+  "snip": "// Critical: Check if ref STILL exists after async operation to prevent \"Cannot set properties of null\" if (outputRef.current) { outputRef.current.innerHTML = s"
+ },
+ {
+  "file": "components/DiagramEditor.tsx",
+  "slug": "xss",
+  "lines": "626,641,678,700,703,741,765,794,795,822,877,880,888,925,938,943,962",
+  "snip": "return ( <div className={`w-full h-full flex flex-col p-6 overflow-hidden relative ${isDarkMode ? 'bg-black text-zinc-200' : 'bg-slate-50 text-slate-900'}`}> <h"
+ },
+ {
+  "file": "components/DiagramEditor.tsx",
+  "slug": "insecure-crypto",
+  "lines": "25,35,52,67,80,91,102,116,128,142,162,181,198,217,236,254,268,278,294,310,332,347,515,545,608,618,619,620,726,930,932,939",
+  "snip": "name: string; category: 'Flow' | 'Mindmap' | 'Sequence' | 'Routine' | 'Structure'; description: string; code: string; }"
+ },
+ {
+  "file": "components/DiagramEditor.tsx",
+  "slug": "dangerous-html",
+  "lines": "488",
+  "snip": "// Critical: Check if ref STILL exists after async operation to prevent \"Cannot set properties of null\" if (outputRef.current) { outputRef.current.innerHTML = s"
+ },
+ {
+  "file": "components/DiagramEditor.tsx",
+  "slug": "secret-in-fallback",
+  "lines": "531",
+  "snip": "try { const apiKey = process.env.API_KEY || ''; const genAI = new GoogleGenerativeAI(apiKey); const model = genAI.getGenerativeModel({"
+ },
+ {
+  "file": "components/DiagramEditor.tsx",
+  "slug": "env-var-as-bool",
+  "lines": "531",
+  "snip": "try { const apiKey = process.env.API_KEY || ''; const genAI = new GoogleGenerativeAI(apiKey); const model = genAI.getGenerativeModel({"
+ },
+ {
+  "file": "components/DiagramEditor.tsx",
+  "slug": "process-env-access",
+  "lines": "531",
+  "snip": "try { const apiKey = process.env.API_KEY || ''; const genAI = new GoogleGenerativeAI(apiKey);"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "xss",
+  "lines": "638,666,717,718,726,733,740,748,753,762,799,807,813,851,853,1014,1037,1047,1055,1069,1073,1074,1082,1084,1094,1096,1114,1115,1128,1138,1139,1147,1152,1171,1172,1176,1178,1190,1191,1781,1783,1995,2067,2075,2138",
+  "snip": "<> <span className=\"px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 text-[9px] font-black tracking-widest uppercase border border-indigo-500/20\">Headles"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "ssrf",
+  "lines": "404",
+  "snip": "const fetchFromSocketBridge = async (controller: AbortController) => { const [accountRes, positionsRes, historyRes] = await Promise.all([ fetch(`${EA_BRIDGE_URL"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "ssrf",
+  "lines": "405",
+  "snip": "const [accountRes, positionsRes, historyRes] = await Promise.all([ fetch(`${EA_BRIDGE_URL}/api/account`, { signal: controller.signal }), fetch(`${EA_BRIDGE_URL}"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "ssrf",
+  "lines": "406",
+  "snip": "fetch(`${EA_BRIDGE_URL}/api/account`, { signal: controller.signal }), fetch(`${EA_BRIDGE_URL}/api/positions`, { signal: controller.signal }), fetch(`${EA_BRIDGE"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "insecure-crypto",
+  "lines": "30,31,35,79,80,105,110,131,156,160,165,168,178,195,217,231,236,237,238,296,300,360,364,416,434,491,493,499,503,505,511,634,637,638,655,746,751,770,774,800,803,804,820,821,822,826,830,834,842,843,844,857,858,860,1010,1262,1265,1347,1634,1641,1766,1937,2064,2069",
+  "snip": "onEditTrade?: (trade: Trade) => void; onAddOffline?: (trade: Trade) => void; onImportTrades?: (trades: Trade[]) => Promise<void>; trades: Trade[]; userId: strin"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "insecure-crypto",
+  "lines": "965",
+  "snip": "useEffect(() => { if (!syncKey) { const newKey = `JFX-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`; s"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "jwt-handling",
+  "lines": "1575,1585",
+  "snip": "useEffect(() => { import('../services/ctraderService').then(({ isAuthenticated, refreshToken, getCtidProfile, logout }) => { if (isAuthenticated()) { setAuthSta"
+ },
+ {
+  "file": "components/ErrorBoundary.tsx",
+  "slug": "xss",
+  "lines": "47,48,49,54,61",
+  "snip": "return ( <div className={`fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center px-4 py-8 overflow-y-auto ${isDarkMode ? 'bg-[#000000] text-"
+ },
+ {
+  "file": "components/JFXChart.tsx",
+  "slug": "xss",
+  "lines": "75,90",
+  "snip": "/> ) : ( <div className={`w-full h-full flex flex-col items-center justify-center gap-4 p-6 text-center ${isDarkMode ? 'bg-black' : 'bg-white'}`}> {isFetching ?"
+ },
+ {
+  "file": "components/JFXChart.tsx",
+  "slug": "insecure-crypto",
+  "lines": "70,79,88,91,102",
+  "snip": "<CustomChart data={allData} trades={[]} // ChartGrid doesn't show backtest trades drawings={[]} // Dashboard drawings could be added later isDarkMode={isDarkMod"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "xss",
+  "lines": "876,931",
+  "snip": "<div className=\"text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none\" dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trade.notes) }} /> "
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "xss",
+  "lines": "135,137,138,142,145,210,212,213,214,215,217,218,219,228,235,242,245,248,252,255,261,263,270,272,275,279,287,291,297,299,300,330,352,354,359,362,689,690,693,698,702,720,740,752,765,773,836,891,945,946,951,962,977,1187,1190,1205,1235,1259,1267,1272,1320,1413,1418,1454,1465,1478,1498,1516,1524,1531,1572,1579,1595",
+  "snip": "return ( <div onClick={onClick} className={`p-5 rounded-2xl border cursor-pointer transition-all hover:scale-[1.02] hover:shadow-xl ${isDarkMode ? 'bg-[#000000]"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "17,19,20,32,40,41,72,73,82,109,115,121,122,124,138,152,166,170,171,172,173,174,177,183,184,185,186,187,188,189,197,200,239,242,279,332,333,334,337,344,357,363,375,384,454,456,457,459,460,464,466,469,471,474,480,481,483,485,486,489,490,491,500,502,507,511,517,524,533,542,550,551,554,558,566,571,573,575,581,586,588,589,596,606,607,614,621,629,702,703,741,749,766,775,783,838,861,867,884,893,916,922,946,965,966,1230,1236,1260,1263,1406,1415,1421,1438,1441,1442,1443,1450,1452,1488,1491,1492,1493,1494,1506,1510,1513,1514,1516,1517,1520,1523,1528,1534,1540,1556,1577,1580,1584,1596,1601,1606",
+  "snip": "interface JournalProps { isDarkMode: boolean; trades: Trade[]; onUpdateTrade: (trade: Trade) => void; onBatchUpdateTrades: (trades: Trade[]) => Promise<boolean>"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "90",
+  "snip": "} return `setup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; };"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "dangerous-html",
+  "lines": "876",
+  "snip": ") : trade.notes ? ( <div className=\"text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none\" dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "dangerous-html",
+  "lines": "931",
+  "snip": ") : trade.exitComment ? ( <div className=\"text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none\" dangerouslySetInnerHTML={{ __html: sanitizeRichTe"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "crypto-usage",
+  "lines": "87",
+  "snip": "const buildSetupId = () => { if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') { return `setup-${crypto.randomUUID()}`; }"
+ },
+ {
+  "file": "components/log-trade/TradeFormStep1.tsx",
+  "slug": "xss",
+  "lines": "190,211",
+  "snip": "userProfile={userProfile} fallback={ <div className={`text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}> Voice notes are available on Premium. </div>"
+ },
+ {
+  "file": "components/log-trade/TradeFormStep1.tsx",
+  "slug": "insecure-crypto",
+  "lines": "18,27,84,123,124,134,168,172,183,200,211,227,234,240",
+  "snip": "isDarkMode: boolean; userProfile: any; isDesktopBridgeTrade?: boolean; }"
+ },
+ {
+  "file": "components/log-trade/TradeFormStep2.tsx",
+  "slug": "insecure-crypto",
+  "lines": "10,24,52,61,65,73,77,107,117,121,122,123,149,162,166,177,178,179",
+  "snip": "handleInputChange: (field: string, value: any) => void; isDarkMode: boolean; isDesktopBridgeTrade?: boolean; }"
+ },
+ {
+  "file": "components/log-trade/TradeFormStep3.tsx",
+  "slug": "insecure-crypto",
+  "lines": "43,62,82,106,109,120",
+  "snip": "<div className=\"space-y-2\"> <div className=\"flex items-center justify-between\"> <label className=\"block text-[11px] font-bold uppercase tracking-widest text-zin"
+ },
+ {
+  "file": "components/LogTrade.tsx",
+  "slug": "xss",
+  "lines": "63,66,71,313,344",
+  "snip": "</div> <div className=\"hidden sm:block ml-3 flex-1\"> <p className={`text-sm font-bold ${isActive ? 'text-[#FF4F01]' : isDarkMode ? 'text-zinc-300' : 'text-slate"
+ },
+ {
+  "file": "components/LogTrade.tsx",
+  "slug": "insecure-crypto",
+  "lines": "26,31,36,37,38,67,79,93,99,160,195,205,206,209,210,212,257,279,317,318,319,327,356",
+  "snip": "isDarkMode: boolean; onSave: (trade: Trade) => void; onBatchSave?: (trades: Trade[]) => Promise<void>; initialTrade?: Trade; onCancel?: () => void;"
+ },
+ {
+  "file": "components/MetaTraderTerminal.tsx",
+  "slug": "xss",
+  "lines": "68",
+  "snip": "const timer = setTimeout(() => { setIsLoading(true); if (singleContainerRef.current) singleContainerRef.current.innerHTML = ''; const ok = initTerminal('mt-cont"
+ },
+ {
+  "file": "components/MetaTraderTerminal.tsx",
+  "slug": "xss",
+  "lines": "84",
+  "snip": "<div className=\"flex flex-col h-full w-full bg-transparent overflow-hidden\"> {/* Header / Toolbar */} <div className={`flex items-center justify-between px-6 py"
+ },
+ {
+  "file": "components/MetaTraderTerminal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "91,92,117",
+  "snip": "</div> <div> <h2 className=\"text-sm font-black uppercase tracking-widest\">Web Terminal</h2> <p className=\"text-[10px] font-bold opacity-40 uppercase tracking-wi"
+ },
+ {
+  "file": "components/MetaTraderTerminal.tsx",
+  "slug": "dangerous-html",
+  "lines": "68",
+  "snip": "const timer = setTimeout(() => { setIsLoading(true); if (singleContainerRef.current) singleContainerRef.current.innerHTML = ''; const ok = initTerminal('mt-cont"
+ },
+ {
+  "file": "components/notes/CreateArea.tsx",
+  "slug": "xss",
+  "lines": "66,352,364",
+  "snip": "return ( <div ref={setNodeRef} style={style} className={`flex items-center group px-4 py-1 ${isDragging ? 'opacity-50' : ''}`}> <div {...attributes} {...listene"
+ },
+ {
+  "file": "components/notes/CreateArea.tsx",
+  "slug": "insecure-crypto",
+  "lines": "39",
+  "snip": "} const genId = () => Math.random().toString(36).slice(2, 9); const COLUMN_WIDTH_INC = 96;"
+ },
+ {
+  "file": "components/notes/NoteCard.tsx",
+  "slug": "xss",
+  "lines": "57,84,142,160",
+  "snip": "{item.checked ? <CheckSquare className=\"w-3.5 h-3.5\" /> : <Square className=\"w-3.5 h-3.5\" />} </div> <span className={`text-[0.8rem] leading-tight break-words l"
+ },
+ {
+  "file": "components/notes/NoteEditor.tsx",
+  "slug": "xss",
+  "lines": "74,505,542,604,817,818",
+  "snip": "return ( <div ref={setNodeRef} style={style} className={`flex items-center group py-1 ${isDragging ? 'opacity-50' : ''}`}> {!isTrashed && ( <div {...attributes}"
+ },
+ {
+  "file": "components/notes/NoteEditor.tsx",
+  "slug": "insecure-crypto",
+  "lines": "206,329,590",
+  "snip": "const label = value.trim(); if (!label) return; if (labels.includes(label)) { setLabelInput(''); return;"
+ },
+ {
+  "file": "components/notes/NoteEditor.tsx",
+  "slug": "insecure-crypto",
+  "lines": "45",
+  "snip": "} const genId = () => Math.random().toString(36).slice(2, 9); const COLUMN_WIDTH_INC = 96;"
+ },
+ {
+  "file": "components/notes/Sidebar.tsx",
+  "slug": "xss",
+  "lines": "36",
+  "snip": "title={!isOpen ? item.label : ''} > <item.icon className={`w-6 h-6 shrink-0 transition-colors ${activeSection === item.id ? 'fill-current' : ''}`} /> <span clas"
+ },
+ {
+  "file": "components/Notes.tsx",
+  "slug": "xss",
+  "lines": "290,312,317",
+  "snip": "return ( <div className={`flex flex-col h-full w-full font-sans overflow-hidden ${isResizing ? 'cursor-nwse-resize select-none' : ''}`} style={{ backgroundColor"
+ },
+ {
+  "file": "components/Notes.tsx",
+  "slug": "insecure-crypto",
+  "lines": "213,214,215,218,239,284,317,366,372,381,389,403,419,451,489",
+  "snip": "const filteredNotes = notes.filter(note => { const matchesSearch = note.title.toLowerCase().includes(searchQuery.toLowerCase()) || note.content.toLowerCase().in"
+ },
+ {
+  "file": "components/Onboarding.tsx",
+  "slug": "xss",
+  "lines": "167,198,227,274,277,295,307,361,405,407,416,439,465,490,546,553",
+  "snip": "return ( <div className={`fixed inset-0 z-[200] flex flex-col items-center justify-start overflow-y-auto ${containerBg} ${textColor} font-sans`}> <div className"
+ },
+ {
+  "file": "components/Onboarding.tsx",
+  "slug": "insecure-crypto",
+  "lines": "184,187,278,290,322,339,348,356,362,378,386,389,423,444,449,470,472,475,533,549,553,612",
+  "snip": "{step === 7 && ( <div className=\"flex gap-2\"> <span className=\"border border-[#FF4F01] text-[10px] font-bold px-2 py-1 rounded text-[#FF4F01] uppercase tracking"
+ },
+ {
+  "file": "components/OpenPositions.tsx",
+  "slug": "xss",
+  "lines": "40,41,45,46,85,94,106",
+  "snip": "if (!positions || positions.length === 0) { return ( <div className={`h-full flex flex-col items-center justify-center p-8 text-center rounded-[32px] border-2 b"
+ },
+ {
+  "file": "components/OpenPositions.tsx",
+  "slug": "insecure-crypto",
+  "lines": "45,47,57,94,109,116,120,124",
+  "snip": "</div> <div className=\"space-y-2\"> <h3 className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-400' : 'text-zinc-600'}`}>No Active Po"
+ },
+ {
+  "file": "components/Playbook.tsx",
+  "slug": "xss",
+  "lines": "24,30,31,36,48,53,57,61,323,326,331,335,342,350,361,388,392,393,407,416,443,445,449,452,457,460,464,483,507,525,535,555,570,584,607,623,633,654,675,686",
+  "snip": "const Badge = ({ children, className }: { children?: React.ReactNode, className?: string }) => ( <span className={`px-2 py-0.5 rounded text-[10px] font-bold upp"
+ },
+ {
+  "file": "components/Playbook.tsx",
+  "slug": "ssrf",
+  "lines": "235",
+  "snip": "const mainImage = formData.imageUrls && formData.imageUrls.length > 0 ? formData.imageUrls[0] : `https://picsum.photos/seed/${entryId}/800/600`; const newEntry:"
+ },
+ {
+  "file": "components/Playbook.tsx",
+  "slug": "insecure-crypto",
+  "lines": "61,88,96,123,124,135,183,242,282,296,331,445,552,559,569,641,687,704",
+  "snip": "<div className=\"flex-1\"> <div className=\"flex justify-between items-start\"> <span className={`text-sm font-medium leading-tight ${isDarkMode ? 'text-zinc-200' :"
+ },
+ {
+  "file": "components/QuickLogModal.tsx",
+  "slug": "xss",
+  "lines": "122",
+  "snip": "<div className=\"col-span-2\"> <label className=\"block text-[10px] font-black uppercase tracking-widest mb-1.5 opacity-40\">Direction</label> <div className={`p-1 "
+ },
+ {
+  "file": "components/QuickLogModal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "91,121,147,161,177,190",
+  "snip": "<div className=\"grid grid-cols-2 gap-4\"> <div className=\"col-span-1\"> <label className=\"block text-[10px] font-black uppercase tracking-widest mb-1.5 opacity-40"
+ },
+ {
+  "file": "components/RichTextEditor.tsx",
+  "slug": "xss",
+  "lines": "220",
+  "snip": "}); const { svg } = await mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, code.replace(/```mermaid/g, '').replace(/```/g, '').trim()); cont"
+ },
+ {
+  "file": "components/RichTextEditor.tsx",
+  "slug": "xss",
+  "lines": "533",
+  "snip": "> {showToolbar && ( <div className={`flex flex-wrap items-center gap-0.5 p-1 border-b transition-colors rounded-t-xl ${isDarkMode ? 'border-[#27272a] bg-black/5"
+ },
+ {
+  "file": "components/RichTextEditor.tsx",
+  "slug": "insecure-crypto",
+  "lines": "235,345,351,355,356,1085",
+  "snip": "{error && <div className=\"absolute top-2 left-2 text-[10px] text-rose-500 font-bold uppercase\">{error}</div>} <div ref={containerRef} className=\"max-w-full over"
+ },
+ {
+  "file": "components/RichTextEditor.tsx",
+  "slug": "insecure-crypto",
+  "lines": "219",
+  "snip": "fontFamily: 'Inter', }); const { svg } = await mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, code.replace(/```mermaid/g, '').replace(/```"
+ },
+ {
+  "file": "components/RichTextEditor.tsx",
+  "slug": "dangerous-html",
+  "lines": "220",
+  "snip": "fontFamily: 'Inter', }); const { svg } = await mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, code.replace(/```mermaid/g, '').replace(/```"
+ },
+ {
+  "file": "components/Rules.tsx",
+  "slug": "xss",
+  "lines": "75,78,86,93,106,131,137,184,185,205,213,239",
+  "snip": "return ( <div className={`w-full h-full overflow-hidden flex flex-col ${isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-slate-50 text-slate-900'}`}> {/* Hero He"
+ },
+ {
+  "file": "components/Rules.tsx",
+  "slug": "insecure-crypto",
+  "lines": "91,179,183,186",
+  "snip": "</div> <div className={`hidden md:flex flex-col items-end`}> <div className=\"text-xs font-bold uppercase tracking-widest opacity-50 mb-1\">Integrity Score</div> "
+ },
+ {
+  "file": "components/Select.tsx",
+  "slug": "xss",
+  "lines": "23,58,77,83,112",
+  "snip": "const Label = ({ children, className = \"\", id }: { children?: React.ReactNode, className?: string, id?: string }) => ( <label id={id} className={`block text-[11"
+ },
+ {
+  "file": "components/Select.tsx",
+  "slug": "insecure-crypto",
+  "lines": "23",
+  "snip": "const Label = ({ children, className = \"\", id }: { children?: React.ReactNode, className?: string, id?: string }) => ( <label id={id} className={`block text-[11"
+ },
+ {
+  "file": "components/Select.tsx",
+  "slug": "insecure-crypto",
+  "lines": "42",
+  "snip": "const [isOpen, setIsOpen] = useState(false); const containerRef = useRef<HTMLDivElement>(null); const labelId = useRef(`select-label-${Math.random().toString(36"
+ },
+ {
+  "file": "components/SessionClock.tsx",
+  "slug": "xss",
+  "lines": "98,110,135,147,150,156,167,174",
+  "snip": "return ( <div className={`w-full p-6 rounded-2xl border mb-6 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-6 relative ${isDarkMode ?"
+ },
+ {
+  "file": "components/SessionClock.tsx",
+  "slug": "insecure-crypto",
+  "lines": "40,95,111,120,142",
+  "snip": "const toggleSession = (id: string) => { if (visibleSessions.includes(id)) { if (visibleSessions.length > 1) { setVisibleSessions(visibleSessions.filter(s => s !"
+ },
+ {
+  "file": "components/Settings.tsx",
+  "slug": "xss",
+  "lines": "239,240,265,267,272,278,282,286,290,299,320,325,331,351,381,390,424,479,513,533,591,612,616,633,701,729,754,774,819,862,867,872,916,970,987,1052,1071,1089,1146,1210,1246,1248",
+  "snip": "const renderPlanProgress = (value: number, limit: number) => ( <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDarkMode ? 'bg-white/[0.08]' : 'bg"
+ },
+ {
+  "file": "components/Settings.tsx",
+  "slug": "insecure-crypto",
+  "lines": "69,72,79,80,81,82,83,84,85,94,95,96,100,113,116,287,288,325,382,486,681,784,785,808,863,864,865,887,888,892,893,897,898,921,1025,1043",
+  "snip": "onUpdateProfile: (profile: UserProfile) => Promise<void>; onLogout: () => void; tradesThisMonth?: number; totalNotes?: number; totalImages?: number;"
+ },
+ {
+  "file": "components/Settings.tsx",
+  "slug": "insecure-crypto",
+  "lines": "656",
+  "snip": "<button onClick={() => { const newKey = `JFX-${Math.floor(1000 + Math.random() * 9000)}-${Math.random() .toString(36) .substring(2, 6)"
+ },
+ {
+  "file": "components/Sidebar.tsx",
+  "slug": "xss",
+  "lines": "221,244,283,311",
+  "snip": "{showNotifications && ( <> <div className={`p-5 border-b flex items-center justify-between ${isDarkMode ? 'border-zinc-800 bg-black/50' : 'border-slate-100 bg-s"
+ },
+ {
+  "file": "components/Sidebar.tsx",
+  "slug": "insecure-crypto",
+  "lines": "44,59,74,127,128,140,142,143,144,145,146,147,161,174,223,224,229,270,311,332,351,365,373",
+  "snip": "onLogout: () => void; userProfile?: UserProfile | null; trades?: Trade[]; eaSession?: EASession | null; offlineQueueCount?: number;"
+ },
+ {
+  "file": "components/TradingViewWidget.tsx",
+  "slug": "xss",
+  "lines": "49",
+  "snip": "if (!needsReinit && !error) return; container.innerHTML = ''; setError(null);"
+ },
+ {
+  "file": "components/TradingViewWidget.tsx",
+  "slug": "xss",
+  "lines": "151,155",
+  "snip": "/> {error && ( <div className={`absolute inset-0 flex flex-col items-center justify-center p-6 text-center backdrop-blur-sm z-10 ${ theme === 'dark' ? 'bg-black"
+ },
+ {
+  "file": "components/TradingViewWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "104,105,165",
+  "snip": "\"popup_height\": \"650\", \"popup_width\": \"1000\", \"studies_overrides\": {}, \"overrides\": { \"paneProperties.backgroundType\": \"solid\","
+ },
+ {
+  "file": "components/TradingViewWidget.tsx",
+  "slug": "dangerous-html",
+  "lines": "49",
+  "snip": "if (!needsReinit && !error) return; container.innerHTML = ''; setError(null); const widgetId = `tradingview_${chartId.replace(/[^a-zA-Z0-9]/g, '_')}`; const wid"
+ },
+ {
+  "file": "components/ui/Button.tsx",
+  "slug": "insecure-crypto",
+  "lines": "6,20",
+  "snip": "interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> { variant?: 'primary' | 'secondary' | 'ghost' | 'destructive' | 'outline'; size?: 's"
+ },
+ {
+  "file": "components/ui/Card.tsx",
+  "slug": "insecure-crypto",
+  "lines": "50,53",
+  "snip": "CardTitle.displayName = \"CardTitle\" export const CardDescription = ({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) => ( <p className={cn(\""
+ },
+ {
+  "file": "components/ui/chart.tsx",
+  "slug": "xss",
+  "lines": "50",
+  "snip": "return ( <style dangerouslySetInnerHTML={{ __html: `[data-chart=\"${id}\"] { ${styles} }`, }}"
+ },
+ {
+  "file": "components/ui/chart.tsx",
+  "slug": "insecure-crypto",
+  "lines": "71",
+  "snip": "<div className=\"rounded-xl border bg-white dark:bg-black p-3 shadow-2xl text-xs dark:border-zinc-800 border-slate-200 min-w-[120px] animate-in fade-in zoom-in d"
+ },
+ {
+  "file": "components/ui/chart.tsx",
+  "slug": "dangerous-html",
+  "lines": "50",
+  "snip": "return ( <style dangerouslySetInnerHTML={{ __html: `[data-chart=\"${id}\"] { ${styles} }`, }} /> )"
+ },
+ {
+  "file": "components/ui/FeatureGate.tsx",
+  "slug": "insecure-crypto",
+  "lines": "17,27,47,57,66",
+  "snip": "variant?: 'inline' | 'block' | 'card'; title?: string; description?: string; }"
+ },
+ {
+  "file": "components/ui/floating-dock.tsx",
+  "slug": "xss",
+  "lines": "58",
+  "snip": "{items.map((item, idx) => ( item.type === 'divider' ? ( <div key={`divider-${idx}`} className=\"w-full px-2 my-1\"> <div className=\"h-px w-full border-t border-da"
+ },
+ {
+  "file": "components/ui/floating-dock.tsx",
+  "slug": "insecure-crypto",
+  "lines": "15,27,31,35,39,75,124,125,128,139",
+  "snip": "isActive?: boolean; isLocked?: boolean; description?: string; badge?: number | boolean; secondaryAction?: {"
+ },
+ {
+  "file": "components/ui/Input.tsx",
+  "slug": "xss",
+  "lines": "57",
+  "snip": "</div> {error && ( <p id={`${inputId}-error`} className=\"text-[10px] font-bold text-rose-500 uppercase tracking-wider mt-0.5\"> {error} </p>"
+ },
+ {
+  "file": "components/ui/Input.tsx",
+  "slug": "insecure-crypto",
+  "lines": "21,36",
+  "snip": "<label htmlFor={inputId} className=\"block text-[11px] font-bold uppercase tracking-widest text-zinc-500 mb-0.5\" > {label}"
+ },
+ {
+  "file": "components/ui/KeyboardShortcuts.tsx",
+  "slug": "xss",
+  "lines": "89,91,96,97,112,120",
+  "snip": "${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200'} `}> <div className={`p-6 border-b flex items-center justify-between ${isDarkMode ? "
+ },
+ {
+  "file": "components/ui/KeyboardShortcuts.tsx",
+  "slug": "insecure-crypto",
+  "lines": "11,17,18,19,20,21,22,23,24,25,112,121",
+  "snip": "modifiers?: 'ctrl' | 'alt' | 'shift' | 'meta'; action: string; description: string; category: string; }"
+ },
+ {
+  "file": "components/ui/MobileBlocker.tsx",
+  "slug": "insecure-crypto",
+  "lines": "97,159,173,210",
+  "snip": "</div> {/* Mock Live Trades */} <div className=\"flex flex-col gap-1 flex-1\"> <div className=\"flex justify-between items-center px-0.5\">"
+ },
+ {
+  "file": "components/ui/MobileNav.tsx",
+  "slug": "xss",
+  "lines": "73,141,145,195,207,212,220",
+  "snip": "/> </div> <span className={`text-[10px] font-bold ${isActive ? '' : isDarkMode ? '' : ''}`}> {item.label} </span>"
+ },
+ {
+  "file": "components/ui/Skeleton.tsx",
+  "slug": "xss",
+  "lines": "40,43,46,65,85,93,97,116,133",
+  "snip": "return ( <div className=\"flex flex-col items-center justify-center h-full py-16 px-8 text-center\"> <div className={`w-20 h-20 rounded-3xl flex items-center just"
+ },
+ {
+  "file": "components/ui/Skeleton.tsx",
+  "slug": "insecure-crypto",
+  "lines": "19,24,28,30,47",
+  "snip": "isDarkMode: boolean; title: string; description: string; action?: { label: string;"
+ },
+ {
+  "file": "components/ui/SortableWidget.tsx",
+  "slug": "xss",
+  "lines": "30",
+  "snip": "return ( <div ref={setNodeRef} style={style} className={`relative group h-full ${className}`}> {/* Drag Handle - Only visible on hover */} <div"
+ },
+ {
+  "file": "components/ui/StepProgress.tsx",
+  "slug": "xss",
+  "lines": "65,103,108,115",
+  "snip": "</p> {step.description && ( <p className={`text-[10px] mt-0.5 ${ isDarkMode ? 'text-zinc-500' : 'text-slate-400' }`}>"
+ },
+ {
+  "file": "components/ui/StepProgress.tsx",
+  "slug": "insecure-crypto",
+  "lines": "6,64,68",
+  "snip": "interface Step { label: string; description?: string; }"
+ },
+ {
+  "file": "components/ui/Toast.tsx",
+  "slug": "insecure-crypto",
+  "lines": "185",
+  "snip": "onRemove(); }} className=\"mt-2 text-xs font-black uppercase tracking-widest underline decoration-2 underline-offset-4 hover:opacity-70 transition-opacity\" > {to"
+ },
+ {
+  "file": "components/ui/Toast.tsx",
+  "slug": "insecure-crypto",
+  "lines": "240",
+  "snip": "} const id = Math.random().toString(36).substring(2, 9); const newToast: Toast = { id,"
+ },
+ {
+  "file": "components/ui/Tooltip.tsx",
+  "slug": "xss",
+  "lines": "55,59",
+  "snip": "{isVisible && ( <div className={`absolute z-[500] pointer-events-none whitespace-nowrap px-2.5 py-1.5 rounded-lg text-[10px] font-semibold shadow-2xl border bac"
+ },
+ {
+  "file": "components/ui/WidgetHelpDrawer.tsx",
+  "slug": "insecure-crypto",
+  "lines": "35,36,37,111",
+  "snip": "const q = searchQuery.toLowerCase(); return Object.values(WIDGET_HELP_DATABASE).filter(art => art.title.toLowerCase().includes(q) || art.category.toLowerCase()."
+ },
+ {
+  "file": "hooks/useData.ts",
+  "slug": "auth-bypass",
+  "lines": "110",
+  "snip": "if (currentUserProfile && currentUserProfile.eaConnected && currentUserProfile.syncKey) { const session = await dataService.getEASession(currentUserProfile.sync"
+ },
+ {
+  "file": "hooks/useData.ts",
+  "slug": "insecure-crypto",
+  "lines": "12,22,36,57,70,76,85,86,103,115,116,191,192,193,197,204,206,210,284,335,367,376",
+  "snip": "export const useData = (userId: string | null, userProfile: UserProfile | null) => { const [trades, setTrades] = useState<Trade[]>([]); const [notes, setNotes] "
+ },
+ {
+  "file": "hooks/useData.ts",
+  "slug": "insecure-crypto",
+  "lines": "48",
+  "snip": "try { await dataService.addTrade(trade); successfullySynced.push(trade.ticketId || trade.id || Math.random().toString()); } catch (error) { console.error(\"Faile"
+ },
+ {
+  "file": "hooks/useMT5Bridge.ts",
+  "slug": "ssrf",
+  "lines": "16",
+  "snip": "const activeTF = overrideTimeframe || timeframe; try { const response = await fetch(`${MT5_BRIDGE_URL}/data?symbol=${activeSymbol}&tf=${activeTF}&count=1000`).c"
+ },
+ {
+  "file": "hooks/useMT5Bridge.ts",
+  "slug": "insecure-crypto",
+  "lines": "11,13",
+  "snip": "const [currentIndex, setCurrentIdx] = useState(0); const fetchData = async (overrideSymbol?: string, overrideTimeframe?: string) => { setIsFetching(true); const"
+ },
+ {
+  "file": "lib/analyticsAiSnapshot.ts",
+  "slug": "insecure-crypto",
+  "lines": "35,41,49,56,57,59,60,64,85,87,88,99,100,103,104,105,106,116,121,135,147,149,162,163,169,170,171,220,232,245,257,264,273,281,282,285,291,337,352,369,395,415,418,423,478",
+  "snip": "const buildEffectiveInitialBalance = ( trades: Trade[], userProfile: UserProfile | null, eaSession?: EASession | null,"
+ },
+ {
+  "file": "lib/analyticsUtils.ts",
+  "slug": "insecure-crypto",
+  "lines": "5,13,14",
+  "snip": "export const isCompletedTrade = (trade: Trade): boolean => trade.result !== 'Pending'; export const getCompletedTrades = (trades: Trade[] = []): Trade[] => trad"
+ },
+ {
+  "file": "lib/bridgeBalance.ts",
+  "slug": "insecure-crypto",
+  "lines": "53,59,74",
+  "snip": "export const resolveBridgeBackedInitialBalance = ({ trades, userProfile, eaSession,"
+ },
+ {
+  "file": "lib/cacheService.ts",
+  "slug": "insecure-crypto",
+  "lines": "27,28,29",
+  "snip": "// LRU eviction if cache size exceeds maxEntries if (this.cache.size >= this.maxEntries && !this.cache.has(key)) { const oldestKey = this.cache.keys().next().va"
+ },
+ {
+  "file": "lib/constants.ts",
+  "slug": "insecure-crypto",
+  "lines": "21,77,78,81,90,102,114",
+  "snip": "TABLES: { PROFILES: 'profiles', TRADES: 'trades', NOTES: 'notes', DAILY_BIAS: 'daily_bias',"
+ },
+ {
+  "file": "lib/demoData.ts",
+  "slug": "insecure-crypto",
+  "lines": "3,518,612",
+  "snip": "import { DailyBias, EASession, Note, Trade, UserProfile } from '../types'; export const demoTrades: Trade[] = [ { id: 'demo-trade-001',"
+ },
+ {
+  "file": "lib/disciplineScore.ts",
+  "slug": "insecure-crypto",
+  "lines": "10,11,12,13,14,16,21",
+  "snip": "}; export const calculateDisciplineScore = (trades: Trade[] = []) => { // Only score trades where the user has explicitly set their plan adherence. // Auto-sync"
+ },
+ {
+  "file": "lib/ea/headlessMql5Script.ts",
+  "slug": "secrets-exposure",
+  "lines": "133,174",
+  "snip": "string jsonPayload = StringFormat(\"{\\\\\\\"sync_key\\\\\\\":\\\\\\\"%s\\\\\\\",\\\\\\\"isHeartbeat\\\\\\\":true,\\\\\\\"isHeadless\\\\\\\":true}\", SyncKey); char data[], result[]; string resu"
+ },
+ {
+  "file": "lib/ea/headlessMql5Script.ts",
+  "slug": "insecure-crypto",
+  "lines": "155,166,167,170,172",
+  "snip": "lastBalance = balance; string accountJson = StringFormat(\"{\\\\\\\"login\\\\\\\":%d,\\\\\\\"balance\\\\\\\":%.2f,\\\\\\\"equity\\\\\\\":%.2f,\\\\\\\"isHeadless\\\\\\\":true}\", AccountInfoInteg"
+ },
+ {
+  "file": "lib/ea/mql5Script.ts",
+  "slug": "secrets-exposure",
+  "lines": "106,255,461",
+  "snip": "char result[]; string resultHeaders; string headers = \"Content-Type: application/json\\\\r\\\\nSync-Key: \" + SyncKey + \"\\\\r\\\\napikey: \" + AnonKey + \"\\\\r\\\\n\"; int re"
+ },
+ {
+  "file": "lib/ea/mql5Script.ts",
+  "slug": "insecure-crypto",
+  "lines": "346,402,403,406,454",
+  "snip": "} string tradesJson = \"[\"; int count = 0;"
+ },
+ {
+  "file": "lib/economicCalendar.js",
+  "slug": "insecure-crypto",
+  "lines": "76,83,260,261",
+  "snip": "if (isBlock) flush(); for (const child of element.childNodes) { walk(child); }"
+ },
+ {
+  "file": "lib/economicCalendar.js",
+  "slug": "untrusted-redirect-following",
+  "lines": "92",
+  "snip": "const fetchText = async (url) => { const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (economic-calendar)',"
+ },
+ {
+  "file": "lib/errors.ts",
+  "slug": "insecure-crypto",
+  "lines": "44,46",
+  "snip": "if (error instanceof NetworkError) return true; if (!navigator.onLine) return true; if (error instanceof TypeError && error.message.includes('fetch')) return tr"
+ },
+ {
+  "file": "lib/finnhubDataTools.ts",
+  "slug": "insecure-crypto",
+  "lines": "54,186,188,191,256,257,258,259,260,261,262,263,264,265",
+  "snip": "form?: string; cik?: string; description?: string; };"
+ },
+ {
+  "file": "lib/fmpDataTools.ts",
+  "slug": "insecure-crypto",
+  "lines": "35,355,368,404,405,406,407,408,409,410,411,412,413",
+  "snip": "industry?: string; marketCap?: number; description?: string; website?: string; image?: string;"
+ },
+ {
+  "file": "lib/htmlSanitizer.ts",
+  "slug": "insecure-crypto",
+  "lines": "51,93",
+  "snip": "child.remove(); } else { child.replaceWith(...Array.from(child.childNodes)); } continue;"
+ },
+ {
+  "file": "lib/quotes.ts",
+  "slug": "insecure-crypto",
+  "lines": "4,19,20",
+  "snip": "export const TRADING_QUOTES = [ { text: \"The goal of a successful trader is to make the best trades. Money is secondary.\", author: \"Alexander Elder\" }, { text: "
+ },
+ {
+  "file": "lib/statsUtils.ts",
+  "slug": "insecure-crypto",
+  "lines": "3,15,16,17,18,19,21,22,23,28,29,30,42,70,73,82,98,99,149,150,152,154,171,174,189,210,212,224,225",
+  "snip": "import { Trade } from '../types'; import { calculatePnLAtPrice } from './trade-calculations'; import { getCompletedTrades, sortTradesChronologically } from './a"
+ },
+ {
+  "file": "lib/thinkingCleaner.ts",
+  "slug": "insecure-crypto",
+  "lines": "123",
+  "snip": "const contentLower = content.toLowerCase(); for (const starter of thinkingStarters) { if (contentLower.includes(starter)) { // This chunk contains thinking tag "
+ },
+ {
+  "file": "lib/trade-calculations.ts",
+  "slug": "insecure-crypto",
+  "lines": "56,57,58,59",
+  "snip": "if (assetType === 'Commodities') { const sym = (pair || '').toUpperCase().replace('/', '').replace('_', ''); if (sym.includes('XAU') || sym.includes('GOLD')) re"
+ },
+ {
+  "file": "lib/trade-import.ts",
+  "slug": "insecure-crypto",
+  "lines": "8,14,64,65,66,67,69,97",
+  "snip": "if (lines.length < 2) return []; let headerIdx = lines.findIndex(l => l.toLowerCase().includes('ticket') && l.toLowerCase().includes('profit')); if (headerIdx ="
+ },
+ {
+  "file": "lib/trade-import.ts",
+  "slug": "insecure-crypto",
+  "lines": "70",
+  "snip": "importedTrades.push({ id: `imported-${ticket || Date.now() + Math.random()}`, ticketId: ticket, pair: item.toUpperCase(),"
+ },
+ {
+  "file": "lib/trade-normalization.ts",
+  "slug": "insecure-crypto",
+  "lines": "90,99,102,106",
+  "snip": "// Crypto check if (sym.startsWith('BTC') || sym.startsWith('ETH') || sym.startsWith('SOL') || sym.startsWith('XRP') || sym.startsWith('ADA') || sym.startsWith("
+ },
+ {
+  "file": "lib/widgetHelpData.ts",
+  "slug": "insecure-crypto",
+  "lines": "28,29,30,34,35,86,100,121,122,123,128,148,149,150,155,162,182,184,212,243,264,266,271,280,334,336,339,347,367,368,369,371,374,403,404,408,409,439,443,444,469,480,481,493,504,505,508,517,538",
+  "snip": "category: 'Overview', breadcrumb: 'Help Center / Overview / Win Rate', definition: 'The win rate is a core metric used to track trading performance over a speci"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "ssrf",
+  "lines": "400",
+  "snip": "const redirectUri = `${window.location.origin}/api/ctrader/callback`; try { const res = await fetch(`/api/ctrader/exchange?code=${encodeURIComponent(code)}&redi"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "insecure-crypto",
+  "lines": "63,81,528,564,605,624,642,680,693,711,884,888",
+  "snip": "symbol: string; symbolId?: number; tradeSide: 'buy' | 'sell'; volume: number; price: number;"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "unsafe-redirect",
+  "lines": "391",
+  "snip": "const url = new URL(`${CTRADER_ID_BASE}/my/settings/openapi/grantingaccess/`); url.searchParams.set('client_id', CLIENT_ID); url.searchParams.set('redirect_uri'"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "unsafe-redirect",
+  "lines": "400",
+  "snip": "const redirectUri = `${window.location.origin}/api/ctrader/callback`; try { const res = await fetch(`/api/ctrader/exchange?code=${encodeURIComponent(code)}&redi"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "jwt-handling",
+  "lines": "19,119,140,426,427",
+  "snip": "export interface CtraderTokens { accessToken: string; refreshToken: string; expiresAt: number; }"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "secret-in-log",
+  "lines": "104",
+  "snip": "// ------------------------------------------------------------------ let memoryTokens: { accessToken: string; expiresAt: number } | null = null;"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "secret-in-log",
+  "lines": "107",
+  "snip": "/** Test helper only — seeds the in-memory token store. */ export function __setTokensForTesting(tokens: { accessToken: string; expiresAt: number } | null) { me"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "secret-in-log",
+  "lines": "111",
+  "snip": "function getStoredTokens(): { accessToken: string; expiresAt: number } | null { if (memoryTokens && Date.now() < memoryTokens.expiresAt) {"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "secret-in-log",
+  "lines": "137",
+  "snip": "/** Return a valid token, silently refreshing from the httpOnly cookie when needed. */ async function getTokens(): Promise<{ accessToken: string; expiresAt: num"
+ },
+ {
+  "file": "services/ctraderService.ts",
+  "slug": "postmessage-origin",
+  "lines": "291",
+  "snip": "socket.onmessage = async (event) => { try { let dataStr: string; if (typeof event.data === 'string') { dataStr = event.data;"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "insecure-crypto",
+  "lines": "118,163,217,218,228,235,339,378,379,381,398,430,440,449,458,462,467,472,480,484,487,488,501,563,566,584,593,599,607,626,637,639,646,648,655,659,660,661,668,673,684,745,822,921,946,1010,1055,1070,1113,1254",
+  "snip": "} as CashTransaction), date: dbTx.date, description: dbTx.description, });"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "585",
+  "snip": ".from('trades') .select('*') .eq('id', trade.id) .single(); if (refreshError) throw refreshError;"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "934",
+  "snip": "}) .select() .single(); if (error) throw error; return mapGoalFromDB(data);"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "1087",
+  "snip": ".insert(dbDiagram) .select() .single(); if (error) throw error; return data; }"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "1119",
+  "snip": ".from('backtest_sessions') .select('id') .eq('user_id', user.id) .eq('symbol', session.symbol) .eq('timeframe', session.timeframe) .order('updated_at', { ascend"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "1157",
+  "snip": ".from('backtest_sessions') .select('*') .eq('user_id', user.id) .order('updated_at', { ascending: false }); if (error) throw error;"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "crypto-usage",
+  "lines": "65,156,1207,1223",
+  "snip": "...fallback, ...trade, id: toSafeString(trade.id, toSafeString(fallback.id, crypto.randomUUID())), }, fallback"
+ },
+ {
+  "file": "services/firehoseService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "51",
+  "snip": "}) .select() .single(); if (error) throw error; return mapRuleFromDB(data);"
+ },
+ {
+  "file": "services/firehoseService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "66",
+  "snip": ".eq('id', ruleId) .select() .single(); if (error) throw error; return mapRuleFromDB(data); },"
+ },
+ {
+  "file": "services/firehoseService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "105",
+  "snip": ".from('firehose_events') .select('*', { count: 'exact', head: true }) .eq('user_id', userId) .eq('seen', false); if (error) throw error;"
+ },
+ {
+  "file": "services/mt5PythonService.ts",
+  "slug": "rce",
+  "lines": "52",
+  "snip": "function runPythonScript(script: string, args: string[] = []): Promise<string> { return new Promise((resolve, reject) => { const python = spawn('python', [scrip"
+ },
+ {
+  "file": "services/mt5PythonService.ts",
+  "slug": "rce",
+  "lines": "1",
+  "snip": "import { spawn } from 'child_process'; import { existsSync } from 'fs'; import { join } from 'path';"
+ },
+ {
+  "file": "services/notesAiService.ts",
+  "slug": "insecure-crypto",
+  "lines": "16,21,26,31,36",
+  "snip": "id: NotebookPromptPreset; label: string; description: string; }> = [ {"
+ },
+ {
+  "file": "services/notesAiService.ts",
+  "slug": "secret-in-log",
+  "lines": "157",
+  "snip": "'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), },"
+ },
+ {
+  "file": "services/nvidiaAiService.ts",
+  "slug": "insecure-crypto",
+  "lines": "24,33,50,56,86,116,121,127,129,133,141,143,144,148,160,171,176,185,206,242,243,244,245,246,247,248,249,251,253,255,260,261,262,263,264,267,269,280,283,307,317,350,518,536",
+  "snip": "id: NVIDIA_CHAT_MODEL_ID, name: \"NVIDIA Research\", description: \"GPT OSS on NVIDIA for research with no account-data access\", type: \"fast\" as const, assistantMo"
+ },
+ {
+  "file": "services/nvidiaAiService.ts",
+  "slug": "secret-in-log",
+  "lines": "410",
+  "snip": "\"Content-Type\": \"application/json\", ...(token ? { Authorization: `Bearer ${token}` } : {}), },"
+ },
+ {
+  "file": "services/openaiService.ts",
+  "slug": "secret-in-log",
+  "lines": "26",
+  "snip": "method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: formData,"
+ },
+ {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "insecure-crypto",
+  "lines": "183",
+  "snip": "url: parsed.url, source: parsed.source || parsed.domain, summary: parsed.summary || parsed.description, publishedAt: parsed.publish_time || parsed.published_at,"
+ },
+ {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "secret-in-log",
+  "lines": "144",
+  "snip": "headers: { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'text/event-stream',"
+ },
+ {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "cors-wildcard",
+  "lines": "5",
+  "snip": "const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', }"
+ },
+ {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "untrusted-redirect-following",
+  "lines": "142",
+  "snip": "try { const response = await fetch(url.toString(), { headers: { 'Authorization': `Bearer ${apiKey}`,"
+ },
+ {
+  "file": "supabase/functions/sync-trades/index.ts",
+  "slug": "insecure-crypto",
+  "lines": "123,141,162,164,167,168,173,174,176,227,231,232,234,235,240,249",
+  "snip": ") const { trades, account, openPositions, isHeartbeat, isReconciliation } = body; // Check if the user has disconnected the bridge via the UI"
+ },
+ {
+  "file": "supabase/functions/sync-trades/index.ts",
+  "slug": "cors-wildcard",
+  "lines": "5",
+  "snip": "const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, sync-key, Sync-Ke"
+ },
+ {
+  "file": "types.ts",
+  "slug": "insecure-crypto",
+  "lines": "184,218,228,239,264,316,368,398,424,433",
+  "snip": "id: string; title: string; description?: string; type: GoalType; metric: MetricType;"
+ },
+ {
+  "file": "vps-manager-main.py",
+  "slug": "crypto-usage",
+  "lines": "11,64",
+  "snip": "import time import json import hmac from datetime import datetime, timezone from typing import Optional"
+ }
+]

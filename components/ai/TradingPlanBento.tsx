@@ -11,8 +11,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import { ChecklistWidget, MermaidWidget } from './AIWidgets';
-import ErrorBoundary from '../ErrorBoundary';
+import { ChecklistWidget } from './AIWidgets';
 
 interface Props {
   isDarkMode: boolean;
@@ -21,7 +20,6 @@ interface Props {
     sections?: Record<string, string>;
     strategyProfile?: any;
     signatures?: Record<string, boolean>;
-    mermaidData?: Record<string, { type: string, code: string }>;
     checklistData?: Record<string, { title: string, items: { text: string, checked: boolean }[] }>;
   };
   onClose: () => void;
@@ -127,7 +125,6 @@ const TradingPlanBento: React.FC<Props> = ({ isDarkMode, message, onClose, onTog
   const sections = message.sections || {};
   const profile = message.strategyProfile || {};
   const signatures = message.signatures || {};
-  const mermaidData = message.mermaidData || {};
   const checklistData = message.checklistData || {};
 
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -433,45 +430,6 @@ const TradingPlanBento: React.FC<Props> = ({ isDarkMode, message, onClose, onTog
         <div className="max-w-[1800px] mx-auto p-6 space-y-6 pb-20">
           
 
-
-          {/* Mermaid Diagrams - Only show in Flows tab or All Sections */}
-          {(activeTab === 'execution' || showAllSections) && Object.keys(mermaidData).length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="w-full"
-            >
-              <h3 className={`text-xs font-bold uppercase tracking-wider mb-4 flex items-center gap-2 ${
-                isDarkMode ? 'text-zinc-400' : 'text-slate-600'
-              }`}>
-                <GitBranch size={14} />
-                Strategic Roadmaps
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                  isDarkMode ? 'bg-cyan-900/50 text-cyan-400' : 'bg-cyan-50 text-cyan-600'
-                }`}>
-                  {Object.keys(mermaidData).length} Flows
-                </span>
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {Object.keys(mermaidData).map((mKey, idx) => (
-                  <motion.div
-                    key={mKey}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                  >
-                    <ErrorBoundary isDarkMode={isDarkMode} fallback={
-                      <div className={`p-6 rounded-2xl border ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>
-                        <span className="text-xs text-rose-500">Failed to render roadmap</span>
-                      </div>
-                    }>
-                      <MermaidWidget code={mermaidData[mKey].code} type={mermaidData[mKey].type} isDarkMode={isDarkMode} />
-                    </ErrorBoundary>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
-          )}
 
           {/* Checklists */}
           {Object.keys(checklistData).length > 0 && (

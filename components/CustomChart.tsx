@@ -550,7 +550,176 @@ const CustomChart: React.FC<CustomChartProps> = ({
     });
     ctx.setLineDash([]); // Reset
 
-    // 5. Axes Rendering
+    // 5. Trade Entry & Exit Markers & Arrows
+    if (trades && trades.length > 0) {
+      const drawUpArrow = (centerX: number, tipY: number, color: string, label: string) => {
+        const arrowW = 12;
+        const arrowH = 10;
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+
+        // Draw Triangle pointing UP
+        ctx.beginPath();
+        ctx.moveTo(centerX, tipY);
+        ctx.lineTo(centerX - arrowW / 2, tipY + arrowH);
+        ctx.lineTo(centerX + arrowW / 2, tipY + arrowH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw Badge Label
+        ctx.font = 'bold 9px sans-serif';
+        const labelW = ctx.measureText(label).width + 8;
+        const badgeH = 14;
+        const badgeY = tipY + arrowH + 2;
+        ctx.fillStyle = isDarkMode ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.95)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(centerX - labelW / 2, badgeY, labelW, badgeH, 3);
+        } else {
+          ctx.rect(centerX - labelW / 2, badgeY, labelW, badgeH);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, centerX, badgeY + badgeH / 2);
+        ctx.restore();
+      };
+
+      const drawDownArrow = (centerX: number, tipY: number, color: string, label: string) => {
+        const arrowW = 12;
+        const arrowH = 10;
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+
+        // Draw Triangle pointing DOWN
+        ctx.beginPath();
+        ctx.moveTo(centerX, tipY);
+        ctx.lineTo(centerX - arrowW / 2, tipY - arrowH);
+        ctx.lineTo(centerX + arrowW / 2, tipY - arrowH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw Badge Label
+        ctx.font = 'bold 9px sans-serif';
+        const labelW = ctx.measureText(label).width + 8;
+        const badgeH = 14;
+        const badgeY = tipY - arrowH - badgeH - 2;
+        ctx.fillStyle = isDarkMode ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.95)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(centerX - labelW / 2, badgeY, labelW, badgeH, 3);
+        } else {
+          ctx.rect(centerX - labelW / 2, badgeY, labelW, badgeH);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, centerX, badgeY + badgeH / 2);
+        ctx.restore();
+      };
+
+      trades.forEach(trade => {
+        if (!trade) return;
+        const isBuy = (trade.direction === 'Long' || (trade as any).type === 'BUY' || (trade as any).tradeSide === 'buy');
+        const entryPrice = trade.entryPrice ?? (trade as any).entry ?? (trade as any).price;
+        const exitPrice = trade.exitPrice ?? (trade as any).exit;
+
+        // Resolve entry time in seconds
+        let entrySec: number | null = null;
+        if (trade.openTime) {
+          entrySec = Math.floor(new Date(trade.openTime).getTime() / 1000);
+        } else if ((trade as any).time) {
+          const t = (trade as any).time;
+          entrySec = t > 1e11 ? Math.floor(t / 1000) : t;
+        }
+
+        // Resolve exit time in seconds
+        let exitSec: number | null = null;
+        if (trade.closeTime) {
+          exitSec = Math.floor(new Date(trade.closeTime).getTime() / 1000);
+        }
+
+        // Find closest candle index for entry
+        let entryIdx = -1;
+        if (entrySec !== null) {
+          let minDiff = Infinity;
+          for (let i = 0; i < data.length; i++) {
+            const diff = Math.abs(data[i].time - entrySec);
+            if (diff < minDiff) {
+              minDiff = diff;
+              entryIdx = i;
+            }
+          }
+        }
+
+        // Find closest candle index for exit
+        let exitIdx = -1;
+        if (exitSec !== null) {
+          let minDiff = Infinity;
+          for (let i = 0; i < data.length; i++) {
+            const diff = Math.abs(data[i].time - exitSec);
+            if (diff < minDiff) {
+              minDiff = diff;
+              exitIdx = i;
+            }
+          }
+        }
+
+        // Render Entry Arrow on entry candlestick
+        if (entryIdx >= 0) {
+          const candle = data[entryIdx];
+          const candleX = getX(entryIdx);
+          const entryColor = isBuy ? '#10b981' : '#ef4444';
+          const entryLabel = isBuy ? 'BUY' : 'SELL';
+
+          if (isBuy) {
+            // Long entry -> arrow placed at candle low pointing UP
+            const tipY = getY(candle.low) + 4;
+            drawUpArrow(candleX, tipY, entryColor, entryLabel);
+          } else {
+            // Short entry -> arrow placed at candle high pointing DOWN
+            const tipY = getY(candle.high) - 4;
+            drawDownArrow(candleX, tipY, entryColor, entryLabel);
+          }
+        }
+
+        // Render Exit Arrow on exit candlestick
+        if (exitIdx >= 0) {
+          const candle = data[exitIdx];
+          const exitX = getX(exitIdx);
+          const exitColor = '#f59e0b'; // amber for exit
+          const exitLabel = 'EXIT';
+
+          if (isBuy) {
+            // Long exit -> arrow placed at candle high pointing DOWN
+            const tipY = getY(candle.high) - 4;
+            drawDownArrow(exitX, tipY, exitColor, exitLabel);
+          } else {
+            // Short exit -> arrow placed at candle low pointing UP
+            const tipY = getY(candle.low) + 4;
+            drawUpArrow(exitX, tipY, exitColor, exitLabel);
+          }
+        }
+      });
+    }
+
+    // 6. Axes Rendering
     ctx.fillStyle = '#000000';
     ctx.fillRect(chartWidth, 0, PADDING_RIGHT, height);
     ctx.fillRect(0, chartHeight, width, PADDING_BOTTOM);
@@ -582,7 +751,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
       const txt = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
       ctx.fillText(txt, x, chartHeight + 5);
     }
-  }, [data, isDarkMode, getX, getY, getIndexFromX, drawings]);
+  }, [data, isDarkMode, getX, getY, getIndexFromX, drawings, trades]);
 
   // Sync API with parent whenever mockApi changes or onCoordinatesChange updates
   useEffect(() => {

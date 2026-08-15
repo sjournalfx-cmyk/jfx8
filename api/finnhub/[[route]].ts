@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { applyCorsHeaders } from '../_lib/cors';
 
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
 
@@ -28,7 +29,7 @@ const getFinnhubErrorMessage = (status: number) => {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCorsHeaders(res, req.headers);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

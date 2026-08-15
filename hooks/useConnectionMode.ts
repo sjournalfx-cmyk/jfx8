@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { UserProfile } from '../types';
 
-export type ConnectionMode = 'bridge' | 'broker' | 'ctrader' | null;
+export type ConnectionMode = 'bridge' | 'ctrader' | null;
 
 export function useConnectionMode(userId: string, userProfile: UserProfile) {
     const [connectionMode, setConnectionMode] = useState<ConnectionMode>(() => {
@@ -12,39 +12,21 @@ export function useConnectionMode(userId: string, userProfile: UserProfile) {
             return 'ctrader';
         }
 
-        // Check if valid cTrader tokens exist in storage
-        const hasCtraderTokens = (() => {
-            try {
-                const raw = localStorage.getItem('jfx_ctrader_tokens') || sessionStorage.getItem('jfx_ctrader_tokens');
-                if (!raw) return false;
-                const tokens = JSON.parse(raw);
-                return Boolean(tokens && tokens.accessToken && (Date.now() < (tokens.expiresAt || Infinity)));
-            } catch {
-                return false;
-            }
-        })();
-
         // Check explicit saved mode preference
         try {
             const savedMode = localStorage.getItem(`jfx_connection_mode_${userId}`);
             if (savedMode === 'none') {
                 return null;
             }
-            if (savedMode === 'ctrader' && hasCtraderTokens) {
+            if (savedMode === 'ctrader') {
                 return 'ctrader';
             }
-            if (savedMode === 'bridge' || savedMode === 'broker') {
-                return savedMode as 'bridge' | 'broker';
+            if (savedMode === 'bridge') {
+                return 'bridge';
             }
         } catch { /* ignore */ }
 
-        // Default fallback if cTrader is authenticated
-        if (hasCtraderTokens) {
-            return 'ctrader';
-        }
-
-        return userProfile.eaConnected ? 'bridge' : 
-            ['connected', 'credentials_stored', 'auth_failed'].includes(userProfile.mt_terminal_status || '') ? 'broker' : null;
+        return userProfile.eaConnected ? 'bridge' : null;
     });
 
     const updateConnectionMode = (mode: ConnectionMode) => {

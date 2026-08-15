@@ -1,0 +1,7 @@
+{
+  "ignorePaths": [
+    "components/LandingPage.tsx",
+    "components/PerformanceSequence.tsx",
+    "components/landing-mock-data.ts"
+  ]
+}

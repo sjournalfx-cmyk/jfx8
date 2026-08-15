@@ -276,15 +276,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
       return;
     }
 
-    if (!import.meta.env.VITE_NVIDIA_API_KEY) {
-      addToast({
-        type: 'error',
-        title: 'AI not configured',
-        message: 'Add the NVIDIA API key to use Help me write.',
-      });
-      return;
-    }
-
     setIsGenerating(true);
     setShowComposeMenu(false);
     try {
@@ -335,7 +326,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
       addToast({
         type: 'error',
         title: 'Help me write failed',
-        message: e?.message?.includes('configured')
+        message: (e?.message?.includes('configured') || e?.message?.includes('Missing'))
           ? 'Add the NVIDIA API key to continue.'
           : e?.message || 'Could not generate notebook content.',
       });

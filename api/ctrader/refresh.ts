@@ -1,12 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { applyCorsHeaders } from '../_lib/cors';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
+const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 
-const CLIENT_ID = process.env.VITE_CTRADER_CLIENT_ID || process.env.CTRADER_CLIENT_ID || '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
-const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
+// Server-only credentials. The client secret must never be shipped to the browser.
+const CLIENT_ID = process.env.CTRADER_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCorsHeaders(res, req.headers);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -20,22 +23,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const { refresh_token } = req.body || {};
-
-  if (!refresh_token) {
-    res.status(400).json({ error: 'Missing refresh_token' });
+  // The refresh token is only ever read from the httpOnly cookie set during the
+  // exchange — never from the request body, which a script attacker could supply.
+  const refreshToken = (req.cookies?.[REFRESH_COOKIE] || '') as string;
+  if (!refreshToken) {
+    res.status(401).json({ error: 'Missing cTrader session' });
     return;
   }
 
   if (!CLIENT_ID || !CLIENT_SECRET) {
-    res.status(500).json({ error: 'cTrader OAuth credentials not configured' });
+    res.status(500).json({ error: 'cTrader OAuth credentials not configured on the server' });
     return;
   }
 
   try {
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
-      refresh_token: String(refresh_token),
+      refresh_token: refreshToken,
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
     });
@@ -52,17 +56,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(502).json({
         error: 'Token refresh failed',
         status: tokenRes.status,
-        details: errText,
       });
       return;
     }
 
     const tokens = await tokenRes.json();
+
+    // Rotate the refresh cookie if cTrader issued a new one.
+    if (tokens.refresh_token) {
+      res.setHeader('Set-Cookie', [
+        `${REFRESH_COOKIE}=${encodeURIComponent(String(tokens.refresh_token))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
+      ]);
+    }
+
     res.json({
       access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token || refresh_token,
       expires_in: tokens.expires_in,
-      scope: tokens.scope,
     });
   } catch (err) {
     console.error('cTrader refresh error:', err);

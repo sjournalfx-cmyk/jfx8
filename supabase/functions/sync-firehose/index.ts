@@ -1,19 +1,40 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+const ALLOWED_ORIGINS = new Set([
+  'https://jfxjournal.site',
+  'https://www.jfxjournal.site',
+  'http://localhost:5173',
+  'http://localhost:3000',
+])
+
+// Origin-aware CORS: the wildcard is replaced so only the app's own origins
+// can read responses cross-origin.
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get('origin') || req.headers.get('Origin') || ''
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  }
+  if (ALLOWED_ORIGINS.has(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin
+  }
+  return headers
 }
+
+// In-memory cooldown per caller so a single account cannot hammer the paid
+// Firehose API by invoking this function directly (the client already throttles
+// itself to one sync per 60s; this enforces the same bound server-side).
+const lastTriggerAt = new Map<string, number>()
+const MIN_TRIGGER_INTERVAL_MS = 60_000
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { headers: corsHeaders(req) })
   }
 
   if (req.method === 'GET') {
     return new Response(JSON.stringify({ status: 'ok' }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       status: 200,
     })
   }
@@ -24,15 +45,64 @@ serve(async (req) => {
       throw new Error('FIREHOSE_API_KEY not configured')
     }
 
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      throw new Error('Missing Authorization header')
+    const authHeader = req.headers.get('Authorization') || ''
+    const bearer = authHeader.replace(/^Bearer\s+/i, '').trim()
+    if (!bearer) {
+      return new Response(JSON.stringify({ success: false, error: 'Missing Authorization header' }), {
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+        status: 401,
+      })
     }
 
+    // Two authorized trigger paths:
+    //   1. Server-to-server (cron): Authorization is the CRON_SECRET.
+    //   2. Client: Authorization is the caller's Supabase JWT (verified below).
+    const cronSecret = Deno.env.get('CRON_SECRET')
+    let callerId: string
+    let useServiceRole = false
+    if (cronSecret && bearer === cronSecret) {
+      callerId = 'cron'
+      useServiceRole = true
+    } else {
+      const verifier = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        {
+          global: { headers: { Authorization: authHeader } },
+          auth: { persistSession: false, autoRefreshToken: false },
+        }
+      )
+      const { data: session, error: sessionError } = await verifier.auth.getUser()
+      if (sessionError || !session?.user) {
+        return new Response(JSON.stringify({ success: false, error: 'Invalid or expired session' }), {
+          headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+          status: 401,
+        })
+      }
+      callerId = session.user.id
+    }
+
+    // Enforce one Firehose poll per caller per minute.
+    const now = Date.now()
+    const last = lastTriggerAt.get(callerId) || 0
+    if (now - last < MIN_TRIGGER_INTERVAL_MS) {
+      return new Response(JSON.stringify({ success: false, error: 'Rate limit exceeded. Try again in a minute.' }), {
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+        status: 429,
+      })
+    }
+    lastTriggerAt.set(callerId, now)
+
+    // Reads: cron uses the service role (all users); client triggers stay
+    // scoped to the caller via their own JWT + RLS.
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      useServiceRole
+        ? (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '')
+        : (Deno.env.get('SUPABASE_ANON_KEY') ?? ''),
+      useServiceRole
+        ? { auth: { persistSession: false, autoRefreshToken: false } }
+        : { global: { headers: { Authorization: authHeader } } }
     )
 
     const { data: rules, error: rulesError } = await supabase
@@ -43,14 +113,14 @@ serve(async (req) => {
     if (rulesError) {
       console.error('Error fetching rules:', rulesError)
       return new Response(JSON.stringify({ success: false, error: rulesError.message }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
         status: 500,
       })
     }
 
     if (!rules || rules.length === 0) {
       return new Response(JSON.stringify({ success: true, message: 'No active rules', rulesChecked: 0 }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
         status: 200,
       })
     }
@@ -109,13 +179,13 @@ serve(async (req) => {
       rulesChecked: rules.length,
       eventsStored: totalEventsStored,
     }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       status: 200,
     })
   } catch (error) {
     console.error('Global error:', error)
     return new Response(JSON.stringify({ success: false, error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
       status: 500,
     })
   }

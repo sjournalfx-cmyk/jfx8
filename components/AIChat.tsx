@@ -14,7 +14,6 @@ import { TrendingUp, TrendingDown, Brain, Clock, Wand2, Send, User, Trash2, Coin
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from './ui/Toast';
-import { MermaidWidget } from './ai/AIWidgets';
 
 // --- Utilities ---
 const formatDuration = (openTime?: string, closeTime?: string) => {
@@ -2479,17 +2478,17 @@ ${strategyProfile.whyITrade}`;
         );
       }
 
+      // Diagram blocks are rendered as plain code (not executed) so no
+      // mermaid-generated HTML/SVG is ever injected into the page.
       return (
         <div key={`${keyPrefix}-mermaid-${index}`} className="my-4">
-          <MermaidWidget
-            code={block.widget.body}
-            type={block.widget.type}
-            isDarkMode={isDarkMode}
-          />
+          <pre className="ai-md-code-block overflow-x-auto rounded-xl border border-white/10 bg-black/40 p-3 text-xs leading-relaxed">
+            <code>{block.widget.body}</code>
+          </pre>
         </div>
       );
     });
-  }, [isDarkMode, renderMarkdownFragment]);
+  }, [renderMarkdownFragment]);
 
   const renderMessageContent = useCallback((message: Message) => {
     const { content, role, audioAttachment } = message;

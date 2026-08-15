@@ -1,9 +1,25 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, sync-key, Sync-Key',
+const ALLOWED_ORIGINS = new Set([
+    'https://jfxjournal.site',
+    'https://www.jfxjournal.site',
+    'http://localhost:5173',
+    'http://localhost:3000',
+])
+
+// Origin-aware CORS: the wildcard is replaced so only the app's own origins
+// can read responses cross-origin. The EA bridge posts without an Origin
+// header, which CORS does not apply to.
+function corsHeaders(req: Request): Record<string, string> {
+    const origin = req.headers.get('origin') || req.headers.get('Origin') || ''
+    const headers: Record<string, string> = {
+        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, sync-key, Sync-Key',
+    }
+    if (ALLOWED_ORIGINS.has(origin)) {
+        headers['Access-Control-Allow-Origin'] = origin
+    }
+    return headers
 }
 
 const toFiniteNumber = (value: unknown, fallback = 0) => {
@@ -23,19 +39,13 @@ const getSessionFromTime = (time: string): string => {
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders })
+        return new Response('ok', { headers: corsHeaders(req) })
     }
 
     try {
-        const supabaseClient = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-        )
-
-        // 1. Extract Body and Sync Key
         const body = await req.json().catch(() => ({}));
 
-        // Try to get sync key from headers (various formats) or body
+        // Extract the sync key (the caller's bridge identifier).
         const syncKey = req.headers.get('sync-key') ||
             req.headers.get('Sync-Key') ||
             body.sync_key ||
@@ -47,31 +57,86 @@ serve(async (req) => {
                 error: 'Missing sync key',
                 details: 'No sync-key found in headers or body'
             }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
                 status: 400,
             })
         }
 
-        const { trades, account, openPositions, isHeartbeat, isReconciliation } = body;
-
-        // 2. Verify sync key exists in profiles
-        const { data: profile, error: profileError } = await supabaseClient
-            .from('profiles')
-            .select('id, name, auto_journal, ea_connected')
-            .eq('sync_key', syncKey)
-            .single();
-
-        if (profileError) {
-            console.error('Profile lookup error:', profileError);
+        // ── Security: require an authenticated user JWT ────────────────────────
+        // The sync key is a client-known secret and must NEVER authorize
+        // service-role writes on its own. Only a verified Supabase user whose
+        // profile sync_key matches may write here.
+        const authHeader = req.headers.get('Authorization') || '';
+        const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+        if (!jwt) {
             return new Response(JSON.stringify({
                 success: false,
-                error: 'Invalid sync key',
-                details: profileError.code === 'PGRST116' ? 'Key not found in database' : `Database error: ${profileError.message}`
+                error: 'Unauthorized',
+                details: 'Missing user session (Authorization header required)'
             }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
                 status: 401,
             })
         }
+
+        const userClient = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+            {
+                global: { headers: { Authorization: `Bearer ${jwt}` } },
+                auth: { persistSession: false, autoRefreshToken: false },
+            }
+        );
+
+        const { data: userData, error: userError } = await userClient.auth.getUser();
+        if (userError || !userData?.user) {
+            return new Response(JSON.stringify({
+                success: false,
+                error: 'Invalid or expired session',
+                details: userError?.message || 'Could not verify the user session'
+            }), {
+                headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        // Verify the sync key belongs to the authenticated user's profile.
+        const { data: profile, error: profileError } = await userClient
+            .from('profiles')
+            .select('id, name, auto_journal, ea_connected, sync_key')
+            .eq('id', userData.user.id)
+            .maybeSingle();
+
+        if (profileError || !profile) {
+            return new Response(JSON.stringify({
+                success: false,
+                error: 'Profile not found',
+                details: profileError?.message || 'No profile exists for this user'
+            }), {
+                headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        if (profile.sync_key !== syncKey) {
+            return new Response(JSON.stringify({
+                success: false,
+                error: 'Invalid sync key',
+                details: 'The provided sync key does not match the authenticated user'
+            }), {
+                headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        // ── Internal writes ────────────────────────────────────────────────────
+        // Only reached after the user is verified above; scoped to profile.id.
+        const supabaseClient = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        )
+
+        const { trades, account, openPositions, isHeartbeat, isReconciliation } = body;
 
         // Check if the user has disconnected the bridge via the UI
         if (profile.ea_connected === false) {
@@ -81,7 +146,7 @@ serve(async (req) => {
                 error: 'Session terminated by user',
                 details: 'The bridge connection was disabled in the dashboard.'
             }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
                 status: 403, // Forbidden
             })
         }
@@ -131,7 +196,7 @@ serve(async (req) => {
                 // Map MT5 trade to DB schema
                 // Calculate Net PnL (Profit + Swap + Commission)
                 const netPnL = Number((trade.profit + (trade.swap || 0) + (trade.commission || 0)).toFixed(2));
-                
+
                 // Determine Status/Tags based on whether it's reconciliation
                 const tags = ['MT5_Auto_Journal'];
                 if (isReconciliation) {
@@ -173,7 +238,7 @@ serve(async (req) => {
                     mindset: 'Neutral',
                 };
 
-                // Only insert if it's an exit deal (entry = 1 or 2) 
+                // Only insert if it's an exit deal (entry = 1 or 2)
                 if (trade.entry === 1 || trade.entry === 2) {
                     newTrades.push(dbTrade);
                 }
@@ -199,7 +264,7 @@ serve(async (req) => {
             user: profile.name,
             synced_count: trades?.length || 0
         }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
             status: 200,
         })
 
@@ -210,7 +275,7 @@ serve(async (req) => {
             error: 'Internal server error',
             details: error.message
         }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
             status: 500,
         })
     }

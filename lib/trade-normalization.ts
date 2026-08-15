@@ -211,5 +211,7 @@ export const normalizeTrade = (
     setupId: resolveOptionalString(trade, fallback, 'setupId'),
     setupName: resolveOptionalString(trade, fallback, 'setupName'),
     deletedAt: resolveOptionalString(trade, fallback, 'deletedAt'),
+    chartCandles: Array.isArray(trade.chartCandles) ? trade.chartCandles : (Array.isArray(fallback.chartCandles) ? fallback.chartCandles : undefined),
+    chartTimeframe: resolveOptionalString(trade, fallback, 'chartTimeframe'),
   };
 };

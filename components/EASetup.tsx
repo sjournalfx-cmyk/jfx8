@@ -12,7 +12,6 @@ import { dataService } from '../services/dataService';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Trade, EASession, EADeal, EAPosition } from '../types';
 import OpenPositions from './OpenPositions';
-import BrokerConnect from './BrokerConnect';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useConnectionMode } from '../hooks/useConnectionMode';
 import { EA_BRIDGE_URL } from '../lib/constants';
@@ -107,43 +106,6 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
         />;
     }
 
-    if (connectionMode === 'broker') {
-        return (
-            <>
-                <div className="relative mb-6 flex items-center gap-3">
-                    <button
-                        onClick={async () => {
-                            const updated = { ...userProfile, mt_terminal_status: '' };
-                            await onUpdateProfile(updated);
-                            updateConnectionMode(null);
-                        }}
-                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
-                    >
-                        <ArrowRight size={12} className="rotate-180" />
-                        Back to methods
-                    </button>
-                </div>
-                <BrokerConnect
-                    isDarkMode={isDarkMode}
-                    userProfile={userProfile}
-                    onUpdateProfile={onUpdateProfile}
-                    embedded
-                    autoConnect={connectionMode === 'broker'}
-                    onDisconnect={async () => {
-                        const updated = { ...userProfile, mt_terminal_status: '' };
-                        await onUpdateProfile(updated);
-                        updateConnectionMode(null);
-                    }}
-                    userId={userId}
-                    eaSession={eaSession}
-                    onTradeAdded={onTradeAdded}
-                    onEditTrade={onEditTrade}
-                    trades={trades}
-                />
-            </>
-        );
-    }
-
     if (!connectionMode) {
         return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} />;
     }
@@ -190,7 +152,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
 
 /* --- SUB-COMPONENT: METHOD CHOICE SCREEN --- */
 interface MethodChoiceProps {
-    onSelect: (mode: 'bridge' | 'broker' | 'ctrader') => void;
+    onSelect: (mode: 'bridge' | 'ctrader') => void;
     onImportTrades?: (trades: Trade[]) => Promise<void>;
     isDarkMode: boolean;
 }
@@ -261,7 +223,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             csvInputRef.current?.click();
             return;
         }
-        onSelect(opt.id as 'bridge' | 'broker' | 'ctrader');
+        onSelect(opt.id as 'bridge' | 'ctrader');
     };
 
     const handleCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {

@@ -10,15 +10,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const _require = createRequire(import.meta.url);
 
+// Server-side NVIDIA key loading for the dev proxy. The key is read from the
+// server env only (never a VITE_* var, which Vite would inline into the bundle).
 const readNvidiaKey = () => {
   if (process.env.NVIDIA_API_KEY) return process.env.NVIDIA_API_KEY;
-  if (process.env.VITE_NVIDIA_API_KEY) return process.env.VITE_NVIDIA_API_KEY;
   for (const file of ['.env.local', '.env']) {
     try {
       const envPath = path.resolve(process.cwd(), file);
       if (fs.existsSync(envPath)) {
         const contents = fs.readFileSync(envPath, 'utf8');
-        const match = contents.match(/^(?:NVIDIA_API_KEY|VITE_NVIDIA_API_KEY)=(?:"([^"]+)"|([^"\r\n]+))/m);
+        const match = contents.match(/^NVIDIA_API_KEY=(?:"([^"]+)"|([^"\r\n]+))/m);
         const key = match?.[1] || match?.[2] || '';
         if (key) return key.trim();
       }
@@ -31,7 +32,7 @@ const readFmpKey = () => {
   try {
     const envPath = path.resolve(process.cwd(), '.env.local');
     const contents = fs.readFileSync(envPath, 'utf8');
-    const match = contents.match(/^(?:FMP_API_KEY|VITE_FMP_API_KEY)=(?:"([^"]+)"|([^"\r\n]+))/m);
+    const match = contents.match(/^FMP_API_KEY=(?:"([^"]+)"|([^"\r\n]+))/m);
     return match?.[1] || match?.[2] || '';
   } catch {
     return '';
@@ -124,7 +125,7 @@ const mt5PythonPlugin = () => {
 
       const makeFmpHandler = (endpointUrl) => async (req, res) => {
         try {
-          const apiKey = readFmpKey() || process.env.FMP_API_KEY || process.env.VITE_FMP_API_KEY;
+          const apiKey = readFmpKey() || process.env.FMP_API_KEY;
 
           if (!apiKey) {
             res.setHeader('Content-Type', 'application/json');

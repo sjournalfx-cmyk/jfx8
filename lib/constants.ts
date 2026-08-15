@@ -42,10 +42,6 @@ export const APP_CONSTANTS = {
 export const MT5_BRIDGE_URL = 'http://localhost:5001';
 export const EA_BRIDGE_URL = 'http://localhost:8888';
 
-// VPS Broker Direct API
-export const VPS_API_URL = import.meta.env.VITE_VPS_API_URL || 'https://vm807cmml.yourlocaldomain.com';
-export const VPS_API_KEY = import.meta.env.VITE_VPS_API_KEY || '';
-
 const PLAN_NORMALIZATION_MAP: Record<string, string> = {
   [APP_CONSTANTS.PLANS.FREE.toLowerCase()]: APP_CONSTANTS.PLANS.FREE,
   free: APP_CONSTANTS.PLANS.FREE,

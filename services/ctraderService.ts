@@ -4,8 +4,12 @@ const CTRADER_ID_BASE = 'https://id.ctrader.com';
 const WS_DEMO = 'wss://demo.ctraderapi.com:5036';
 const WS_LIVE = 'wss://live.ctraderapi.com:5036';
 
-const CLIENT_ID = import.meta.env.VITE_CTRADER_CLIENT_ID || '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
-const CLIENT_SECRET = import.meta.env.VITE_CTRADER_CLIENT_SECRET || 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
+// The client ID is a public OAuth identifier (safe to ship to the browser).
+// The client secret is required by the cTrader Open API web flow for the direct
+// WebSocket application auth (ProtoOAApplicationAuthReq) and is supplied via the
+// VITE_CTRADER_CLIENT_SECRET env var only — never hardcoded in source.
+const CLIENT_ID = import.meta.env.VITE_CTRADER_CLIENT_ID || '';
+const CLIENT_SECRET = import.meta.env.VITE_CTRADER_CLIENT_SECRET || '';
 const CTRADER_VOLUME_CENTS_PER_UNIT = 100;
 const CTRADER_UNITS_PER_LOT = 100000;
 const CTRADER_VOLUME_CENTS_PER_LOT = CTRADER_VOLUME_CENTS_PER_UNIT * CTRADER_UNITS_PER_LOT;
@@ -85,64 +89,56 @@ export interface CtraderPosition {
   takeProfit?: number;
 }
 
-const TOKEN_KEY = 'jfx_ctrader_tokens';
 const SCOPE = 'accounts';
 
 // ------------------------------------------------------------------
-// Storage helpers — use localStorage with sessionStorage fallback.
-// After an OAuth cross-site redirect, some browsers (Safari ITP /
-// Firefox ETP) throw "requestStorageAccess: Permission denied" on the
-// first localStorage call.  We request access first (no-op on Chrome)
-// then fall back to sessionStorage so the tokens are never lost.
+// Token storage — memory only.
+// The access token is held in a module variable (never persisted to
+// localStorage/sessionStorage, so XSS cannot exfiltrate it). The long-lived
+// refresh token is kept server-side in an httpOnly cookie set by
+// /api/ctrader/exchange, and /api/ctrader/refresh uses that cookie to mint a
+// fresh access token. After a page reload the access token is re-obtained via
+// that silent refresh, so sessions survive reloads without storing secrets
+// in the browser.
 // ------------------------------------------------------------------
-async function requestStorageIfNeeded(): Promise<void> {
+let memoryTokens: { accessToken: string; expiresAt: number } | null = null;
+
+/** Test helper only — seeds the in-memory token store. */
+export function __setTokensForTesting(tokens: { accessToken: string; expiresAt: number } | null) {
+  memoryTokens = tokens;
+}
+
+function getStoredTokens(): { accessToken: string; expiresAt: number } | null {
+  if (memoryTokens && Date.now() < memoryTokens.expiresAt) {
+    return memoryTokens;
+  }
+  return null;
+}
+
+/** Refresh the access token from the server (which reads the httpOnly cookie). */
+async function refreshTokensFromCookie(): Promise<boolean> {
   try {
-    if (typeof document.requestStorageAccess === 'function') {
-      await document.requestStorageAccess();
-    }
+    const res = await fetch('/api/ctrader/refresh', { method: 'POST' });
+    if (!res.ok) return false;
+    const data = await res.json();
+    const accessToken = data.access_token || data.accessToken;
+    if (!accessToken) return false;
+    memoryTokens = {
+      accessToken,
+      expiresAt: Date.now() + ((data.expires_in || data.expiresIn || 2628000) * 1000),
+    };
+    return true;
   } catch {
-    // Permission denied or API not available — fall through to sessionStorage fallback
+    return false;
   }
 }
 
-function getStoredTokens(): CtraderTokens | null {
-  try {
-    const raw = localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as CtraderTokens;
-  } catch {
-    try {
-      const raw = sessionStorage.getItem(TOKEN_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw) as CtraderTokens;
-    } catch {
-      return null;
-    }
-  }
-}
-
-async function storeTokensSafe(tokens: CtraderTokens): Promise<void> {
-  await requestStorageIfNeeded();
-  const value = JSON.stringify(tokens);
-  try {
-    localStorage.setItem(TOKEN_KEY, value);
-  } catch {
-    // localStorage blocked — persist in sessionStorage for this tab
-  }
-  try {
-    sessionStorage.setItem(TOKEN_KEY, value);
-  } catch { /* ignore */ }
-}
-
-function storeTokens(tokens: CtraderTokens) {
-  const value = JSON.stringify(tokens);
-  try { localStorage.setItem(TOKEN_KEY, value); } catch { /* blocked */ }
-  try { sessionStorage.setItem(TOKEN_KEY, value); } catch { /* blocked */ }
-}
-
-function clearTokens() {
-  try { localStorage.removeItem(TOKEN_KEY); } catch { /* blocked */ }
-  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* blocked */ }
+/** Return a valid token, silently refreshing from the httpOnly cookie when needed. */
+async function getTokens(): Promise<{ accessToken: string; expiresAt: number } | null> {
+  const cached = getStoredTokens();
+  if (cached) return cached;
+  const refreshed = await refreshTokensFromCookie();
+  return refreshed ? getStoredTokens() : null;
 }
 
 let wsDemo: WebSocket | null = null;
@@ -239,7 +235,7 @@ async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
   if (activePromise) return activePromise;
 
   const newPromise: Promise<WebSocket> = (async () => {
-    const tokens = getStoredTokens();
+    const tokens = await getTokens();
     if (!tokens) throw new Error('Not authenticated with cTrader');
 
     // Close any stale socket before creating a new one
@@ -388,6 +384,7 @@ function stopHeartbeat(isDemo?: boolean) {
 }
 
 export function getAuthorizeUrl(): string {
+  if (!CLIENT_ID) throw new Error('cTrader client ID is not configured (VITE_CTRADER_CLIENT_ID).');
   const redirectUri = `${window.location.origin}/api/ctrader/callback`;
   const url = new URL(`${CTRADER_ID_BASE}/my/settings/openapi/grantingaccess/`);
   url.searchParams.set('client_id', CLIENT_ID);
@@ -407,12 +404,12 @@ export async function exchangeCode(code: string): Promise<{ ok: boolean; error?:
       console.warn('[cTrader] exchange failed:', msg, data);
       return { ok: false, error: String(msg) };
     }
-    if (data.accessToken && data.refreshToken) {
-      await storeTokensSafe({
+    if (data.accessToken) {
+      // The refresh token is stored server-side in an httpOnly cookie by the exchange endpoint.
+      memoryTokens = {
         accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
         expiresAt: Date.now() + (data.expiresIn || 2628000) * 1000,
-      });
+      };
       return { ok: true };
     }
     return { ok: false, error: data?.error || 'No tokens in response' };
@@ -423,38 +420,17 @@ export async function exchangeCode(code: string): Promise<{ ok: boolean; error?:
 
 
 export function isAuthenticated(): boolean {
-  const tokens = getStoredTokens();
-  if (!tokens) return false;
-  return Date.now() < tokens.expiresAt;
+  return getStoredTokens() !== null;
 }
 
 export async function refreshToken(): Promise<boolean> {
-  const tokens = getStoredTokens();
-  if (!tokens?.refreshToken) return false;
-
-  try {
-    const res = await fetch('/api/ctrader/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: tokens.refreshToken }),
-    });
-
-    if (!res.ok) return false;
-
-    const data = await res.json();
-    storeTokens({
-      accessToken: data.accessToken || data.access_token,
-      refreshToken: data.refreshToken || data.refresh_token || tokens.refreshToken,
-      expiresAt: Date.now() + (data.expiresIn || data.expires_in || 2628000) * 1000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return refreshTokensFromCookie();
 }
 
 export function logout() {
-  clearTokens();
+  memoryTokens = null;
+  // Clear the server-side refresh cookie (best-effort).
+  try { void fetch('/api/ctrader/logout', { method: 'POST' }); } catch { /* ignore */ }
   appAuthDone.clear();
   appAuthPromises.clear();
   accountAuthPromises.clear();
@@ -472,16 +448,8 @@ export function logout() {
 }
 
 export async function getAccounts(): Promise<CtraderAccount[]> {
-  let tokens = getStoredTokens();
+  const tokens = await getTokens();
   if (!tokens) throw new Error('Not authenticated with cTrader');
-
-  // Auto-refresh if expired
-  if (Date.now() >= tokens.expiresAt) {
-    const refreshed = await refreshToken();
-    if (!refreshed) throw new Error('cTrader session expired. Please reconnect.');
-    tokens = getStoredTokens();
-    if (!tokens) throw new Error('cTrader session expired. Please reconnect.');
-  }
 
   const res = await fetch('/api/ctrader/accounts', {
     headers: { Authorization: `Bearer ${tokens.accessToken}` },
@@ -496,15 +464,11 @@ export async function getAccounts(): Promise<CtraderAccount[]> {
   return dedupeAccountsByTraderId((data.accounts || []) as CtraderAccount[]);
 }
 export async function authAccount(ctidTraderAccountId: number, isDemo: boolean = true): Promise<void> {
-  let tokens = getStoredTokens();
+  const tokens = await getTokens();
   if (!tokens) throw new Error('Not authenticated with cTrader');
 
-  // Auto-refresh if expired
-  if (Date.now() >= tokens.expiresAt) {
-    const refreshed = await refreshToken();
-    if (!refreshed) throw new Error('cTrader session expired. Please reconnect.');
-    tokens = getStoredTokens();
-    if (!tokens) throw new Error('cTrader session expired. Please reconnect.');
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    throw new Error('cTrader app credentials are not configured (VITE_CTRADER_CLIENT_ID / VITE_CTRADER_CLIENT_SECRET).');
   }
 
   const socket = await ensureConnected(isDemo);
@@ -684,7 +648,7 @@ export interface CtraderOrder {
 }
 
 export async function getCtidProfile(): Promise<any> {
-  const tokens = getStoredTokens();
+  const tokens = await getTokens();
   if (!tokens) throw new Error('Not authenticated with cTrader');
   const socket = await ensureConnected(true);
   const data = await sendWsMessage(socket, PT.GET_CTID_PROFILE_BY_TOKEN_REQ, {

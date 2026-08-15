@@ -11,6 +11,7 @@ import { Trade, UserProfile } from '../types';
 import { getSASTDateTime, getDefaultTimezone } from '../lib/timeUtils';
 import { sanitizeRichTextHtml } from '../lib/htmlSanitizer';
 import { JournalSkeleton, EmptyState } from './ui/Skeleton';
+import TradeChartView from './TradeChartView';
 
 interface JournalProps {
   isDarkMode: boolean;
@@ -641,6 +642,8 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
     };
 
     const [previewImage, setPreviewImage] = useState<{ url: string, title: string } | null>(null);
+    // Track per-trade canvas mode: 'chart' (default) or 'screenshots'
+    const [canvasMode, setCanvasMode] = useState<Record<string, 'chart' | 'screenshots'>>({});
     const [editingComment, setEditingComment] = useState<{ tradeId: string; field: 'notes' | 'exitComment'; value: string } | null>(null);
     const [editingStrategy, setEditingStrategy] = useState<{ tradeId: string; value: string } | null>(null);
     const [editingRating, setEditingRating] = useState<{ tradeId: string; value: number; hoverValue?: number } | null>(null);
@@ -787,84 +790,137 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                             )}
                         </div>
                     </div>
-                    <div className="col-span-12 lg:col-span-9 grid grid-cols-1 md:grid-cols-2 gap-4 md:h-full md:grid-rows-[308px_minmax(0,1fr)] items-stretch content-start pr-1">
-                        {[{ id: 'before', label: 'Before Canvas', data: trade.beforeScreenshot }, { id: 'after', label: 'After Canvas', data: trade.afterScreenshot }].map((slot) => (
-                            <div key={slot.id} className="group h-[308px] min-h-[308px] rounded-xl border overflow-hidden bg-black/5 dark:bg-white/5 border-dashed border-zinc-300 dark:border-zinc-700 flex flex-col">
-                                <div className="px-3 py-2 border-b border-white/5 dark:border-zinc-700/70 bg-black/5 dark:bg-white/5 flex items-center justify-between">
-                                    <div className="text-[9px] font-bold text-white uppercase tracking-wider px-2 py-0.5 bg-black/60 rounded">{slot.label}</div>
-                                    {slot.data && (
-                                        <div className="flex items-center gap-2">
-                                            <button 
-                                                onClick={() => setPreviewImage({ url: slot.data!, title: `${trade.pair} - ${slot.label} Screenshot` })}
-                                                className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all"
-                                                title="View Full Size"
-                                            >
-                                                <Eye size={16} />
-                                            </button>
-                                            <button 
-                                                onClick={() => handleDeleteImage(trade, slot.id as any)}
-                                                type="button"
-                                                className="p-2 bg-rose-500/80 hover:bg-rose-500 text-white rounded-lg transition-all"
-                                                title="Delete Image"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="relative flex-1 min-h-0 overflow-hidden">
-                                    {slot.data ? (
-                                        <img src={slot.data} alt={slot.label} className="absolute inset-0 w-full h-full object-cover" />
-                                    ) : (
-                                        <label className="absolute inset-0 cursor-pointer flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors">
-                                            <div className="flex flex-col items-center justify-center opacity-35 text-center">
-                                                <ImageIcon size={20} className="mb-2" />
-                                                <span className="text-[9px] font-bold uppercase tracking-wider">No Image</span>
-                                            </div>
-                                            <input 
-                                                type="file" 
-                                                accept="image/*" 
-                                                className="hidden" 
-                                                aria-label={`Upload ${slot.label} screenshot`}
-                                                onChange={(e) => handleUpload(trade, slot.id as any, e)} 
-                                            />
-                                        </label>
-                                    )}
+                    <div className="col-span-12 lg:col-span-9 grid grid-cols-1 md:grid-cols-2 gap-4 md:h-full md:grid-rows-[440px_auto] items-stretch content-start pr-1">
+                        {/* ── Chart / Screenshots dual-mode panel (spans both columns) ── */}
+                        <div className={`col-span-2 h-[440px] min-h-[440px] rounded-xl border overflow-hidden flex flex-col border-dashed ${isDarkMode ? 'border-zinc-700' : 'border-zinc-300'}`}>
+                            {/* ── Mode toggle header ── */}
+                            <div className={`flex items-center justify-between px-3 py-1.5 border-b shrink-0 ${isDarkMode ? 'border-zinc-800 bg-black/40' : 'border-slate-100 bg-slate-50'}`}>
+                                <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                                    {(canvasMode[trade.id] ?? 'chart') === 'chart' ? 'Live Chart' : 'Screenshots'}
+                                </span>
+                                <div className={`flex items-center rounded-lg p-0.5 gap-0.5 ${isDarkMode ? 'bg-zinc-900' : 'bg-slate-100'}`}>
+                                    <button
+                                        onClick={() => setCanvasMode(prev => ({ ...prev, [trade.id]: 'chart' }))}
+                                        className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${
+                                            (canvasMode[trade.id] ?? 'chart') === 'chart'
+                                                ? (isDarkMode ? 'bg-zinc-700 text-white' : 'bg-white text-slate-900 shadow-sm')
+                                                : (isDarkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-slate-400 hover:text-slate-600')
+                                        }`}
+                                        title="Live cTrader Chart"
+                                    >
+                                        📈 Chart
+                                    </button>
+                                    <button
+                                        onClick={() => setCanvasMode(prev => ({ ...prev, [trade.id]: 'screenshots' }))}
+                                        className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${
+                                            (canvasMode[trade.id] ?? 'chart') === 'screenshots'
+                                                ? (isDarkMode ? 'bg-zinc-700 text-white' : 'bg-white text-slate-900 shadow-sm')
+                                                : (isDarkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-slate-400 hover:text-slate-600')
+                                        }`}
+                                        title="Before / After screenshots"
+                                    >
+                                        🖼 Screenshots
+                                    </button>
                                 </div>
                             </div>
-                        ))}
-                        <div className={`h-full p-5 rounded-xl border flex flex-col ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
-                            <div className="flex items-center justify-between mb-2">
+
+                            {/* ── Mode content ── */}
+                            {(canvasMode[trade.id] ?? 'chart') === 'chart' ? (
+                                <div className="flex-1 min-h-0 overflow-hidden">
+                                    <TradeChartView 
+                                        trade={trade} 
+                                        isDarkMode={isDarkMode} 
+                                        onSaveCandles={(candles, tf) => {
+                                            onUpdateTrade({
+                                                ...trade,
+                                                chartCandles: candles,
+                                                chartTimeframe: tf,
+                                            });
+                                        }}
+                                    />
+                                </div>
+                            ) : (
+                                <div className="flex-1 min-h-0 grid grid-cols-2 gap-2 p-2">
+                                    {[{ id: 'before', label: 'Before Canvas', data: trade.beforeScreenshot }, { id: 'after', label: 'After Canvas', data: trade.afterScreenshot }].map((slot) => (
+                                        <div key={slot.id} className={`group rounded-lg border overflow-hidden flex flex-col border-dashed ${isDarkMode ? 'border-zinc-700 bg-white/5' : 'border-zinc-300 bg-black/5'}`}>
+                                            <div className="px-3 py-1.5 border-b border-white/5 dark:border-zinc-700/70 bg-black/5 dark:bg-white/5 flex items-center justify-between shrink-0">
+                                                <div className="text-[9px] font-bold text-white uppercase tracking-wider px-2 py-0.5 bg-black/60 rounded">{slot.label}</div>
+                                                {slot.data && (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            onClick={() => setPreviewImage({ url: slot.data!, title: `${trade.pair} - ${slot.label} Screenshot` })}
+                                                            className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all"
+                                                            title="View Full Size"
+                                                        >
+                                                            <Eye size={14} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteImage(trade, slot.id as any)}
+                                                            type="button"
+                                                            className="p-1.5 bg-rose-500/80 hover:bg-rose-500 text-white rounded-lg transition-all"
+                                                            title="Delete Image"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="relative flex-1 min-h-0 overflow-hidden">
+                                                {slot.data ? (
+                                                    <img src={slot.data} alt={slot.label} className="absolute inset-0 w-full h-full object-cover" />
+                                                ) : (
+                                                    <label className="absolute inset-0 cursor-pointer flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors">
+                                                        <div className="flex flex-col items-center justify-center opacity-35 text-center">
+                                                            <ImageIcon size={18} className="mb-1.5" />
+                                                            <span className="text-[9px] font-bold uppercase tracking-wider">No Image</span>
+                                                        </div>
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            className="hidden"
+                                                            aria-label={`Upload ${slot.label} screenshot`}
+                                                            onChange={(e) => handleUpload(trade, slot.id as any, e)}
+                                                        />
+                                                    </label>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className={`p-3.5 min-h-[90px] max-h-[140px] rounded-xl border flex flex-col ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
+                            <div className="flex items-center justify-between mb-1.5 shrink-0">
                                 <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40">Entry Note</h4>
                                 {!(editingComment?.tradeId === trade.id && editingComment.field === 'notes') && (
                                     <button
                                         onClick={() => beginCommentEdit(trade, 'notes')}
-                                        className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-black text-zinc-500' : 'hover:bg-slate-100 text-slate-400'}`}
+                                        className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-black text-zinc-500' : 'hover:bg-slate-100 text-slate-400'}`}
                                         title="Edit Entry Comment"
                                     >
-                                        <Edit3 size={12} />
+                                        <Edit3 size={11} />
                                     </button>
                                 )}
                             </div>
                             <div className="flex-1 min-h-0 overflow-auto pr-1">
                                 {editingComment?.tradeId === trade.id && editingComment.field === 'notes' ? (
-                                    <div className="space-y-3">
+                                    <div className="space-y-2">
                                         <textarea
                                             value={editingComment.value}
                                             onChange={(e) => setEditingComment(prev => prev ? { ...prev, value: e.target.value } : prev)}
-                                            className={`w-full min-h-28 resize-none rounded-xl border px-3 py-2 text-sm outline-none ${isDarkMode ? 'bg-black border-zinc-800 text-zinc-100' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+                                            className={`w-full min-h-20 resize-none rounded-xl border px-3 py-2 text-xs outline-none ${isDarkMode ? 'bg-black border-zinc-800 text-zinc-100' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
                                             placeholder="Edit entry comment..."
                                         />
                                         <div className="flex items-center justify-end gap-2">
                                             <button
                                                 onClick={() => setEditingComment(null)}
-                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'bg-black text-zinc-300' : 'bg-slate-100 text-slate-600'}`}
+                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'bg-black text-zinc-300' : 'bg-slate-100 text-slate-600'}`}
                                             >
                                                 Cancel
                                             </button>
                                             <button
                                                 onClick={() => saveCommentEdit(trade)}
-                                                className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-widest bg-brand text-white"
+                                                className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-brand text-white"
                                             >
                                                 Save
                                             </button>
@@ -872,54 +928,54 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     </div>
                                 ) : trade.notes ? (
                                     <div
-                                        className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none"
+                                        className="text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none"
                                         dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trade.notes) }}
                                     />
                                 ) : (
-                                    <p className="text-sm opacity-50 italic">No entry comments recorded.</p>
+                                    <p className="text-xs opacity-50 italic">No entry comments recorded.</p>
                                 )}
                             </div>
                             {trade.voiceNote && (
-                                <div className="mt-4 pt-4 border-t border-dashed border-current/10">
-                                    <h5 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2">Voice Note</h5>
-                                    <p className="text-sm leading-relaxed whitespace-pre-wrap opacity-90">
+                                <div className="mt-2 pt-2 border-t border-dashed border-current/10 shrink-0">
+                                    <h5 className="text-[9px] font-black uppercase tracking-widest opacity-40 mb-1">Voice Note</h5>
+                                    <p className="text-xs leading-relaxed whitespace-pre-wrap opacity-90">
                                         {trade.voiceNote}
                                     </p>
                                 </div>
                             )}
                         </div>
-                        <div className={`h-full p-5 rounded-xl border flex flex-col ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
-                            <div className="flex items-center justify-between mb-2">
+                        <div className={`p-3.5 min-h-[90px] max-h-[140px] rounded-xl border flex flex-col ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
+                            <div className="flex items-center justify-between mb-1.5 shrink-0">
                                 <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40">Exit Note</h4>
                                 {!(editingComment?.tradeId === trade.id && editingComment.field === 'exitComment') && (
                                     <button
                                         onClick={() => beginCommentEdit(trade, 'exitComment')}
-                                        className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-black text-zinc-500' : 'hover:bg-slate-100 text-slate-400'}`}
+                                        className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-black text-zinc-500' : 'hover:bg-slate-100 text-slate-400'}`}
                                         title="Edit Exit Comment"
                                     >
-                                        <Edit3 size={12} />
+                                        <Edit3 size={11} />
                                     </button>
                                 )}
                             </div>
                             <div className="flex-1 min-h-0 overflow-auto pr-1">
                                 {editingComment?.tradeId === trade.id && editingComment.field === 'exitComment' ? (
-                                    <div className="space-y-3">
+                                    <div className="space-y-2">
                                         <textarea
                                             value={editingComment.value}
                                             onChange={(e) => setEditingComment(prev => prev ? { ...prev, value: e.target.value } : prev)}
-                                            className={`w-full min-h-28 resize-none rounded-xl border px-3 py-2 text-sm outline-none ${isDarkMode ? 'bg-black border-zinc-800 text-zinc-100' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+                                            className={`w-full min-h-20 resize-none rounded-xl border px-3 py-2 text-xs outline-none ${isDarkMode ? 'bg-black border-zinc-800 text-zinc-100' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
                                             placeholder="Edit exit comment..."
                                         />
                                         <div className="flex items-center justify-end gap-2">
                                             <button
                                                 onClick={() => setEditingComment(null)}
-                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'bg-black text-zinc-300' : 'bg-slate-100 text-slate-600'}`}
+                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'bg-black text-zinc-300' : 'bg-slate-100 text-slate-600'}`}
                                             >
                                                 Cancel
                                             </button>
                                             <button
                                                 onClick={() => saveCommentEdit(trade)}
-                                                className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-widest bg-brand text-white"
+                                                className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-brand text-white"
                                             >
                                                 Save
                                             </button>
@@ -927,11 +983,11 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     </div>
                                 ) : trade.exitComment ? (
                                     <div
-                                        className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none"
+                                        className="text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none"
                                         dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trade.exitComment) }}
                                     />
                                 ) : (
-                                    <p className="text-sm opacity-50 italic">No exit comments recorded.</p>
+                                    <p className="text-xs opacity-50 italic">No exit comments recorded.</p>
                                 )}
                             </div>
                         </div>

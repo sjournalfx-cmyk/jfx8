@@ -1,8 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import WebSocket from 'ws';
+import { applyCorsHeaders } from '../_lib/cors';
 
-const CLIENT_ID = process.env.VITE_CTRADER_CLIENT_ID || process.env.CTRADER_CLIENT_ID || '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
-const CLIENT_SECRET = process.env.VITE_CTRADER_CLIENT_SECRET || process.env.CTRADER_CLIENT_SECRET || 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
+// Server-only credentials. The client secret must never be shipped to the browser.
+const CLIENT_ID = process.env.CTRADER_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';
 
 // Official cTrader Open API payload types
 const PT = {
@@ -119,7 +121,7 @@ function fetchAccountsFromHost(
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCorsHeaders(res, req.headers);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 

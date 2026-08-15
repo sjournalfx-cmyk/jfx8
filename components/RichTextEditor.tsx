@@ -15,7 +15,6 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import Image from '@tiptap/extension-image';
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu';
-import mermaid from 'mermaid';
 import {
   Bold, Italic, Underline as UnderlineIcon, List,
   ListChecks, Table as TableIcon, Eraser, Type,
@@ -199,78 +198,6 @@ const FloatingText = TiptapNode.create({
   },
 });
 
-const MermaidNodeView = ({ node, extension }: any) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const renderDiagram = async () => {
-      if (!containerRef.current) return;
-      const code = node.attrs.code || node.textContent;
-      if (!code) return;
-
-      try {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: 'dark', // We can adjust this based on isDarkMode if we pass it
-          securityLevel: 'loose',
-          fontFamily: 'Inter',
-        });
-        const { svg } = await mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, code.replace(/```mermaid/g, '').replace(/```/g, '').trim());
-        containerRef.current.innerHTML = svg;
-        setError(null);
-      } catch (e: any) {
-        console.error("Mermaid Render Error", e);
-        setError("Invalid diagram code");
-      }
-    };
-
-    renderDiagram();
-  }, [node.attrs.code, node.textContent]);
-
-  return (
-    <div className="mermaid-wrapper my-4 p-4 rounded-xl border border-zinc-800 bg-black flex flex-col items-center justify-center relative group">
-      {error && <div className="absolute top-2 left-2 text-[10px] text-rose-500 font-bold uppercase">{error}</div>}
-      <div ref={containerRef} className="max-w-full overflow-auto" />
-      <div className="hidden group-hover:block absolute bottom-2 right-2 text-[8px] font-black uppercase tracking-widest opacity-20">AI Generated Map</div>
-    </div>
-  );
-};
-
-const MermaidExtension = TiptapNode.create({
-  name: 'mermaid',
-  group: 'block',
-  atom: true,
-  draggable: true,
-
-  addAttributes() {
-    return {
-      code: {
-        default: '',
-      },
-    };
-  },
-
-  parseHTML() {
-    return [
-      {
-        tag: 'div.mermaid-diagram-note',
-        getAttrs: (element: any) => ({
-          code: element.textContent,
-        }),
-      },
-    ];
-  },
-
-  renderHTML({ node, HTMLAttributes }) {
-    return ['div', { class: 'mermaid-diagram-note', ...HTMLAttributes }, node.attrs.code];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(MermaidNodeView);
-  },
-});
-
 const RichTextEditor: React.FC<RichTextEditorProps> = ({
   content,
   onChange,
@@ -320,7 +247,6 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
         allowBase64: true,
       }),
       FloatingText,
-      MermaidExtension,
     ],
     content: content,
     onUpdate: ({ editor }) => {

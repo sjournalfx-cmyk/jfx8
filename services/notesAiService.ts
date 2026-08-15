@@ -145,17 +145,16 @@ const buildPresetPrompt = (options: NotebookAiOptions) => {
   ].join('\n').trim();
 };
 
-const hasNvidiaKey = () => Boolean(import.meta.env.VITE_NVIDIA_API_KEY);
-
+// The API key lives server-side only (/api/nvidia). The server returns a clear
+// error if it is not configured, so no VITE_* key check is needed here.
 async function requestNotebookCompletion(prompt: string): Promise<string> {
-  if (!hasNvidiaKey()) {
-    throw new Error('NVIDIA API key is not configured.');
-  }
-
+  const { getSessionToken } = await import('../lib/supabase');
+  const token = await getSessionToken();
   const response = await fetch(BASE_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({
       model: NVIDIA_CHAT_MODEL_ID,
