@@ -3,9 +3,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 
-// Server-only credentials. The client secret must never be shipped to the browser.
-const CLIENT_ID = process.env.CTRADER_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';
+function getCredentials() {
+  return {
+    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
+    clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '',
+  };
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Same-origin endpoint; do not depend on the shared CORS helper at function
@@ -31,8 +34,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    res.status(500).json({ error: 'cTrader OAuth credentials not configured on the server' });
+  const { clientId, clientSecret } = getCredentials();
+  if (!clientId || !clientSecret) {
+    res.status(503).json({ error: 'cTrader OAuth credentials are not configured for this deployment' });
     return;
   }
 
@@ -40,8 +44,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
+      client_id: clientId,
+      client_secret: clientSecret,
     });
 
     const tokenRes = await fetch(CTRADER_TOKEN_URL, {

@@ -1,9 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import WebSocket from 'ws';
 
-// Server-only credentials. The client secret must never be shipped to the browser.
-const CLIENT_ID = process.env.CTRADER_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';
+// Match the exchange route during the VITE_* → server-only variable migration.
+// New deployments should use CTRADER_*, but existing Vercel projects may only
+// have the legacy VITE_CTRADER_* variables configured.
+function getCredentials() {
+  return {
+    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
+    clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '',
+  };
+}
 
 // Official cTrader Open API payload types
 const PT = {
@@ -138,14 +144,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    res.status(500).json({ error: 'cTrader OAuth credentials not configured' });
+  const { clientId, clientSecret } = getCredentials();
+  if (!clientId || !clientSecret) {
+    res.status(503).json({
+      error: 'cTrader OAuth credentials are not configured for this deployment',
+      missing: [!clientId && 'CTRADER_CLIENT_ID', !clientSecret && 'CTRADER_CLIENT_SECRET'].filter(Boolean),
+    });
     return;
   }
 
   try {
-    const demoAccs = await fetchAccountsFromHost('demo.ctraderapi.com', accessToken, CLIENT_ID, CLIENT_SECRET);
-    const liveAccs = await fetchAccountsFromHost('live.ctraderapi.com', accessToken, CLIENT_ID, CLIENT_SECRET);
+    const demoAccs = await fetchAccountsFromHost('demo.ctraderapi.com', accessToken, clientId, clientSecret);
+    const liveAccs = await fetchAccountsFromHost('live.ctraderapi.com', accessToken, clientId, clientSecret);
 
     // Merge and deduplicate by ctidTraderAccountId (both endpoints return all accounts)
     const merged = [...demoAccs, ...liveAccs];
