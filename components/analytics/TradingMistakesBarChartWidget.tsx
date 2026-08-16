@@ -201,15 +201,15 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-2 pt-0 pb-0">
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-slate-50'}`}>
             <div className="text-[9px] font-black uppercase tracking-widest opacity-50">Total mistakes</div>
             <div className="mt-0.5 text-base font-black">{totalMistakes}</div>
           </div>
-          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-slate-50'}`}>
             <div className="text-[9px] font-black uppercase tracking-widest opacity-50">Unique types</div>
             <div className="mt-0.5 text-base font-black">{mistakeData.length}</div>
           </div>
-          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-slate-50'}`}>
             <div className="text-[9px] font-black uppercase tracking-widest opacity-50">Most common</div>
             <div className="flex items-baseline justify-between gap-2 mt-0.5">
               <div className="truncate text-xs font-black">{mostCommonMistake?.mistake || 'None'}</div>
@@ -221,7 +221,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
         </div>
 
         {mistakeData.length === 0 ? (
-          <div className={`flex flex-1 min-h-[160px] items-center justify-center rounded-[28px] border border-dashed text-center ${isDarkMode ? 'border-zinc-800 bg-white/5 text-zinc-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
+          <div className={`flex flex-1 min-h-[160px] items-center justify-center rounded-[28px] border border-dashed text-center ${isDarkMode ? 'border-zinc-800 bg-black text-zinc-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
             <div className="space-y-3 px-6">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10 text-rose-500">
                 <AlertTriangle size={22} />

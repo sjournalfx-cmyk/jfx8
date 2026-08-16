@@ -261,7 +261,6 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                     {options.map((opt, idx) => (
                         <button
                             key={opt.id}
-                            disabled={opt.id === 'csv'}
                             onClick={() => void handleCardClick(opt)}
                             style={{
                                 animationDelay: `${idx * 150}ms`,
@@ -316,7 +315,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                                 <div
                                     className={`inline-flex items-center gap-2 px-4 py-2 lg:px-5 lg:py-2.5 rounded-xl text-xs lg:text-sm font-semibold transition-all duration-300 ${
                                         opt.id === 'csv'
-                                            ? 'bg-white/5 text-zinc-500 border border-white/5 cursor-not-allowed'
+                                            ? 'bg-[#8B5CF6] text-white border border-[#8B5CF6] group-hover:gap-3'
                                             : 'text-white group-hover:gap-3'
                                     }`}
                                     style={opt.id !== 'csv' ? { backgroundColor: opt.accent } : undefined}
