@@ -14,9 +14,10 @@ interface ComparisonViewProps {
     trades: Trade[];
     isDarkMode: boolean;
     currencySymbol: string;
+    onInfoClick?: () => void;
 }
 
-export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isDarkMode, currencySymbol = '$' }) => {
+export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick }) => {
     const [compareMode, setCompareMode] = useState<'symbol' | 'strategy' | 'session'>('symbol');
 
     const getTradeSession = (t: Trade) => {
@@ -415,7 +416,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isD
                 <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-2">
                         <h3 className="text-xl font-bold tracking-tight">Comparative Equity Curve</h3>
-                        <InfoTooltip content="A direct overlay comparing the cumulative profit/loss progression over time for both selected metrics." isDarkMode={isDarkMode}>
+                        <InfoTooltip content="A direct overlay comparing the cumulative profit/loss progression over time for both selected metrics." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
                             <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
                         </InfoTooltip>
                     </div>

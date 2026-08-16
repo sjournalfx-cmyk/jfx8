@@ -132,7 +132,7 @@ export const WidgetHelpDrawer: React.FC<WidgetHelpDrawerProps> = ({
 
                     ) : (
                         /* ── ARTICLE VIEW (RAW TEXT & BULLET POINTS ONLY) ── */
-                        <div className="space-y-6 text-xs text-zinc-300 leading-relaxed">
+                        <div className="flex flex-col gap-6 text-xs text-zinc-300 leading-relaxed">
 
                             {/* Title row */}
                             <div className="flex items-start justify-between gap-3">
@@ -155,7 +155,7 @@ export const WidgetHelpDrawer: React.FC<WidgetHelpDrawerProps> = ({
 
                             {/* Formula */}
                             {activeArticle.formula && (
-                                <div className="space-y-2">
+                                <div className="order-1 space-y-2">
                                     <p className="font-bold text-white text-xs">The Formula:</p>
                                     <p className="text-zinc-300 text-xs">{activeArticle.formula}</p>
                                     {activeArticle.formulaExample && (
@@ -172,7 +172,7 @@ export const WidgetHelpDrawer: React.FC<WidgetHelpDrawerProps> = ({
 
                             {/* Why Misleading */}
                             {activeArticle.whyMisleading && (
-                                <div className="space-y-2">
+                                <div className="order-3 space-y-2">
                                     <p className="font-bold text-white text-xs">
                                         Why {activeArticle.title.replace('What is ', '').replace('?', '')} Alone is Misleading
                                     </p>
@@ -198,7 +198,7 @@ export const WidgetHelpDrawer: React.FC<WidgetHelpDrawerProps> = ({
 
                             {/* How It Helps */}
                             {activeArticle.howItHelps && activeArticle.howItHelps.length > 0 && (
-                                <div className="space-y-4">
+                                <div className="order-2 space-y-4">
                                     <p className="font-bold text-white text-xs">
                                         How Tracked {activeArticle.title.replace('What is ', '').replace(/\?$/, 's').replace(/a$/i, 'a').replace(/e$/i, 'e')} Help Traders
                                     </p>                                    <div className="space-y-4">
@@ -222,7 +222,7 @@ export const WidgetHelpDrawer: React.FC<WidgetHelpDrawerProps> = ({
                             )}
 
                             {/* Bottom spacer */}
-                            <div className="h-8" />
+                            <div className="order-4 h-8" />
                         </div>
                     )}
                 </div>

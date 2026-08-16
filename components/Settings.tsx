@@ -514,19 +514,6 @@ const Settings: React.FC<SettingsProps> = ({
                       )}
                     </div>
 
-                    <div className={`mt-5 flex items-center justify-between gap-4 border-t pt-4 ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}>
-                      <p className="text-[11px] opacity-50">
-                        Save persona changes before leaving this section.
-                      </p>
-                      <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-4 py-2.5 text-[13px] font-black text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isSaving ? 'Saving...' : 'Save Settings'}
-                        <Save size={14} />
-                      </button>
-                    </div>
                   </div>
                 </section>
               </div>

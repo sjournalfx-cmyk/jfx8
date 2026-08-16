@@ -128,7 +128,7 @@ export const TimeAnalysisMatrixWidget: React.FC<TimeAnalysisMatrixProps> = ({ tr
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-bold tracking-tight italic uppercase">Time-of-Day Performance</h3>
-              <Tooltip content="Heatmap showing net P&L for each day-and-hour combination. Green = profitable slot, Red = loss-making slot." isDarkMode={isDarkMode}>
+              <Tooltip content="Heatmap showing net P&L for each day-and-hour combination. Green = profitable slot, Red = loss-making slot." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
               </Tooltip>
             </div>

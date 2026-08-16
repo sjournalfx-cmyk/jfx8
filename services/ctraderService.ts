@@ -551,10 +551,45 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
 
   const data = await sendWsMessage(socket, PT.DEAL_LIST_REQ, payload);
 
-  return (data.deal || []).map((deal: any) => {
+  const rawDeals = data.deal || [];
+  const parseTimestamp = (value: unknown): number | undefined => {
+    if (value === undefined || value === null || value === '') return undefined;
+    const numericValue = Number(value);
+    const timestamp = Number.isFinite(numericValue) ? numericValue : new Date(String(value)).getTime();
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined;
+  };
+  const getPositionId = (deal: any): string | undefined => {
+    const positionId = deal.positionId ?? deal.tradeData?.positionId ?? deal.closePositionDetail?.positionId;
+    return positionId === undefined || positionId === null ? undefined : String(positionId);
+  };
+
+  // A close deal's createTimestamp is often the same as its execution time.
+  // Build an index from all returned position deals so a close can use the
+  // position's first execution as its opening time instead.
+  const earliestPositionExecution = new Map<string, number>();
+  rawDeals.forEach((deal: any) => {
+    const positionId = getPositionId(deal);
+    const executionTime = parseTimestamp(deal.executionTimestamp ?? deal.createTimestamp);
+    if (!positionId || !executionTime) return;
+    const currentEarliest = earliestPositionExecution.get(positionId);
+    if (!currentEarliest || executionTime < currentEarliest) {
+      earliestPositionExecution.set(positionId, executionTime);
+    }
+  });
+
+  return rawDeals.map((deal: any) => {
     const tradeData = deal.tradeData || {};
+    const closePositionDetail = deal.closePositionDetail || {};
     const rawSymbolId = deal.symbolId ?? tradeData.symbolId ?? deal.closePositionDetail?.symbolId;
     const symbolId = rawSymbolId !== undefined && rawSymbolId !== null ? Number(rawSymbolId) : undefined;
+    const positionOpenTime = earliestPositionExecution.get(getPositionId(deal) || '');
+    const openTime = parseTimestamp(
+      closePositionDetail.entryTimestamp ??
+      closePositionDetail.openTimestamp ??
+      tradeData.openTimestamp ??
+      deal.openTimestamp
+    ) ?? positionOpenTime ?? parseTimestamp(deal.createTimestamp);
+    const closeTime = parseTimestamp(deal.executionTimestamp) ?? parseTimestamp(deal.createTimestamp);
 
     return {
       dealId: Number(deal.dealId),
@@ -567,9 +602,8 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
       profit: Number(deal.closePositionDetail?.grossProfit ?? deal.profit ?? 0) / 100,
       swap: Number(deal.closePositionDetail?.swap ?? deal.swap ?? 0) / 100,
       commission: Number(deal.commission ?? 0) / 100,
-      openTimestamp: deal.createTimestamp ? new Date(Number(deal.createTimestamp)).toISOString() : '',
-      closeTimestamp: deal.executionTimestamp ? new Date(Number(deal.executionTimestamp)).toISOString()
-        : deal.createTimestamp ? new Date(Number(deal.createTimestamp)).toISOString() : '',
+      openTimestamp: openTime ? new Date(openTime).toISOString() : '',
+      closeTimestamp: closeTime ? new Date(closeTime).toISOString() : '',
       stopLoss: deal.closePositionDetail?.stopLoss ? Number(deal.closePositionDetail.stopLoss) : undefined,
       takeProfit: deal.closePositionDetail?.takeProfit ? Number(deal.closePositionDetail.takeProfit) : undefined,
       entryPrice: deal.closePositionDetail?.entryPrice ? Number(deal.closePositionDetail.entryPrice) : undefined,

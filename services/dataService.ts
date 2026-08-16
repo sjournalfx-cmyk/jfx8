@@ -594,6 +594,25 @@ export const dataService = {
     return mapTradeFromDB(refreshedTrade as DBTrade);
   },
 
+  async updateTradeComments(tradeId: string, notes: string | undefined, exitComment: string | undefined): Promise<Trade> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
+    // Notes are edited frequently and do not require the full trade/image update
+    // workflow. Updating only these columns also prevents an older trade payload
+    // from briefly overwriting the comment in the realtime UI.
+    const { data, error } = await supabase
+      .from('trades')
+      .update({ notes: notes || null, exit_comment: exitComment || null })
+      .eq('id', tradeId)
+      .eq('user_id', user.id)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return mapTradeFromDB(data as DBTrade);
+  },
+
   async batchUpdateTrades(trades: Trade[]) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');

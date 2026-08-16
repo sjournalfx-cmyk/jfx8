@@ -7,12 +7,13 @@ import {
 import { ToolType } from './types';
 
 // Drawing-tool glyphs styled after TradingView's compact chart toolbar.
-// The ray keeps a visible arrowhead at its open end, while the vertical line
-// uses small caps so it cannot be confused with the rectangle tool.
+// The ray uses two circular anchor points and continues past the second point,
+// matching the ray handle shown on the chart.
 const RayToolIcon = ({ size = 16, strokeWidth = 1.8 }: { size?: number; strokeWidth?: number }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M4 20 19.5 4.5" />
-        <path d="M13.5 4.5h6v6" />
+        <path d="M5 19 12 12 19 5" />
+        <circle cx="5" cy="19" r="2.6" fill="none" />
+        <circle cx="12" cy="12" r="2.6" fill="none" />
     </svg>
 );
 

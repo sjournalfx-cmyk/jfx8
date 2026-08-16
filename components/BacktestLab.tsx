@@ -1459,21 +1459,6 @@ setAllData(validData);
                 </div>
 
                 <div className={`absolute left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 rounded-2xl border shadow-xl ${isDarkMode ? 'bg-black/80 border-zinc-800 shadow-black/20' : 'bg-slate-50 border-slate-200 shadow-slate-200/50'}`}>
-                    <div className={`flex items-center rounded-xl p-1 gap-1 ${isDarkMode ? 'bg-black/20' : 'bg-slate-100'}`}>
-                        <button 
-                            onClick={() => setActiveLabTab('chart')}
-                            className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeLabTab === 'chart' ? (isDarkMode ? 'bg-black text-[#FF4F01] border border-[#FF4F01]/20' : 'bg-white text-[#FF4F01] shadow-sm') : 'text-zinc-500 hover:text-zinc-300'}`}
-                        >
-                            Chart
-                        </button>
-                        <button 
-                            onClick={() => setActiveLabTab('optimizer')}
-                            className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeLabTab === 'optimizer' ? (isDarkMode ? 'bg-black text-[#FF4F01] border border-[#FF4F01]/20' : 'bg-white text-[#FF4F01] shadow-sm') : 'text-zinc-500 hover:text-zinc-300'}`}
-                        >
-                            Optimizer
-                        </button>
-                    </div>
-                    <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`} />
                     <div className={`flex items-center rounded-xl border px-2 relative ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-white border-slate-200'}`}>
                         <div className="flex items-center gap-2 px-1">
                             <div className="relative group/status">
@@ -1546,7 +1531,7 @@ setAllData(validData);
                         </button>
                     </div>
 
-                    <button onClick={() => handleFetchMT5Data()} disabled={isFetching} className={`h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest ${isFetching ? 'bg-black text-zinc-500 cursor-wait' : 'bg-gradient-to-r from-[#FF4F01] to-[#ff7e42] text-white active:scale-95 shadow-lg shadow-[#FF4F01]/25'}`}>
+                    <button onClick={() => handleFetchMT5Data()} disabled={isFetching} className={`h-9 px-4 rounded-xl border text-[10px] font-black uppercase tracking-widest backdrop-blur-xl transition-all ${isFetching ? 'bg-black/40 border-white/10 text-zinc-500 cursor-wait' : 'bg-[#FF4F01]/20 border-[#FF4F01]/35 text-orange-100 hover:bg-[#FF4F01]/30 hover:border-[#FF4F01]/55 active:scale-95 shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(255,79,1,0.12)]'}`}>
                         {isFetching ? 'Syncing...' : 'MT5 Sync'}
                     </button>
                     <button
@@ -1555,8 +1540,8 @@ setAllData(validData);
                         title="Fetch historical candles by date from cTrader Open API"
                         className={`h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
                             isCtraderFetching
-                                ? 'bg-black text-zinc-500 cursor-wait'
-                                : 'bg-gradient-to-r from-[#0061FF] to-[#60efff] text-white active:scale-95 shadow-lg shadow-[#0061FF]/25'
+                            ? 'bg-black/40 border-white/10 text-zinc-500 cursor-wait'
+                                : 'bg-[#1689ff]/20 border-[#48c8ff]/40 text-cyan-100 hover:bg-[#1689ff]/30 hover:border-[#48c8ff]/60 active:scale-95 shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(22,137,255,0.14)]'
                         }`}
                     >
                         {isCtraderFetching ? (
@@ -1795,7 +1780,7 @@ setAllData(validData);
                                                             }}
                                                             className={`py-1 rounded-lg text-[9px] font-black uppercase transition-all ${
                                                                 isDarkMode
-                                                                    ? 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-[#0061FF]/50'
+                                                                    ? 'bg-[#000000] hover:bg-[#111111] text-zinc-300 border border-zinc-800 hover:border-[#0061FF]/50'
                                                                     : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
                                                             }`}
                                                         >
@@ -1880,7 +1865,7 @@ setAllData(validData);
                                             className={`w-full py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md ${
                                                 isCtraderFetching
                                                     ? 'bg-black border-zinc-800 text-zinc-500 cursor-wait'
-                                                    : 'bg-gradient-to-r from-[#0061FF] to-[#60efff] text-white border-transparent shadow-[#0061FF]/25 hover:opacity-95'
+                                                    : 'bg-[#1689ff]/20 border-[#48c8ff]/40 text-cyan-100 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(22,137,255,0.14)] hover:bg-[#1689ff]/30 hover:border-[#48c8ff]/60'
                                             }`}
                                         >
                                             {isCtraderFetching ? (
@@ -2047,7 +2032,7 @@ setAllData(validData);
                                 <span className="px-2 py-1 rounded bg-rose-500/20 text-rose-500 text-[8px] font-black uppercase tracking-widest">LOCKED</span>
                             </div>
                         )}
-                        <button onClick={() => setIsSettingsOpen(true)} disabled={allData.length === 0} title="Settings" className={`p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-blue-500' : 'hover:bg-blue-50 text-blue-600'}`}>
+                        <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => setIsSettingsOpen(true)} title="Settings" className={`relative z-50 p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-blue-500' : 'hover:bg-blue-50 text-blue-600'}`}>
                             <Settings size={20} />
                         </button>
                         <div className="flex flex-col items-end gap-1 relative">
@@ -2076,10 +2061,11 @@ setAllData(validData);
                         )}
                     </div>
                 </div>
-            )}            {isSettingsOpen && (
-                <div className="fixed inset-0 z-[400] flex justify-end">
+            )}
+            {isSettingsOpen && (
+                <div className="fixed inset-0 flex justify-end pointer-events-auto" style={{ zIndex: 9999 }}>
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setIsSettingsOpen(false)} />
-                    <div className={`relative w-full max-w-md h-full shadow-2xl border-l flex flex-col ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>
+                    <div onClick={(event) => event.stopPropagation()} className={`relative w-full max-w-md h-full shadow-2xl border-l flex flex-col ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>
                         <div className={`px-5 py-4 border-b flex items-center justify-between ${isDarkMode ? 'border-zinc-800 bg-black/40' : 'border-slate-100 bg-slate-50/60'}`}>
                             <div className="flex items-center gap-3">
                                 <div className="h-10 w-10 grid place-items-center bg-[#FF4F01]/10 text-[#FF4F01] rounded-2xl">

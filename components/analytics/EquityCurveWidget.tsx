@@ -9,11 +9,12 @@ interface EquityCurveWidgetProps {
     isDarkMode: boolean;
     currencySymbol: string;
     currentBalanceOverride?: number;
+    hideCurrentValue?: boolean;
     onInfoClick?: () => void;
     isLoading?: boolean;
 }
 
-export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [], equityData = [], isDarkMode, currencySymbol = '$', currentBalanceOverride, onInfoClick, isLoading = false }) => {
+export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [], equityData = [], isDarkMode, currencySymbol = '$', currentBalanceOverride, hideCurrentValue = false, onInfoClick, isLoading = false }) => {
     const [hoverIndex, setHoverIndex] = useState<number | null>(null);
     const svgRef = useRef<SVGSVGElement>(null);
 
@@ -132,7 +133,7 @@ export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [
                         </div>
                     )}
                     
-                    {hoverIndex === null && (
+                    {hoverIndex === null && !hideCurrentValue && (
                         <div className="text-right">
                             <div className="text-lg font-bold font-mono tracking-tight" style={{ color: accentColor }}>
                                 {equityData[equityData.length - 1] >= 0 ? '+' : ''}{currencySymbol}{equityData[equityData.length - 1]?.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}

@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import { Trade } from '../../types';
-import { Tooltip } from '../ui/Tooltip';
-import { BarChart3, HelpCircle } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 
 interface SymbolPerformanceWidgetProps {
     trades: Trade[];
@@ -51,13 +50,6 @@ export const SymbolPerformanceWidget: React.FC<SymbolPerformanceWidgetProps> = (
                 </div>
                 <div className="flex items-center gap-2">
                     <h3 className="text-lg font-bold tracking-tight">Symbol Performance</h3>
-                    <Tooltip content="Aggregated performance metrics for your most and least profitable symbols." isDarkMode={isDarkMode}>
-                        <HelpCircle 
-                            size={14}
-                            onClick={onInfoClick}
-                            className="opacity-40 cursor-help hover:opacity-100" 
-                        />
-                    </Tooltip>
                 </div>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

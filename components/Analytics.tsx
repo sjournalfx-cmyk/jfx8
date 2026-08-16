@@ -5,6 +5,7 @@ import {
     Target, LineChart, Shield, X, Printer, Gauge, Zap, TrendingDown, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle
 } from 'lucide-react';
 import { Tooltip } from './ui/Tooltip';
+import { normalizePlan } from '../lib/constants';
 
 
 import {
@@ -269,9 +270,10 @@ interface AnalyticsProps {
   dailyPsychologyInsights?: PsychologyInsightsEntry | null;
   onRefreshPsychologyInsights?: () => void;
   isRefreshingPsychologyInsights?: boolean;
+  psychologyAnalyzeLimitReached?: boolean;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false }) => {
+const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false, psychologyAnalyzeLimitReached = false }) => {
     const trades = useMemo(() => {
         return sortTradesChronologically(rawTrades);
     }, [rawTrades]);
@@ -549,7 +551,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     </div>
                 </section>
 
-                <section className="flex min-h-[220px] flex-col rounded-[14px] border border-[#1f1f1f] bg-[#000000] p-4.5 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
+                <section className="flex min-h-[380px] flex-col rounded-[14px] border border-[#1f1f1f] bg-[#000000] p-[18px] shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
                     <div className="mb-3.5 flex items-start justify-between gap-4">
                         <div className="flex items-center gap-2">
                             <h2 className="text-[18px] font-bold text-white">Key Insights & Warnings</h2>
@@ -560,11 +562,12 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         <button
                             type="button"
                             onClick={onRefreshPsychologyInsights}
-                            disabled={!onRefreshPsychologyInsights || isRefreshingPsychologyInsights}
-                            className="group inline-flex items-center gap-2 rounded-[8px] border border-[#2c2c2c] bg-[linear-gradient(180deg,#121212_0%,#090909_100%)] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e2e8f0] shadow-[0_1px_0_rgba(255,255,255,0.04),0_8px_18px_rgba(0,0,0,0.25)] transition-all duration-200 hover:border-[#3a3a3a] hover:bg-[linear-gradient(180deg,#161616_0%,#0b0b0b_100%)] hover:text-white hover:shadow-[0_1px_0_rgba(255,255,255,0.06),0_12px_22px_rgba(0,0,0,0.32)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#2c2c2c] disabled:hover:bg-[linear-gradient(180deg,#121212_0%,#090909_100%)]"
+                            disabled={!onRefreshPsychologyInsights || isRefreshingPsychologyInsights || psychologyAnalyzeLimitReached}
+                            aria-label="Analyze psychology insights"
+                            title={psychologyAnalyzeLimitReached ? 'Daily Analyze limit reached (2/2)' : 'Analyze psychology insights'}
+                            className="group inline-flex items-center justify-center rounded-full p-1.5 text-[#93c5fd] transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
                         >
-                            <RotateCcw size={12} className={isRefreshingPsychologyInsights ? 'animate-spin text-white' : 'text-[#93c5fd] transition-transform duration-200 group-hover:rotate-12'} />
-                            <span className="translate-y-[0.5px]">Analyze</span>
+                            <RotateCcw size={14} className={isRefreshingPsychologyInsights ? 'animate-spin text-white' : 'transition-transform duration-200 group-hover:rotate-12'} />
                         </button>
                     </div>
 
@@ -665,25 +668,25 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     <div className="text-2xl font-black text-rose-500">-{currencySymbol}{stats.grossLoss.toLocaleString()}</div>
                 </div>
             );
-            case 'equityCurve': return <EquityCurveWidget trades={completedTrades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('equityCurve')} />;
+            case 'equityCurve': return <EquityCurveWidget trades={completedTrades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={currencySymbol} hideCurrentValue={normalizePlan(userProfile?.plan) !== 'FREE' && completedTrades.length === 0} onInfoClick={() => handleOpenHelp('equityCurve')} />;
             case 'drawdown': return <DrawdownOverTimeWidget trades={completedTrades} isDarkMode={isDarkMode} userProfile={userProfile} startingBalance={effectiveInitialBalance} onInfoClick={() => handleOpenHelp('drawdown')} />;
             case 'streakMomentum': return <MomentumStreakWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('momentumStreak')} />;
-            case 'symbolPerformance': return <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('currencyStrength')} />;
-            case 'largestWinLoss': return <LargestWinLossWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('winRate')} />;
+            case 'symbolPerformance': return <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('symbolPerformance')} />;
+            case 'largestWinLoss': return <LargestWinLossWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('largestWinLoss')} />;
             case 'currencyStrength': return <CurrencyStrengthMeter isDarkMode={isDarkMode} trades={completedTrades} onInfoClick={() => handleOpenHelp('currencyStrength')} />;
-            case 'outcomeDist': return <OutcomeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('winRate')} />;
+            case 'outcomeDist': return <OutcomeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('outcomeDistribution')} />;
             case 'riskReward': return (
                 <div className={`h-full p-8 rounded-[32px] border ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                     <h3 className="font-bold text-lg mb-6 flex items-center justify-between">
                         <span className="flex items-center gap-2"><Activity size={20} className="text-indigo-500" /> Risk/Reward</span>
-                        <Tooltip content="Compares average winning trade size vs average losing trade size. Higher is better." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('profitFactor')}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
+                        <Tooltip content="Compares average winning trade size vs average losing trade size. Higher is better." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('riskReward')}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </h3>
                     <div className="space-y-6"><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Win</span><span className="text-xl font-black text-emerald-500">{currencySymbol}{Math.round(stats.avgWin).toLocaleString()}</span></div><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Loss</span><span className="text-xl font-black text-rose-500">{currencySymbol}{Math.round(stats.avgLoss).toLocaleString()}</span></div></div>
                 </div>
             );
             case 'tradeGrade': return <TradeGradeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradeGrade')} />;
             case 'psychSlip': return <PsychologicalSlipWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('psychSlip')} />;
-            case 'timeMatrix': return <TimeAnalysisMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('revenueMatrix')} />;
+            case 'timeMatrix': return <TimeAnalysisMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('timeAnalysis')} />;
             default: return null;
         }
     };
@@ -746,7 +749,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                         <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                             <span className="flex items-center gap-1.5"><TrendingUp size={12} className="text-emerald-500" /> Total P&L</span>
-                            <Tooltip content="Net realized profit or loss from all closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('grossProfit')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
+                            <Tooltip content="Net realized profit or loss from all closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('netProfit')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                         </span>
                         <div className="text-xl font-black text-emerald-500">{currencySymbol}{stats.netProfit.toLocaleString()}</div>
                     </div>
@@ -755,7 +758,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
                         <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
                             <span className="flex items-center gap-1.5"><Activity size={12} className="text-indigo-500" /> Risk/Reward</span>
-                            <Tooltip content="Average winning trade amount divided by average losing trade amount." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('profitFactor')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
+                            <Tooltip content="Average winning trade amount divided by average losing trade amount." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('riskReward')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                         </span>
                         <div className="text-xl font-black">{stats.avgWin > 0 && stats.avgLoss < 0 ? (Math.abs(stats.avgWin) / Math.abs(stats.avgLoss)).toFixed(2) : '0.00'}</div>
                     </div>
@@ -824,10 +827,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             {activeTab === 'trades' && (
                 <div className="space-y-6 pb-20">
                     <div className="grid grid-cols-1 gap-4">
-                        <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('currencyStrength')} />
+                        <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('symbolPerformance')} />
                     </div>
                     <div className="grid grid-cols-1 gap-4">
-                        <PairDistributionTreemapWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('currencyStrength')} />
+                        <PairDistributionTreemapWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('pairDistribution')} />
                     </div>
                 </div>
             )}
@@ -838,10 +841,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 <div className="space-y-6 pb-20">
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                         <div className="min-h-[280px]">
-                            <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('tradeGrade')} />
+                            <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('strategyPerformance')} />
                         </div>
                         <div className="min-h-[280px]">
-                            <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('psychSlip')} />
+                            <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradingMistakes')} />
                         </div>
                     </div>
                     <div className="w-full min-h-[320px]">
@@ -855,7 +858,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
                             <h2 className="text-xl font-bold">Detailed Performance Report</h2>
-                            <Tooltip content="A comprehensive breakdown of all key performance metrics, trading days, and drawdowns." isDarkMode={isDarkMode}>
+                            <Tooltip content="A comprehensive breakdown of all key performance metrics, trading days, and drawdowns." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('detailedReport')}>
                                 <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
                             </Tooltip>
                         </div>
@@ -890,13 +893,15 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 </div>
             )}
 
-            {activeTab === 'reports' && <ComparisonView trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />}
+            {activeTab === 'reports' && <ComparisonView trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('comparison')} />}
 
             {activeTab === 'cash' && (
                 <CashTransactionsView
                     isDarkMode={isDarkMode}
                     userProfile={userProfile}
                     cashTransactions={cashTransactions}
+                    onCashTransactionsInfoClick={() => handleOpenHelp('cashTransactions')}
+                    onTransactionMomentumInfoClick={() => handleOpenHelp('transactionMomentum')}
                 />
             )}
 
@@ -906,13 +911,16 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         trades={completedTrades}
                         isDarkMode={isDarkMode}
                         currencySymbol={currencySymbol}
+                        onMarketSessionsInfoClick={() => handleOpenHelp('marketSessions')}
+                        onHourlyPerformanceInfoClick={() => handleOpenHelp('hourlyPerformance')}
+                        onDailyActivityInfoClick={() => handleOpenHelp('dailyActivity')}
                     />
 
                     <TimeAnalysisMatrixWidget 
                         trades={completedTrades} 
                         isDarkMode={isDarkMode} 
                         currencySymbol={currencySymbol} 
-                        onInfoClick={() => handleOpenHelp('revenueMatrix')}
+                        onInfoClick={() => handleOpenHelp('timeAnalysis')}
                     />
                 </div>
             )}

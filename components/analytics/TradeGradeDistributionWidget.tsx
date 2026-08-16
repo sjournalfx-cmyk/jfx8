@@ -57,11 +57,6 @@ export const TradeGradeDistributionWidget: React.FC<TradeGradeDistributionProps>
                 ))}
             </div>
 
-            {trades.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center bg-inherit rounded-[32px] opacity-20 text-[10px] font-black uppercase tracking-widest">
-                    No Ratings Found
-                </div>
-            )}
         </div>
     );
 };

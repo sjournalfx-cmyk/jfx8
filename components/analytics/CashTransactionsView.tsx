@@ -33,6 +33,8 @@ interface CashTransactionsViewProps {
   isDarkMode: boolean;
   userProfile: UserProfile;
   cashTransactions: CashTransaction[];
+  onCashTransactionsInfoClick?: () => void;
+  onTransactionMomentumInfoClick?: () => void;
 }
 
 const TRANSACTION_TYPES: CashTransactionType[] = ['Deposit', 'Withdrawal', 'Interest', 'Fee', 'Transfer'];
@@ -43,7 +45,7 @@ type CashTransactionFormData = Omit<Partial<CashTransaction>, 'amount'> & {
   description?: string;
 };
 
-export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDarkMode, userProfile, cashTransactions }) => {
+export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDarkMode, userProfile, cashTransactions, onCashTransactionsInfoClick, onTransactionMomentumInfoClick }) => {
   const [activeSubTab, setActiveTab] = useState<'transactions' | 'insights'>('insights');
   const [timeFilter, setTimeFilter] = useState('Last 12 months');
   const [typeFilter, setTypeFilter] = useState<CashTransactionType | 'All'>('All');
@@ -285,7 +287,7 @@ const chartData = useMemo(() => {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-black tracking-tight">Cash Transactions</h2>
-            <InfoTooltip content="A log of non-trade capital events that impact your overall trading account balance." isDarkMode={isDarkMode}>
+            <InfoTooltip content="A log of non-trade capital events that impact your overall trading account balance." isDarkMode={isDarkMode} onInfoClick={onCashTransactionsInfoClick}>
               <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
             </InfoTooltip>
           </div>
@@ -510,7 +512,7 @@ const chartData = useMemo(() => {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-xl font-black tracking-tight italic uppercase">TRANSACTION MOMENTUM</h3>
-                    <InfoTooltip content="A visual representation of your cumulative net capital flow or monthly flows over time." isDarkMode={isDarkMode}>
+                    <InfoTooltip content="A visual representation of your cumulative net capital flow or monthly flows over time." isDarkMode={isDarkMode} onInfoClick={onTransactionMomentumInfoClick}>
                       <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
                     </InfoTooltip>
                   </div>

@@ -207,8 +207,13 @@ const {
     [activeTrades, activeUserProfile, activeDailyBias, activeEaSession, lastKnownBridgeBalance, isBridgeOnline]
   );
   const [psychologyInsightsCache, setPsychologyInsightsCache] = useLocalStorage<PsychologyInsightsCache>(PSYCHOLOGY_INSIGHTS_STORAGE_KEY, {});
+  const [psychologyAnalyzeUsage, setPsychologyAnalyzeUsage] = useLocalStorage<Record<string, { date: string; count: number }>>('jfx_psychology_analyze_usage_v1', {});
   const psychologyInsightsScope = getPsychologyInsightsScopeKey(userId, isDemoMode);
   const todayPsychologyInsightsKey = getPsychologyInsightsDayKey();
+  const todayPsychologyAnalyzeCount = psychologyAnalyzeUsage[psychologyInsightsScope]?.date === todayPsychologyInsightsKey
+    ? psychologyAnalyzeUsage[psychologyInsightsScope].count
+    : 0;
+  const psychologyAnalyzeLimitReached = todayPsychologyAnalyzeCount >= 2;
   const buildPsychologyInsightsFallbackContent = useCallback(() => {
     const disciplineScore = analyticsSnapshot?.psychology?.disciplineScore?.score;
     const adherenceLevel = analyticsSnapshot?.psychology?.psychologyInsights?.adherenceLevel || 'Medium';
@@ -228,6 +233,17 @@ const {
 ### Immediate Action
 - Trade note review: re-open the latest trade notes and mark the exact point where discipline broke down.`;
   }, [analyticsSnapshot]);
+  const isValidPsychologyInsightsContent = (content: string) => {
+    const normalized = content.trim();
+    const hasRequiredSections = [
+      /^#{1,6}\s*key insights\s*$/im,
+      /^#{1,6}\s*warnings\s*$/im,
+      /^#{1,6}\s*immediate action\s*$/im,
+    ].every((pattern) => pattern.test(normalized));
+    const containsPromptLeak = /source facts|inside,? structure|format specifics|generate the trader'?s daily key insights/i.test(normalized);
+
+    return hasRequiredSections && !containsPromptLeak;
+  };
   const dailyPsychologyInsights = useMemo(() => {
     if (isDemoMode) return null;
 
@@ -237,7 +253,7 @@ const {
     const cleanedContent = extractSectionBody(entry.content, 'KEY_INSIGHTS_WARNINGS')
       || entry.content.replace(/^\s*\[SECTION:KEY_INSIGHTS_WARNINGS\]\s*/i, '').trim();
 
-    if (cleanedContent.trim()) {
+    if (isValidPsychologyInsightsContent(cleanedContent)) {
       return {
         ...entry,
         content: cleanedContent.trim(),
@@ -286,6 +302,19 @@ const {
   const refreshPsychologyInsights = useCallback(async (force = false) => {
     if (isDemoMode || isDataLoading || !activeUserProfile) return;
 
+    if (force) {
+      const usage = psychologyAnalyzeUsage[psychologyInsightsScope];
+      const count = usage?.date === todayPsychologyInsightsKey ? usage.count : 0;
+      if (count >= 2) return;
+      setPsychologyAnalyzeUsage((current) => ({
+        ...current,
+        [psychologyInsightsScope]: {
+          date: todayPsychologyInsightsKey,
+          count: count + 1,
+        },
+      }));
+    }
+
     const requestKey = `${psychologyInsightsScope}:${todayPsychologyInsightsKey}`;
     const cachedEntry = psychologyInsightsCache[psychologyInsightsScope];
     if (!force && (cachedEntry?.date === todayPsychologyInsightsKey || psychologyInsightsRequestRef.current === requestKey)) {
@@ -317,7 +346,9 @@ const {
       );
       const extractedContent = extractSectionBody(response, 'KEY_INSIGHTS_WARNINGS')
         || response.replace(/^\s*\[SECTION:KEY_INSIGHTS_WARNINGS\]\s*/i, '').trim();
-      const content = extractedContent.trim() || buildPsychologyInsightsFallbackContent();
+      const content = isValidPsychologyInsightsContent(extractedContent)
+        ? extractedContent.trim()
+        : buildPsychologyInsightsFallbackContent();
 
       setPsychologyInsightsCache((current) => ({
         ...current,
@@ -350,9 +381,11 @@ const {
     isDataLoading,
     isDemoMode,
     psychologyInsightsCache,
+    psychologyAnalyzeUsage,
     psychologyInsightsScope,
     psychologyInsightsSourceFacts,
     setPsychologyInsightsCache,
+    setPsychologyAnalyzeUsage,
     todayPsychologyInsightsKey,
   ]);
 
@@ -521,8 +554,18 @@ const {
       return;
     }
     const previousTrade = trades.find(t => t.id === updatedTrade.id);
+    const changedFields = previousTrade
+      ? Object.keys(updatedTrade).filter(key => updatedTrade[key as keyof Trade] !== previousTrade[key as keyof Trade])
+      : [];
+    const isCommentOnlyUpdate = changedFields.length > 0 && changedFields.every(key => key === 'notes' || key === 'exitComment');
+
+    if (isCommentOnlyUpdate) {
+      setTrades(prev => prev.map(t => t.id === updatedTrade.id ? updatedTrade : t));
+    }
     try {
-      const savedTrade = await dataService.updateTrade(updatedTrade);
+      const savedTrade = isCommentOnlyUpdate
+        ? await dataService.updateTradeComments(updatedTrade.id, updatedTrade.notes, updatedTrade.exitComment)
+        : await dataService.updateTrade(updatedTrade);
       setTrades(prev => prev.map(t => t.id === savedTrade.id ? savedTrade : t));
     } catch (error) {
       console.error("Error updating trade:", error);
@@ -992,7 +1035,6 @@ const onLogout = async () => {
               onLogout={onLogout}
               userProfile={activeUserProfile}
               trades={activeTrades}
-              eaSession={activeEaSession}
               offlineQueueCount={offlineQueue.length}
               isDemoMode={isDemoMode}
               onToggleDemoMode={() => {
@@ -1074,6 +1116,7 @@ const onLogout = async () => {
                 onDeleteTrades={handleDeleteTrades}
                 onEditTrade={handleEditTrade}
                 userProfile={activeUserProfile}
+                onViewChange={setCurrentView}
                 offlineQueue={offlineQueue}
                 isDemoMode={isDemoMode}
               />
@@ -1091,6 +1134,7 @@ const onLogout = async () => {
             dailyPsychologyInsights={dailyPsychologyInsights}
             onRefreshPsychologyInsights={() => refreshPsychologyInsights(true)}
             isRefreshingPsychologyInsights={isRefreshingPsychologyInsights}
+            psychologyAnalyzeLimitReached={psychologyAnalyzeLimitReached}
           />
         )}
             {currentView === 'notes' && (

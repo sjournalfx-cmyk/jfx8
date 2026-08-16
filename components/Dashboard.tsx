@@ -700,7 +700,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
             case 'recentTrades':
                 return <EconomicCalendarWidget isDarkMode={isDarkMode} />;
             case 'equityCurve':
-                return <EquityCurveWidget trades={trades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={userProfile.currencySymbol} isLoading={isLoading} />;
+                return <EquityCurveWidget trades={trades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={userProfile.currencySymbol} hideCurrentValue={!isFreeTier && trades.length === 0} isLoading={isLoading} />;
             case 'openPositions':
                 return (
                     <div className={`h-full p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-zinc-800 shadow-2xl' : 'bg-white border-slate-100 shadow-md'}`}>

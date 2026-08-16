@@ -28,9 +28,10 @@ const safePnL = (value: unknown): number => {
 };
 
 interface WidgetProps {
-  trades: Trade[];
-  isDarkMode: boolean;
-  currencySymbol: string;
+    trades: Trade[];
+    isDarkMode: boolean;
+    currencySymbol: string;
+    onInfoClick?: () => void;
 }
 
 const getSessionIcon = (session: string) => {
@@ -95,7 +96,7 @@ const formatSignedPnL = (value: number, currencySymbol: string) => {
   })}`;
 };
 
-export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode, currencySymbol }) => {
+export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode, currencySymbol, onInfoClick }) => {
   const data = useMemo(() => {
     const stats: Record<string, { pnl: number, wins: number, count: number }> = {
       'Asian': { pnl: 0, wins: 0, count: 0 },
@@ -136,7 +137,7 @@ export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode,
             <Sunrise size={20} className="text-brand" />
             Market Sessions
           </h3>
-          <InfoTooltip content="Performance breakdown categorized by major global market trading sessions (Asian, London, London/New York Overlap, and New York)." isDarkMode={isDarkMode}>
+          <InfoTooltip content="Performance breakdown categorized by major global market trading sessions (Asian, London, London/New York Overlap, and New York)." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
             <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
           </InfoTooltip>
         </div>
@@ -198,7 +199,7 @@ export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode,
   );
 };
 
-export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkMode, currencySymbol }) => {
+export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkMode, currencySymbol, onInfoClick }) => {
   const data = useMemo(() => {
     const stats: Record<number, { count: number, wins: number, pnl: number, holdMinutes: number, holdCount: number }> = {};
     Array.from({ length: 24 }).forEach((_, i) => {
@@ -277,7 +278,7 @@ export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkM
             <Clock size={20} className="text-brand" />
             Hourly Performance
           </h3>
-          <InfoTooltip content="Analysis of trade duration and performance structured by hour of day (SAST timezone)." isDarkMode={isDarkMode}>
+          <InfoTooltip content="Analysis of trade duration and performance structured by hour of day (SAST timezone)." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
             <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
           </InfoTooltip>
         </div>
@@ -392,7 +393,7 @@ export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkM
   );
 };
 
-export const DailyActivityHeatmap: React.FC<WidgetProps> = ({ trades, isDarkMode, currencySymbol }) => {
+export const DailyActivityHeatmap: React.FC<WidgetProps> = ({ trades, isDarkMode, currencySymbol, onInfoClick }) => {
   const data = useMemo(() => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
     const stats: Record<string, { pnl: number, count: number, wins: number }> = {};
@@ -489,7 +490,7 @@ export const DailyActivityHeatmap: React.FC<WidgetProps> = ({ trades, isDarkMode
             <BarChart2 size={24} className="text-brand" />
             Day of Week
           </h3>
-          <InfoTooltip content={tooltipContent} isDarkMode={isDarkMode}>
+          <InfoTooltip content={tooltipContent} isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
             <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
           </InfoTooltip>
         </div>

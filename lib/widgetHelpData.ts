@@ -324,6 +324,55 @@ export const WIDGET_HELP_DATABASE: Record<string, WidgetHelpArticle> = {
         ],
     },
 
+    pairDistribution: {
+        id: 'pairDistribution',
+        title: 'What is Pair Distribution?',
+        category: 'Trade Analysis',
+        breadcrumb: 'Help Center / Trade Analysis / Pair Distribution',
+        definition: 'The Pair Distribution treemap shows how your completed trades are spread across the instruments you trade. Each tile represents a pair, and its size reflects that pair’s share of your trading activity.',
+        formula: 'Tile size = Number of completed trades for the pair ÷ Total completed trades',
+        formulaExample: 'Example: If you completed 20 of 50 trades on EURUSD, its tile represents 40% of your trade distribution. The colour shows whether that pair was profitable or unprofitable overall.',
+        whyMisleading: {
+            intro: 'A large tile shows activity, not quality. A pair with many trades is not automatically your best opportunity.',
+            examples: [
+                'High Frequency, Low Quality: A large tile may reveal overtrading if the pair has poor profitability or inconsistent results.',
+                'Small Sample Size: A small, profitable tile may be due to only a few trades and needs more data before drawing conclusions.',
+            ],
+        },
+        howItHelps: [
+            {
+                title: '1. Reveals Trading Concentration',
+                points: [
+                    'Shows which pairs receive most of your attention and capital.',
+                    'Highlights concentration risk when one instrument dominates your activity.',
+                ],
+            },
+            {
+                title: '2. Supports Pair Review',
+                points: [
+                    'Compare the size and result of each tile to spot pairs worth keeping, reducing, or reviewing.',
+                    'Use it alongside win rate and expectancy before changing your watchlist.',
+                ],
+            },
+        ],
+    },
+
+    symbolPerformance: { id: 'symbolPerformance', title: 'What is Symbol Performance?', category: 'Trade Analysis', breadcrumb: 'Help Center / Trade Analysis / Symbol Performance', definition: 'Symbol Performance compares the completed-trade results of each instrument you trade, including its total P/L, win rate, and trade count.', formula: 'Pair P/L = Sum of completed-trade P/L for that symbol', formulaExample: 'Use a meaningful sample size before deciding that a pair is strong or weak.' },
+    largestWinLoss: { id: 'largestWinLoss', title: 'What are Largest Win and Loss?', category: 'Trade Analysis', breadcrumb: 'Help Center / Trade Analysis / Largest Win and Loss', definition: 'This widget highlights your biggest single winning and losing trades, together with the cumulative P/L of long and short positions.', formula: 'Largest result = Maximum or minimum P/L across completed trades', formulaExample: 'A single exceptional result is context, not proof of a repeatable edge.' },
+    outcomeDistribution: { id: 'outcomeDistribution', title: 'What is Outcome Distribution?', category: 'Trade Analysis', breadcrumb: 'Help Center / Trade Analysis / Outcome Distribution', definition: 'Outcome Distribution shows the share of completed trades that were wins, losses, or break-even.', formula: 'Outcome share = Trades in outcome ÷ Total completed trades × 100', formulaExample: 'Review it with average win and average loss; the most common outcome is not always the most profitable.' },
+    riskReward: { id: 'riskReward', title: 'What is Risk/Reward?', category: 'Overview', breadcrumb: 'Help Center / Overview / Risk Reward', definition: 'Risk/Reward compares the average amount you gain on winning trades with the average amount you lose on losing trades.', formula: 'Risk/Reward = Average win ÷ Absolute average loss', formulaExample: 'An average win of R200 and average loss of R100 produces a 2.0 risk/reward ratio.' },
+    netProfit: { id: 'netProfit', title: 'What is Net P/L?', category: 'Overview', breadcrumb: 'Help Center / Overview / Net Profit Loss', definition: 'Net P/L is the total realised result from all completed trades after gains and losses are combined.', formula: 'Net P/L = Gross profit − Gross loss', formulaExample: 'Positive net P/L means the selected completed trades made money overall.' },
+    timeAnalysis: { id: 'timeAnalysis', title: 'What is Time Analysis?', category: 'Timing', breadcrumb: 'Help Center / Timing / Time Analysis', definition: 'Time Analysis maps your completed-trade performance by day and hour, making productive and weak trading windows easier to identify.', formula: 'Time-slot P/L = Sum of completed-trade P/L in that day and hour', formulaExample: 'Treat a hot or cold slot cautiously until it contains enough trades to be representative.' },
+    strategyPerformance: { id: 'strategyPerformance', title: 'What is Strategy Performance?', category: 'Advanced', breadcrumb: 'Help Center / Advanced / Strategy Performance', definition: 'Strategy Performance groups completed trades by strategy tag to compare their activity and cumulative P/L.', formula: 'Strategy P/L = Sum of completed-trade P/L sharing a strategy tag', formulaExample: 'A strategy with fewer trades may need more samples before it is scaled or removed.' },
+    tradingMistakes: { id: 'tradingMistakes', title: 'What are Trading Mistakes?', category: 'Advanced', breadcrumb: 'Help Center / Advanced / Trading Mistakes', definition: 'Trading Mistakes tracks the frequency and impact of mistakes recorded in your journal, so recurring execution issues become visible.', formula: 'Mistake count = Number of completed trades tagged with each mistake', formulaExample: 'Focus on the mistakes that recur most often or coincide with the largest losses.' },
+    detailedReport: { id: 'detailedReport', title: 'What is the Detailed Performance Report?', category: 'Reports', breadcrumb: 'Help Center / Reports / Detailed Performance Report', definition: 'The Detailed Performance Report consolidates key performance metrics, trading-day activity, and drawdown information for review.', formula: 'Report values are calculated from the completed trades in the active journal data.', formulaExample: 'Use it to review the full performance picture instead of relying on any one metric.' },
+    marketSessions: { id: 'marketSessions', title: 'What is Market Session Performance?', category: 'Timing', breadcrumb: 'Help Center / Timing / Market Sessions', definition: 'Market Session Performance groups completed trades by Asian, London, overlap, and New York trading sessions.', formula: 'Session P/L = Sum of completed-trade P/L assigned to that session', formulaExample: 'Session results can help you focus preparation on the times your method performs best.' },
+    hourlyPerformance: { id: 'hourlyPerformance', title: 'What is Hourly Performance?', category: 'Timing', breadcrumb: 'Help Center / Timing / Hourly Performance', definition: 'Hourly Performance compares trade activity, duration, and results for each hour of the day.', formula: 'Hourly P/L = Sum of completed-trade P/L opened in each hour', formulaExample: 'Check that a favourable hour has enough trades before changing your trading schedule.' },
+    dailyActivity: { id: 'dailyActivity', title: 'What is Daily Activity?', category: 'Timing', breadcrumb: 'Help Center / Timing / Daily Activity', definition: 'Daily Activity shows how your trade count and P/L vary across the trading days of the week.', formula: 'Daily P/L = Sum of completed-trade P/L for each weekday', formulaExample: 'A poor day may be caused by a small sample, so review it alongside trade count.' },
+    comparison: { id: 'comparison', title: 'What is Comparative Equity?', category: 'Comparison', breadcrumb: 'Help Center / Comparison / Comparative Equity', definition: 'Comparative Equity overlays cumulative P/L for the two selected groups, such as symbols, strategies, or sessions.', formula: 'Cumulative P/L = Running sum of completed-trade P/L over time', formulaExample: 'Compare both the final result and the smoothness of each line.' },
+    cashTransactions: { id: 'cashTransactions', title: 'What are Cash Transactions?', category: 'Transactions', breadcrumb: 'Help Center / Transactions / Cash Transactions', definition: 'Cash Transactions records deposits, withdrawals, fees, interest, and transfers separately from trade performance.', formula: 'Net cash flow = Deposits + interest + transfers − withdrawals − fees', formulaExample: 'Separating cash flow from trading P/L prevents deposits from being mistaken for trading profit.' },
+    transactionMomentum: { id: 'transactionMomentum', title: 'What is Transaction Momentum?', category: 'Transactions', breadcrumb: 'Help Center / Transactions / Transaction Momentum', definition: 'Transaction Momentum visualises cumulative capital movements and their trend over time.', formula: 'Cumulative cash flow = Running sum of recorded cash transactions', formulaExample: 'Use it to understand balance changes that were caused by funding rather than trades.' },
+
     tradeGrade: {
         id: 'tradeGrade',
         title: 'What is Trade Setup Grade?',
@@ -521,6 +570,132 @@ export const WIDGET_HELP_DATABASE: Record<string, WidgetHelpArticle> = {
         ],
     },
 };
+
+const ADDITIONAL_GUIDANCE: Record<string, Pick<WidgetHelpArticle, 'whyMisleading' | 'howItHelps'>> = {
+    symbolPerformance: {
+        whyMisleading: { intro: 'A pair can look strong or weak because of a few unusual trades, market conditions, or different position sizes.', examples: ['Compare trade count as well as P/L before favouring a symbol.', 'Review expectancy and drawdown; a profitable pair can still be volatile.'] },
+        howItHelps: [{ title: '1. Refines your watchlist', points: ['Identify pairs where your setup has been most consistent.', 'Flag symbols that need a rule review, smaller size, or a pause.'] }],
+    },
+    largestWinLoss: {
+        whyMisleading: { intro: 'Extreme single trades can distort your perception of normal performance.', examples: ['A large win may be an outlier rather than a repeatable setup.', 'A large loss may signal a process failure, not just normal variance.'] },
+        howItHelps: [{ title: '1. Reviews execution extremes', points: ['Open the underlying trades and check entry, size, stop, and exit decisions.', 'Use the long versus short result to reveal directional bias.'] }],
+    },
+    outcomeDistribution: {
+        whyMisleading: { intro: 'Win frequency alone does not determine profitability.', examples: ['A high win rate can lose money when losses are much larger than wins.', 'Break-even trades can hide costs or early exits when viewed without P/L.'] },
+        howItHelps: [{ title: '1. Balances probability and payoff', points: ['Pair it with Risk/Reward and Profit Factor.', 'Track whether changes to your process improve the mix of outcomes.'] }],
+    },
+    riskReward: {
+        whyMisleading: { intro: 'A high ratio is only useful when it is supported by a realistic win rate and consistent execution.', examples: ['A single oversized win can inflate the ratio.', 'A good ratio does not compensate for ignoring stops or over-sizing.'] },
+        howItHelps: [{ title: '1. Tests your trade economics', points: ['Compare the ratio with win rate to assess expectancy.', 'Use it to spot whether winners are cut too early or losses are allowed to run.'] }],
+    },
+    netProfit: {
+        whyMisleading: { intro: 'Net P/L is the outcome, but it does not show the risk, consistency, or sample size that produced it.', examples: ['A positive result driven by one trade may not be repeatable.', 'A losing period can still contain sound execution during normal variance.'] },
+        howItHelps: [{ title: '1. Keeps the score', points: ['Track whether the account is progressing over the selected period.', 'Review it with drawdown, Profit Factor, and trade count before changing a strategy.'] }],
+    },
+    timeAnalysis: {
+        whyMisleading: { intro: 'Time slots with few trades can appear unusually good or bad by chance.', examples: ['News events can skew a day-hour cell.', 'Your availability may influence the result as much as the market session.'] },
+        howItHelps: [{ title: '1. Improves timing discipline', points: ['Focus preparation on time windows with repeatable results.', 'Use weak periods to set filters or reduce activity rather than forcing trades.'] }],
+    },
+    strategyPerformance: {
+        whyMisleading: { intro: 'Strategy tags are only as reliable as the labels recorded in the journal.', examples: ['Inconsistent tagging can split the same setup across multiple groups.', 'A strategy with few trades needs more evidence before it is scaled.'] },
+        howItHelps: [{ title: '1. Allocates attention to the right setups', points: ['Compare strategies using P/L, sample size, and drawdown.', 'Review losing strategies for market-condition or execution patterns.'] }],
+    },
+    tradingMistakes: {
+        whyMisleading: { intro: 'A low count can mean mistakes were not recorded, rather than that they did not occur.', examples: ['One severe mistake can matter more than several minor ones.', 'A mistake that wins still deserves review if it broke your process.'] },
+        howItHelps: [{ title: '1. Turns journaling into corrective action', points: ['Prioritise the most frequent or costly mistakes.', 'Create one specific prevention rule and measure whether recurrence falls.'] }],
+    },
+    detailedReport: {
+        whyMisleading: { intro: 'A report is a summary, so individual metrics should be interpreted together rather than in isolation.', examples: ['Strong profit with a deep drawdown may not fit your risk tolerance.', 'A short reporting period may not represent the strategy’s long-term behaviour.'] },
+        howItHelps: [{ title: '1. Runs a complete review', points: ['Use it for weekly or monthly performance reviews.', 'Record one strength, one weakness, and one next action from the report.'] }],
+    },
+    marketSessions: {
+        whyMisleading: { intro: 'Session results can be affected by trade frequency, news, and the way sessions are assigned.', examples: ['A session with few trades can look exceptional by chance.', 'Overlap activity may differ because of volatility, not necessarily better execution.'] },
+        howItHelps: [{ title: '1. Matches your schedule to your edge', points: ['Compare sessions using P/L, win rate, and trade count.', 'Use the result to focus your preparation and avoid weak windows.'] }],
+    },
+    hourlyPerformance: {
+        whyMisleading: { intro: 'Hourly patterns need enough trades and should be read in your configured timezone.', examples: ['A single event can distort one hour.', 'A profitable hour can be caused by a particular strategy rather than the time itself.'] },
+        howItHelps: [{ title: '1. Identifies productive hours', points: ['Set alerts or a trading routine around repeatable high-quality periods.', 'Review weak hours for fatigue, liquidity, or rule-following issues.'] }],
+    },
+    dailyActivity: {
+        whyMisleading: { intro: 'Day-of-week results can reflect different trade counts and market events rather than a true weekday effect.', examples: ['One large Friday loss can dominate the weekly picture.', 'Avoid dropping a day until the sample is meaningful.'] },
+        howItHelps: [{ title: '1. Finds weekly patterns', points: ['Plan attention and risk around consistently strong or weak days.', 'Combine it with session and time analysis before changing availability.'] }],
+    },
+    comparison: {
+        whyMisleading: { intro: 'Two lines can finish at the same value while carrying very different risk and consistency.', examples: ['A smoother equity path may be easier to execute than a volatile one.', 'Groups with different trade counts should not be judged by P/L alone.'] },
+        howItHelps: [{ title: '1. Compares quality, not only totals', points: ['Compare final P/L, path, drawdown, and sample size.', 'Use it to decide which pair, strategy, or session deserves deeper review.'] }],
+    },
+    cashTransactions: {
+        whyMisleading: { intro: 'Cash movements change balance but are not trading performance.', examples: ['A deposit can make equity growth look stronger than the trading result.', 'A withdrawal does not mean the strategy lost money.'] },
+        howItHelps: [{ title: '1. Keeps capital and performance separate', points: ['Reconcile account balance changes accurately.', 'Review trading P/L independently from funding decisions.'] }],
+    },
+    transactionMomentum: {
+        whyMisleading: { intro: 'A rising capital-flow line does not show whether the trading strategy is profitable.', examples: ['Repeated deposits can mask a negative trading result.', 'Large one-off transactions can dominate the trend.'] },
+        howItHelps: [{ title: '1. Understands account funding', points: ['Review when and why capital entered or left the account.', 'Keep funding decisions separate from strategy performance reviews.'] }],
+    },
+};
+
+Object.entries(ADDITIONAL_GUIDANCE).forEach(([id, guidance]) => {
+    Object.assign(WIDGET_HELP_DATABASE[id], guidance);
+});
+
+Object.assign(WIDGET_HELP_DATABASE, {
+    improveProfitFactor: {
+        id: 'improveProfitFactor',
+        title: 'How to Improve Profit Factor',
+        category: 'Improvement Playbooks',
+        breadcrumb: 'Help Center / Improvement Playbooks / Profit Factor',
+        definition: 'Use this playbook when gross losses are consuming too much of your gross profit. The aim is to improve trade quality and loss control, not simply to trade more often.',
+        formula: 'Profit Factor = Gross Profit ÷ Gross Loss',
+        formulaExample: 'A Profit Factor above 1.0 is profitable; focus on improving it with repeatable process changes.',
+        howItHelps: [
+            { title: '1. Review your losing trades', points: ['Tag the reason for each loss: valid setup, early entry, late entry, no stop, or rule break.', 'Separate normal strategy losses from avoidable execution losses.'] },
+            { title: '2. Protect winning trades', points: ['Compare average win with average loss to see whether winners are cut too early.', 'Keep a consistent exit rule instead of changing targets emotionally.'] },
+            { title: '3. Make one testable change', points: ['Choose one filter, such as avoiding low-liquidity hours or off-plan entries.', 'Review the next 20 trades before deciding whether the change worked.'] },
+        ],
+    },
+    reduceDrawdown: {
+        id: 'reduceDrawdown',
+        title: 'How to Reduce Drawdown',
+        category: 'Improvement Playbooks',
+        breadcrumb: 'Help Center / Improvement Playbooks / Drawdown',
+        definition: 'Use this playbook when losses are clustering or the account is taking too long to recover. Its purpose is to slow the damage while you identify the cause.',
+        formula: 'Drawdown = (Peak Equity − Current Equity) ÷ Peak Equity × 100',
+        formulaExample: 'A smaller drawdown needs less recovery profit and gives you more room to execute calmly.',
+        howItHelps: [
+            { title: '1. Add a circuit breaker', points: ['Set a maximum loss per day and per week.', 'Stop trading when the limit is reached; review rather than trying to win it back.'] },
+            { title: '2. Reduce exposure during a losing run', points: ['Lower position size after a predefined number of losses.', 'Avoid adding correlated positions that can lose together.'] },
+            { title: '3. Diagnose before resuming full size', points: ['Review whether losses came from market conditions, setup quality, or discipline.', 'Return to normal size only after your process is being followed consistently.'] },
+        ],
+    },
+    stopOvertrading: {
+        id: 'stopOvertrading',
+        title: 'How to Stop Overtrading',
+        category: 'Improvement Playbooks',
+        breadcrumb: 'Help Center / Improvement Playbooks / Overtrading',
+        definition: 'Use this playbook when trade count rises without a matching improvement in quality, or when you enter trades from boredom, fear of missing out, or a desire to recover losses.',
+        formula: 'Quality trade rate = Trades that met your plan ÷ Total trades × 100',
+        formulaExample: 'More trades do not create an edge; only trades that meet your tested rules do.',
+        howItHelps: [
+            { title: '1. Set entry limits before the session', points: ['Define your maximum number of trades and valid setup types.', 'Require a written reason or checklist before every entry.'] },
+            { title: '2. Remove emotional triggers', points: ['Take a timed break after a loss or missed trade.', 'Do not increase size to recover a loss or chase a move.'] },
+            { title: '3. Measure compliance', points: ['Review Plan Adherence and Trading Mistakes after each session.', 'Track how many trades would have been avoided by following your rules.'] },
+        ],
+    },
+    improvePlanAdherence: {
+        id: 'improvePlanAdherence',
+        title: 'How to Improve Plan Adherence',
+        category: 'Improvement Playbooks',
+        breadcrumb: 'Help Center / Improvement Playbooks / Plan Adherence',
+        definition: 'Use this playbook when your journal shows that deviations from your plan are reducing performance. The objective is to make following the plan easier than breaking it.',
+        formula: 'Plan adherence rate = Trades followed exactly ÷ Total trades × 100',
+        formulaExample: 'Review P/L by Plan Adherence to see the financial cost of minor and major deviations.',
+        howItHelps: [
+            { title: '1. Make the plan observable', points: ['Turn every entry rule into a short yes/no checklist.', 'Define invalidation, stop, target, and maximum size before entering.'] },
+            { title: '2. Record deviations honestly', points: ['Tag every deviation immediately after the trade.', 'Describe the trigger: impatience, fear, revenge, news, or distraction.'] },
+            { title: '3. Build accountability', points: ['Set one adherence target for the week, such as no entries without a checklist.', 'Review the result weekly and adjust one process step at a time.'] },
+        ],
+    },
+});
 
 export const getWidgetHelpArticle = (widgetId: string): WidgetHelpArticle => {
     return WIDGET_HELP_DATABASE[widgetId] || {

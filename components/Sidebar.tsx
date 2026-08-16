@@ -27,7 +27,7 @@ import {
   IconFlask,
   IconRadio
 } from '@tabler/icons-react';
-import { UserProfile, Trade, EASession } from '../types';
+import { UserProfile, Trade } from '../types';
 import { useToast } from './ui/Toast';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from '../lib/constants';
 import { FloatingDock } from './ui/floating-dock';
@@ -42,7 +42,6 @@ interface SidebarProps {
   onLogout: () => void;
   userProfile?: UserProfile | null;
   trades?: Trade[];
-  eaSession?: EASession | null;
   offlineQueueCount?: number;
   isDemoMode?: boolean;
   onToggleDemoMode?: () => void;
@@ -57,7 +56,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   onLogout,
   userProfile,
   trades = [],
-  eaSession,
   offlineQueueCount = 0,
   isDemoMode = false,
   onToggleDemoMode,
@@ -70,37 +68,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   const isBasicTier = !PLAN_FEATURES[currentPlan].advancedAnalytics;
 
   const { notifications, unreadCount, clearNotifications, markNotificationsRead } = useToast();
-
-  const tradeCount = trades.length;
-
-  // Bridge Health Logic
-  const [isBridgeOnline, setIsBridgeOnline] = useState(false);
-
-  useEffect(() => {
-    const checkHealth = () => {
-      if (!userProfile?.eaConnected || !eaSession?.last_updated) {
-        setIsBridgeOnline(false);
-        return;
-      }
-
-      // Check explicit heartbeat flag from bridge for instant reaction
-      if (eaSession.data?.isHeartbeat === false) {
-        setIsBridgeOnline(false);
-        return;
-      }
-
-      const lastUpdate = new Date(eaSession.last_updated).getTime();
-      const now = new Date().getTime();
-      const diffSeconds = (now - lastUpdate) / 1000;
-
-      // Use a shorter 15s threshold for better accuracy
-      setIsBridgeOnline(diffSeconds < 15);
-    };
-
-    checkHealth();
-    const interval = setInterval(checkHealth, 2000); // Check every 2s for better responsiveness
-    return () => clearInterval(interval);
-  }, [eaSession, userProfile?.eaConnected]);
 
   // Close notifications on click outside
   useEffect(() => {
@@ -125,6 +92,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const menuItems = [
     { id: 'dashboard', icon: <IconLayoutDashboard size={18} />, label: 'Dashboard', description: 'Overview of your trading performance' },
+    { id: 'ea-setup', icon: <IconLink size={18} />, label: 'Connect & Import', restricted: true, description: 'Connect accounts or import trades' },
     { id: 'log-trade', icon: <IconPlus size={18} />, label: 'Log Trade', description: 'Record a new trade entry' },
     { 
       id: 'history', 
@@ -141,7 +109,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     },
     { id: 'analytics', icon: <IconChartBar size={18} />, label: 'Analytics', description: 'Deep dive into your statistics' },
     { id: 'notes', icon: <IconFileText size={18} />, label: 'Notebook', description: 'Trading notes and strategies' },
-    { id: 'ea-setup', icon: <IconLink size={18} />, label: 'Desktop Bridge', restricted: true, description: 'Connect MetaTrader EA' },
     { id: 'charts', icon: <IconChartCandle size={18} />, label: 'Market Grid', restricted: true, description: 'Multi-chart analysis view' },
     { id: 'backtest-lab', icon: <IconFlask size={18} />, label: 'Backtest Lab', restricted: true, description: 'Test strategies historically' },
     { id: 'ai-chat', icon: <IconMessage size={18} />, label: 'AI Assistant', description: 'Get AI trading insights' },
@@ -189,23 +156,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         }`}
       style={{ width: isExpanded ? 240 : 72 }}
     >
-      <style>{`
-        @keyframes heartbeat {
-            0% { transform: scale(1); opacity: 0.6; }
-            15% { transform: scale(1.1); opacity: 1; }
-            30% { transform: scale(1); opacity: 0.6; }
-            45% { transform: scale(1.15); opacity: 1; }
-            60% { transform: scale(1); opacity: 0.6; }
-            100% { transform: scale(1); opacity: 0.6; }
-        }
-        @keyframes pulse-line {
-            0% { stroke-dashoffset: 100; opacity: 0.4; }
-            20% { stroke-dashoffset: 0; opacity: 1; }
-            40% { stroke-dashoffset: -100; opacity: 0.4; }
-            100% { stroke-dashoffset: -100; opacity: 0.4; }
-        }
-      `}</style>
-
       {/* Notification Menu */}
       <div
         ref={notificationRef}
@@ -298,26 +248,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             <UserCircle size={28} />
           )}
         </button>
-        <AnimatePresence mode="popLayout">
-          {isExpanded && (
-            <motion.div 
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              transition={{ duration: 0.2 }}
-              className="ml-3 flex flex-col gap-1 overflow-hidden whitespace-nowrap"
-            >
-              <div className="flex flex-col">
-                <div className={`text-[9px] font-black uppercase tracking-widest leading-none ${isDemoMode ? 'text-amber-500' : isBridgeOnline ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {isDemoMode ? 'Demo Mode' : 'Live Status'}
-                </div>
-                <div className="text-[11px] font-bold mt-0.5">
-                  {isDemoMode ? 'Sample data active' : (isBridgeOnline ? 'Bridge Active' : (userProfile?.eaConnected ? 'Bridge Offline' : 'Disconnected'))}
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       {/* Main Navigation */}

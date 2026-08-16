@@ -6,9 +6,12 @@ interface PerformanceBySessionProps {
   trades: Trade[];
   isDarkMode: boolean;
   currencySymbol: string;
+  onMarketSessionsInfoClick?: () => void;
+  onHourlyPerformanceInfoClick?: () => void;
+  onDailyActivityInfoClick?: () => void;
 }
 
-export const PerformanceBySession: React.FC<PerformanceBySessionProps> = ({ trades, isDarkMode, currencySymbol }) => {
+export const PerformanceBySession: React.FC<PerformanceBySessionProps> = ({ trades, isDarkMode, currencySymbol, onMarketSessionsInfoClick, onHourlyPerformanceInfoClick, onDailyActivityInfoClick }) => {
   return (
     <div className="space-y-8">
       {/* Bento Grid Layout */}
@@ -20,6 +23,7 @@ export const PerformanceBySession: React.FC<PerformanceBySessionProps> = ({ trad
             trades={trades} 
             isDarkMode={isDarkMode} 
             currencySymbol={currencySymbol} 
+            onInfoClick={onMarketSessionsInfoClick}
           />
         </div>
 
@@ -29,6 +33,7 @@ export const PerformanceBySession: React.FC<PerformanceBySessionProps> = ({ trad
             trades={trades} 
             isDarkMode={isDarkMode} 
             currencySymbol={currencySymbol} 
+            onInfoClick={onDailyActivityInfoClick}
           />
         </div>
 
@@ -38,6 +43,7 @@ export const PerformanceBySession: React.FC<PerformanceBySessionProps> = ({ trad
             trades={trades} 
             isDarkMode={isDarkMode} 
             currencySymbol={currencySymbol} 
+            onInfoClick={onHourlyPerformanceInfoClick}
           />
         </div>
 

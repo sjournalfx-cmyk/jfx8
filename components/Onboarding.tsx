@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { User, Globe, DollarSign, Zap, ChevronRight, CheckCircle2, ShieldCheck, ArrowRight, ArrowLeft, Terminal, Shield, Flame, Check, Wallet, Cpu, Lock, Camera } from 'lucide-react';
+import { User, DollarSign, Zap, ChevronRight, CheckCircle2, ArrowRight, ArrowLeft, Terminal, Shield, Flame, Check, Wallet, Lock, Camera } from 'lucide-react';
 import { UserProfile } from '../types';
 import { dataService } from '../services/dataService';
 
@@ -84,25 +84,20 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
 
   const nextStep = () => {
     if (step === 4 && isFreePlan) {
-      // Skip Sync Tech, go to Account Config
       setFormData(prev => ({ ...prev, syncMethod: 'Manual', plan: 'FREE TIER (JOURNALER)' }));
+      setStep(5);
+    } else if (step === 4) {
       setStep(6);
-    } else if (step === 5 && formData.plan === 'PREMIUM (MASTERS)') {
-      // Premium users skip Account Config after selecting sync
-      setStep(7);
     } else {
-      setStep(s => Math.min(s + 1, 7));
+      setStep(s => Math.min(s + 1, 6));
     }
   };
 
   const prevStep = () => {
-    if (step === 6 && isFreePlan) {
+    if (step === 5 && isFreePlan) {
       setStep(4);
-    } else if (step === 7 && formData.plan === 'PRO TIER (ANALYSTS)' && formData.syncMethod === 'EA_CONNECT') {
-      setStep(5);
-    } else if (step === 7 && formData.plan === 'PREMIUM (MASTERS)') {
-      // Premium users go back to Sync Tech, skipping Account Config
-      setStep(5);
+    } else if (step === 6 && !isFreePlan) {
+      setStep(4);
     } else {
       setStep(s => Math.max(s - 1, 1));
     }
@@ -117,33 +112,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
     
     if (planName === 'FREE TIER (JOURNALER)') {
       setFormData(prev => ({ ...prev, syncMethod: 'Manual', plan: 'FREE TIER (JOURNALER)', avatarUrl: freeAvatars[0] }));
-      setStep(6); // Jump to Account Config
+      setStep(5); // Jump to Account Config
     } else {
-      setStep(5); // Go to Sync Tech
-    }
-  };
-
-  const handleSelectSync = async (method: 'Manual' | 'EA_CONNECT' | 'BROKER_SYNC') => {
-    const updatedData: UserProfile = {
-      ...formData as UserProfile,
-      syncMethod: method,
-      onboarded: true,
-      accountName: formData.accountName || 
-        (method === 'EA_CONNECT' ? 'EA Sync Account' : 
-         method === 'BROKER_SYNC' ? 'Broker Sync Account' : 'Primary Trading Account')
-    };
-
-    setFormData(updatedData);
-    
-    // For PRO TIER (EA CONNECT) and PREMIUM TIER (BROKER SYNC), skip Account Config
-    if (
-      (method === 'EA_CONNECT' && formData.plan === 'PRO TIER (ANALYSTS)') || 
-      (method === 'BROKER_SYNC' && formData.plan === 'PREMIUM (MASTERS)')
-    ) {
-      setStep(7);
-    } else {
-      // Default fallback, though manual navigation handles most cases
-      setStep(6);
+      setFormData(prev => ({
+        ...prev,
+        syncMethod: planName === 'PRO TIER (ANALYSTS)' ? 'EA_CONNECT' : 'BROKER_SYNC',
+      }));
+      setStep(6); // Paid tiers use their plan's default sync method
     }
   };
 
@@ -158,7 +133,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
   const subTextColor = isDarkMode ? 'text-zinc-500' : 'text-[#666666]';
 
   // Total steps for UI display
-  const totalStepsUI = 7;
+  const totalStepsUI = 6;
 
   const currentAvatars = formData.plan === 'FREE TIER (JOURNALER)' ? freeAvatars : 
                         formData.plan === 'PRO TIER (ANALYSTS)' ? proAvatars : premiumAvatars;
@@ -170,7 +145,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
         {/* Header Navigation */}
         <div className="flex items-center justify-between mb-12">
           <div className="flex gap-1.5 items-center">
-            {[1, 2, 3, 4, 5, 6, 7].map((s) => (
+            {[1, 2, 3, 4, 5, 6].map((s) => (
               <div
                 key={s}
                 className={`h-2.5 rounded-full transition-all duration-300 ${s === step ? 'w-8 bg-[#FF4F01]' : s < step ? 'w-2.5 bg-[#FF4F01]/40' : 'w-2.5 bg-zinc-200 dark:bg-black'
@@ -179,7 +154,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
             ))}
           </div>
           <div className="flex items-center gap-4">
-            {step === 7 && (
+            {step === 6 && (
               <div className="flex gap-2">
                 <span className="border border-[#FF4F01] text-[10px] font-bold px-2 py-1 rounded text-[#FF4F01] uppercase tracking-widest animate-pulse">Final Step</span>
               </div>
@@ -328,7 +303,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
                     focus: 'Data-driven automated trading.',
                     features: [
                       'Everything in FREE',
-                      'EA Sync Technology',
+                      'Automated Trade Import',
                       'Advanced Analytics',
                       '1 Custom Chart Layout',
                       'Strategy Mapper',
@@ -399,92 +374,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
             </div>
           )}
 
-          {step === 5 && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-6xl">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Sync Technology</h1>
-              <p className={`text-lg mb-12 ${subTextColor}`}>Choose how you want to import your trading data.</p>
-
-              <div className={`grid grid-cols-1 ${formData.plan === 'PRO TIER (ANALYSTS)' ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-8`}>
-                <button
-                  onClick={() => handleSelectSync('Manual')}
-                  disabled={formData.plan === 'PRO TIER (ANALYSTS)' || formData.plan === 'PREMIUM (MASTERS)'}
-                  className={`p-10 rounded-[32px] border-2 text-left transition-all group relative overflow-hidden ${formData.syncMethod === 'Manual'
-                      ? 'border-[#FF4F01] bg-[#FF4F01]/5'
-                      : isDarkMode ? 'border-zinc-800 bg-[#111]' : 'border-zinc-100 bg-white shadow-sm'
-                    } ${formData.plan === 'PRO TIER (ANALYSTS)' || formData.plan === 'PREMIUM (MASTERS)' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-8 transition-colors ${formData.syncMethod === 'Manual' ? 'bg-[#FF4F01] text-white' : 'bg-zinc-100 dark:bg-black text-zinc-500'}`}>
-                    <ShieldCheck size={28} />
-                  </div>
-                  <h3 className="text-2xl font-black mb-3">Manual Entry</h3>
-                  <p className="text-sm opacity-50 leading-relaxed mb-6">Standard journaling workflow. Manually record every trade with detailed psychology logging.</p>
-                  <ul className="space-y-2">
-                    {['Pure focus', 'Detailed metrics', 'Psychology logging'].map(item => (
-                      <li key={item} className="flex items-center gap-2 text-xs font-bold opacity-60 uppercase tracking-widest">
-                        <Check size={14} className="text-[#FF4F01]" /> {item}
-                      </li>
-                    ))}
-                  </ul>
-                  {formData.syncMethod === 'Manual' && <div className="absolute top-8 right-8 text-[#FF4F01]"><CheckCircle2 size={32} /></div>}
-                </button>
-
-                <button
-                  onClick={() => handleSelectSync('EA_CONNECT')}
-                  disabled={formData.plan === 'PREMIUM (MASTERS)'}
-                  className={`p-10 rounded-[32px] border-2 text-left transition-all group relative overflow-hidden ${formData.syncMethod === 'EA_CONNECT'
-                      ? 'border-[#FF4F01] bg-[#FF4F01]/5'
-                      : isDarkMode ? 'border-zinc-800 bg-[#111]' : 'border-zinc-100 bg-white shadow-sm'
-                    } ${formData.plan === 'PREMIUM (MASTERS)' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-8 transition-colors ${formData.syncMethod === 'EA_CONNECT' ? 'bg-[#FF4F01] text-white' : 'bg-zinc-100 dark:bg-black text-zinc-500'}`}>
-                    <Cpu size={28} />
-                  </div>
-                  <div className="flex items-center gap-3 mb-3">
-                    <h3 className="text-2xl font-black">EA CONNECT</h3>
-                    <span className="bg-[#FF4F01] text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-widest">NEW</span>
-                  </div>
-                  <p className="text-sm opacity-50 leading-relaxed mb-6">Automated sync with MT4/MT5. Install our bridge EA to sync your live execution data instantly.</p>
-                  <ul className="space-y-2">
-                    {['Auto-import', 'Real-time equity', 'No manual data entry'].map(item => (
-                      <li key={item} className="flex items-center gap-2 text-xs font-bold opacity-60 uppercase tracking-widest">
-                        <Check size={14} className="text-[#FF4F01]" /> {item}
-                      </li>
-                    ))}
-                  </ul>
-                  {formData.syncMethod === 'EA_CONNECT' && <div className="absolute top-8 right-8 text-[#FF4F01]"><CheckCircle2 size={32} /></div>}
-                </button>
-
-                {formData.plan !== 'PRO TIER (ANALYSTS)' && (
-                  <button
-                    onClick={() => handleSelectSync('BROKER_SYNC')}
-                    className={`p-10 rounded-[32px] border-2 text-left transition-all group relative overflow-hidden ${formData.syncMethod === 'BROKER_SYNC'
-                        ? 'border-[#FF4F01] bg-[#FF4F01]/5'
-                        : isDarkMode ? 'border-zinc-800 bg-[#111]' : 'border-zinc-100 bg-white shadow-sm'
-                      }`}
-                  >
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-8 transition-colors ${formData.syncMethod === 'BROKER_SYNC' ? 'bg-[#FF4F01] text-white' : 'bg-zinc-100 dark:bg-black text-zinc-500'}`}>
-                      <Globe size={28} />
-                    </div>
-                    <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-2xl font-black">Broker Direct</h3>
-                      <span className="bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-widest">PREMIUM</span>
-                    </div>
-                    <p className="text-sm opacity-50 leading-relaxed mb-6">Connect directly to your broker via the JournalFX VPS bridge. Professional grade synchronization without any desktop bridge software.</p>
-                    <ul className="space-y-2">
-                      {['Cloud sync', 'Direct broker link', 'Institutional speed'].map(item => (
-                        <li key={item} className="flex items-center gap-2 text-xs font-bold opacity-60 uppercase tracking-widest">
-                          <Check size={14} className="text-[#FF4F01]" /> {item}
-                        </li>
-                      ))}
-                    </ul>
-                    {formData.syncMethod === 'BROKER_SYNC' && <div className="absolute top-8 right-8 text-[#FF4F01]"><CheckCircle2 size={32} /></div>}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {step === 6 && formData.plan !== 'PREMIUM (MASTERS)' && (
+          {step === 5 && formData.plan !== 'PREMIUM (MASTERS)' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
               <h1 className="text-5xl font-bold tracking-tight mb-4">Account Configuration</h1>
               <p className={`text-lg mb-12 ${subTextColor}`}>Define your primary trading account details and base currency.</p>
@@ -540,7 +430,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
             </div>
           )}
 
-          {step === 7 && (
+          {step === 6 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
               <h1 className="text-5xl font-bold tracking-tight mb-4">Choose Your Avatar</h1>
               <p className={`text-lg mb-8 ${subTextColor}`}>Select a persona that represents your trading style.</p>
@@ -606,12 +496,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
           </button>
 
           <div className="flex items-center gap-4">
-            {step < 7 ? (
+            {step < 6 ? (
               <div className="flex items-center gap-4">
-                {step === 5 && (
-                  <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Select Sync Method Above</div>
-                )}
-                {(step < 5 || step === 6) && (
+                {step < 6 && (
                   <button
                     onClick={nextStep}
                     disabled={(step === 1 && (!formData.name || !formData.country)) || (step === 3 && !agreedToTerms)}

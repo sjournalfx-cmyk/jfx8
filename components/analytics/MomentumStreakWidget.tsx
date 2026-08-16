@@ -84,7 +84,7 @@ export const MomentumStreakWidget: React.FC<MomentumStreakWidgetProps> = ({ trad
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Streak</span>
-                    <Tooltip content="Shows your current win/loss streak and your all-time longest winning and losing runs." isDarkMode={isDarkMode}>
+                    <Tooltip content="Shows your current win/loss streak and your all-time longest winning and losing runs." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
                         <HelpCircle size={12} className="opacity-40 cursor-help hover:opacity-100" />
                     </Tooltip>
                 </div>

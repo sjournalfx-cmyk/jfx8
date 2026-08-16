@@ -21,6 +21,7 @@ interface JournalProps {
   onDeleteTrades: (tradeIds: string[]) => void;
   onEditTrade: (trade: Trade) => void;
   userProfile: UserProfile;
+  onViewChange: (view: string) => void;
   isLoading?: boolean;
   offlineQueue?: Trade[];
   isDemoMode?: boolean;
@@ -382,7 +383,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
     );
 };
 
-const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, onBatchUpdateTrades, onDeleteTrades, onEditTrade, userProfile, isLoading = false, offlineQueue = [], isDemoMode = false }) => {
+const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, onBatchUpdateTrades, onDeleteTrades, onEditTrade, userProfile, onViewChange, isLoading = false, offlineQueue = [], isDemoMode = false }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
     const [expandedTradeId, setExpandedTradeId] = useState<string | null>(null);
@@ -689,7 +690,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
     };
 
     const renderTradeDetails = (trade: Trade) => (
-        <div key={`details-${trade.id}`} className={`col-span-11 mx-6 mt-1 mb-6 rounded-2xl overflow-hidden border shadow-xl relative ${isDarkMode ? 'bg-[#000000] border-[#27272a] shadow-black' : 'bg-white border-slate-200'}`}>
+        <div key={`details-${trade.id}`} className={`col-span-11 min-w-0 mx-6 mt-1 mb-6 rounded-2xl overflow-hidden border shadow-xl relative ${isDarkMode ? 'bg-[#000000] border-[#27272a] shadow-black' : 'bg-white border-slate-200'}`}>
             <div className={`relative px-6 py-4 border-b flex flex-wrap items-center justify-between gap-4 ${isDarkMode ? 'bg-black/50 border-zinc-800' : 'bg-slate-50/50 border-slate-100'}`}>
                 <div className="flex items-center gap-6">
                     <div>
@@ -738,7 +739,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                 </div>
             </div>
             <div className="relative p-6">
-                <div className="grid grid-cols-12 gap-6 items-stretch">
+                <div className="grid grid-cols-12 gap-6 items-start min-w-0">
                     <div className="col-span-12 md:col-span-4 lg:col-span-3 space-y-4 pr-1">
                         <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-black/30 border-zinc-800' : 'bg-slate-50/50 border-slate-200'}`}>
                             <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-3">Execution</h4>
@@ -790,9 +791,9 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                             )}
                         </div>
                     </div>
-                    <div className="col-span-12 lg:col-span-9 grid grid-cols-1 md:grid-cols-2 gap-4 md:h-full md:grid-rows-[440px_auto] items-stretch content-start pr-1">
+                    <div className="col-span-12 lg:col-span-9 min-w-0 grid grid-cols-1 md:grid-cols-2 gap-4 items-start content-start pr-1">
                         {/* ── Chart / Screenshots dual-mode panel (spans both columns) ── */}
-                        <div className={`col-span-2 h-[440px] min-h-[440px] rounded-xl border overflow-hidden flex flex-col border-dashed ${isDarkMode ? 'border-zinc-700' : 'border-zinc-300'}`}>
+                        <div className={`col-span-2 h-[440px] min-h-[440px] min-w-0 rounded-xl border overflow-hidden flex flex-col border-dashed ${isDarkMode ? 'border-zinc-700' : 'border-zinc-300'}`}>
                             {/* ── Mode toggle header ── */}
                             <div className={`flex items-center justify-between px-3 py-1.5 border-b shrink-0 ${isDarkMode ? 'border-zinc-800 bg-black/40' : 'border-slate-100 bg-slate-50'}`}>
                                 <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
@@ -889,7 +890,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 </div>
                             )}
                         </div>
-                        <div className={`p-3.5 min-h-[90px] max-h-[140px] rounded-xl border flex flex-col ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
+                        <div className={`p-3.5 h-[140px] min-w-0 rounded-xl border flex flex-col overflow-hidden ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
                             <div className="flex items-center justify-between mb-1.5 shrink-0">
                                 <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40">Entry Note</h4>
                                 {!(editingComment?.tradeId === trade.id && editingComment.field === 'notes') && (
@@ -902,7 +903,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     </button>
                                 )}
                             </div>
-                            <div className="flex-1 min-h-0 overflow-auto pr-1">
+                            <div className="flex-1 min-h-0 min-w-0 overflow-auto overflow-x-hidden pr-1">
                                 {editingComment?.tradeId === trade.id && editingComment.field === 'notes' ? (
                                     <div className="space-y-2">
                                         <textarea
@@ -928,7 +929,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     </div>
                                 ) : trade.notes ? (
                                     <div
-                                        className="text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none"
+                                        className="min-w-0 break-words text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none"
                                         dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trade.notes) }}
                                     />
                                 ) : (
@@ -944,7 +945,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 </div>
                             )}
                         </div>
-                        <div className={`p-3.5 min-h-[90px] max-h-[140px] rounded-xl border flex flex-col ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
+                        <div className={`p-3.5 h-[140px] min-w-0 rounded-xl border flex flex-col overflow-hidden ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
                             <div className="flex items-center justify-between mb-1.5 shrink-0">
                                 <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40">Exit Note</h4>
                                 {!(editingComment?.tradeId === trade.id && editingComment.field === 'exitComment') && (
@@ -957,7 +958,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     </button>
                                 )}
                             </div>
-                            <div className="flex-1 min-h-0 overflow-auto pr-1">
+                            <div className="flex-1 min-h-0 min-w-0 overflow-auto overflow-x-hidden pr-1">
                                 {editingComment?.tradeId === trade.id && editingComment.field === 'exitComment' ? (
                                     <div className="space-y-2">
                                         <textarea
@@ -983,7 +984,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     </div>
                                 ) : trade.exitComment ? (
                                     <div
-                                        className="text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none"
+                                        className="min-w-0 break-words text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none"
                                         dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trade.exitComment) }}
                                     />
                                 ) : (
@@ -1499,7 +1500,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     description={searchTerm || dateRange ? "Try adjusting your search or date range to find trades." : "Start logging your trades to track your trading performance and build your trading journal."}
                                     action={!searchTerm && !dateRange ? {
                                         label: "Log Your First Trade",
-                                        onClick: () => {/* Navigate to log trade - handled by parent */}
+                                        onClick: () => onViewChange('ea-setup')
                                     } : undefined}
                                 />
                             ) : (
