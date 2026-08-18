@@ -9,7 +9,7 @@ import { normalizeAssistantMarkdown, stripAssistantWidgetMarkup } from '../lib/a
 import { formatDataToolResponse, formatStatementsMarkdown, formatRatiosMarkdown, DATA_TOOL_LABELS, DATA_TOOL_API_ROUTES, type DataToolKind } from '../lib/fmpDataTools';
 import { formatFinnhubDataToolResponse, FINNHUB_TOOL_LABELS, FINNHUB_TOOL_API_ROUTES, type FinnhubToolKind } from '../lib/finnhubDataTools';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { cleanThinkingTags } from '../lib/thinkingCleaner';
+import { cleanAssistantResponse, cleanThinkingTags } from '../lib/thinkingCleaner';
 import { TrendingUp, TrendingDown, Brain, Clock, Wand2, Send, User, Trash2, Coins, ChevronDown, List as ListIcon, X, History, Plus, ChevronRight, ChevronLeft, Workflow, CheckCircle2, StickyNote, Download, FileText, Activity, Sparkles, Target, Table, Mic, Star, Square, CheckSquare, ArrowUpRight, Save, RotateCcw, LayoutGrid, MessageSquare, Menu, MoreHorizontal, Copy, ThumbsUp, ThumbsDown, Paperclip, Image, Smile, CornerDownLeft, Zap, AlertCircle, Check, Loader2, StopCircle, ArrowLeft, ArrowRight, ListChecks, BarChart3, Clock3, BrainCircuit, DollarSign, Timer, CircleDot, Goal as GoalIcon, Pause, Play, Settings, Telescope } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -1993,7 +1993,10 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     } = {}
   ) => {
     const { isDeepAnalysis = false, kind = isDeepAnalysis ? 'analysis' : 'chat', psychologySnapshot, scalingSnapshot, strategyProfile, contextSummary } = options;
-    let cleanContent = cleanThinkingTags(fullResponse).replace(/\n\n\n+/g, '\n\n').trim();
+    let cleanContent = cleanAssistantResponse(fullResponse).replace(/\n\n\n+/g, '\n\n').trim();
+    if (!cleanContent) {
+      cleanContent = 'I couldn\'t prepare a safe final response. Please try again.';
+    }
 
     const sections: Record<string, string> = {};
     const sectionMatches = Array.from(cleanContent.matchAll(/\[SECTION:([A-Z_]+)\]([\s\S]*?)(?=\[SECTION:[A-Z_]+\]|$)/g));
@@ -2495,7 +2498,7 @@ ${strategyProfile.whyITrade}`;
     const isUser = role === 'user';
     const isAudioOnlyUserMessage = isUser && Boolean(audioAttachment) && (!content || content === '[Voice recording]');
 
-    let safeContent = cleanThinkingTags(content || '');
+    let safeContent = isUser ? cleanThinkingTags(content || '') : cleanAssistantResponse(content || '');
     if (!isUser) {
       safeContent = normalizeAssistantMarkdown(safeContent);
       if (message.contextSummary?.mode === 'mentor') {

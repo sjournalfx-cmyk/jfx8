@@ -1,6 +1,6 @@
 import { Trade, UserProfile, DailyBias } from "../types";
 import { calculateStats } from "../lib/statsUtils";
-import { cleanThinkingTags, isInsideThinkingBlock } from "../lib/thinkingCleaner";
+import { cleanAssistantResponse, isInsideThinkingBlock } from "../lib/thinkingCleaner";
 
 const BASE_URL = "/api/nvidia";
 export const NVIDIA_CHAT_MODEL_ID = "nvidia/nemotron-3.5-lightning-30b-a3b";
@@ -413,6 +413,9 @@ async function chatCompletion(
         model,
         messages,
         max_tokens: maxTokens,
+        // NVIDIA reasoning models can put their hidden reasoning in `content`
+        // unless this is explicitly disabled.
+        chat_template_kwargs: { enable_thinking: false },
         ...(onStream ? { stream: true } : {}),
       }),
       signal: combined.signal as any,
@@ -478,20 +481,20 @@ async function chatCompletion(
               fullText += content;
 
               if (!isInsideThinkingBlock(fullText)) {
-                onStream(cleanThinkingTags(fullText));
+                onStream(cleanAssistantResponse(fullText));
               }
             }
           } catch {}
         }
       }
 
-      return cleanThinkingTags(fullText);
+      return cleanAssistantResponse(fullText);
     }
 
     const json = await response.json();
     const message = json.choices?.[0]?.message;
     const content = message?.content || "";
-    return cleanThinkingTags(content);
+    return cleanAssistantResponse(content);
   } catch (error: any) {
     if (combined.signal.aborted && !signal?.aborted) {
       throw new Error(`NVIDIA API timeout after ${timeoutMs}ms`);

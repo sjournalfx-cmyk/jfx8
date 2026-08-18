@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-    Play, Pause, ChevronRight, RotateCcw,
+    Play, Pause, ChevronRight, ChevronLeft, RotateCcw,
     TrendingUp, TrendingDown, XCircle, X,
     Settings, Zap, ArrowLeftToLine, StepForward, ChevronDown, Database,
     Trash2, Lock, Unlock, Check, Search, Download, FileUp, RefreshCw, Clock, Brain,
-    ZoomIn, ZoomOut, Calendar
+    ZoomIn, ZoomOut, Calendar, List, Star
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { DrawingToolbar } from './backtest/DrawingToolbar';
@@ -17,9 +17,10 @@ import { MT5_BRIDGE_URL } from '../lib/constants';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
 import { UserProfile, BacktestSession, Trade, BacktestTrade } from '../types';
 import { dataService } from '../services/dataService';
-import { fetchCtraderCandles, isAuthenticated as isCtraderAuthenticated, getAccounts as getCtraderAccounts } from '../services/ctraderService';
+import { fetchCtraderCandles, isAuthenticated as isCtraderAuthenticated, getAccounts as getCtraderAccounts, refreshToken as refreshCtraderToken, getSelectedAccountId } from '../services/ctraderService';
 import CustomChart from './CustomChart';
 import { OptimizationHeatmap } from './backtest/OptimizationHeatmap';
+import CtraderAuthModal from './backtest/CtraderAuthModal';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
 import { OptimizationResult } from '../types';
 import { Waves, LayoutDashboard, Target } from 'lucide-react';
@@ -30,7 +31,6 @@ interface BacktestLabProps {
     onUpdateProfile: (profile: UserProfile) => Promise<void>;
 }
 
-const POPULAR_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD', 'XAUUSD', 'BTCUSD', 'ETHUSD', 'US30', 'NAS100', 'GER40'];
 const BACKTEST_HISTORY_LIMIT = 50;
 
 const cloneDrawing = (drawing: Drawing): Drawing => ({
@@ -41,6 +41,17 @@ const cloneDrawing = (drawing: Drawing): Drawing => ({
 
 const cloneDrawings = (drawings: Drawing[]) => drawings.map(cloneDrawing);
 
+// When new data is loaded (e.g. another timeframe), the bar-index (logical)
+// anchors of existing drawings are stale. TradingView-style: keep every drawing
+// pinned to its original timestamp/price and drop the stale index so it renders
+// correctly on the newly loaded bars.
+const stripLogicalAnchors = (drawings: Drawing[]): Drawing[] =>
+    drawings.map(d => ({
+        ...d,
+        p1: { time: d.p1.time, price: d.p1.price },
+        p2: d.p2 ? { time: d.p2.time, price: d.p2.price } : undefined,
+    }));
+
 const getReplayIndexKey = (symbol: string, timeframe: string) => `jfx_backtest_currentIndex_${symbol}_${timeframe}`;
 const optimizeCandleData = (data: any[]) => data.map(d => ({
     time: d.time,
@@ -49,6 +60,30 @@ const optimizeCandleData = (data: any[]) => data.map(d => ({
     low: Number(d.low.toFixed(5)),
     close: Number(d.close.toFixed(5))
 }));
+
+// TradingView-style watchlist (same data as ChartGrid)
+const WATCHLISTS: Record<string, string[]> = {
+    'Forex': [
+        'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY', 'FX:AUDUSD', 'FX:USDCAD', 'FX:USDCHF', 'FX:NZDUSD',
+        'FX:EURGBP', 'FX:EURJPY', 'FX:GBPJPY', 'FX:CADJPY', 'FX:AUDJPY', 'FX:CHFJPY',
+        'FX:EURAUD', 'FX:GBPAUD', 'FX:EURCAD', 'FX:GBPCAD', 'FX:AUDNZD', 'FX:NZDJPY'
+    ],
+    'Crypto': [
+        'BINANCE:BTCUSD', 'BINANCE:ETHUSD', 'BINANCE:SOLUSD', 'BINANCE:XRPUSD', 'BINANCE:BNBUSD',
+        'BINANCE:ADAUSD', 'BINANCE:DOGEUSD', 'BINANCE:AVAXUSD', 'BINANCE:DOTUSD',
+        'BINANCE:MATICUSD', 'BINANCE:LINKUSD', 'BINANCE:LTCUSD', 'BINANCE:SHIBUSD', 'BINANCE:UNIUSD'
+    ],
+    'Indices': [
+        'OANDA:SPX500USD', 'OANDA:NAS100USD', 'TVC:US30', 'TVC:RUT',
+        'TVC:DE40', 'TVC:UK100', 'TVC:FR40', 'TVC:EU50',
+        'TVC:JP225', 'TVC:HSI', 'OANDA:AU200AUD', 'TVC:CN50'
+    ],
+    'Commodities': [
+        'OANDA:XAUUSD', 'OANDA:XAGUSD', 'TVC:PLATINUM', 'TVC:PALLADIUM',
+        'TVC:USOIL', 'TVC:UKOIL', 'TVC:NG1!',
+        'TVC:HG1!', 'TVC:ZC1!', 'TVC:ZW1!'
+    ]
+};
 
 const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUpdateProfile }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -81,11 +116,46 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     }, [allData.length, symbol, timeframe, setCurrentIdx]);
 
     // UI State
-    const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
     const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'ctrader' | 'none'>('jfx_backtest_data_source', 'none');
+    // Explicit user-facing data source so timeframe/symbol changes never route
+    // to the wrong backend (e.g. MT5 bridge errors while connected to cTrader).
+    const [activeSource, setActiveSource] = useLocalStorage<'mt5' | 'ctrader'>('jfx_backtest_active_source', 'mt5');
     const [isCtraderFetching, setIsCtraderFetching] = useState(false);
     const [showCtraderAuthModal, setShowCtraderAuthModal] = useState(false);
+    // Live cTrader auth status: re-checked on an interval and when the tab
+    // regains focus, so returning from the cTrader OAuth flow (Settings or the
+    // Connect modal) is picked up automatically without a manual refresh.
+    const [ctraderConnected, setCtraderConnected] = useState<boolean>(() => isCtraderAuthenticated());
+
+    // TradingView-style watchlist sidebar
+    const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
+    const [watchlistCategory, setWatchlistCategory] = useState<string>('Forex');
+    const [starredSymbols, setStarredSymbols] = useLocalStorage<string[]>('jfx_watchlist_starred', []);
+
+    useEffect(() => {
+        let mounted = true;
+        const check = async () => {
+            let authed = isCtraderAuthenticated();
+            if (!authed) {
+                // Returning from the OAuth callback may have set an httpOnly
+                // cookie; try a silent refresh to re-establish the session.
+                try { await refreshCtraderToken(); } catch { /* keep status */ }
+                authed = isCtraderAuthenticated();
+            }
+            if (mounted) setCtraderConnected(authed);
+        };
+        check();
+        const interval = window.setInterval(check, 5000);
+        const onFocus = () => check();
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onFocus);
+        return () => {
+            mounted = false;
+            window.clearInterval(interval);
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onFocus);
+        };
+    }, []);
 
     // cTrader Historical Date Configuration
     const [ctraderFetchSymbol, setCtraderFetchSymbol] = useState(symbol);
@@ -475,7 +545,7 @@ setCurrentIdx(session.data.length - 1);
                     setCurrentIdx(Math.min(data.length - 1, 50));
                     setDataSource('cache');
                     localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data, index: Math.min(data.length - 1, 50) }));
-                    setDrawings([]);
+                    setDrawings(prev => stripLogicalAnchors(prev));
                     setHistory([]);
                     historyStatesRef.current = [];
                     historyPointerRef.current = -1;
@@ -560,7 +630,7 @@ setAllData(validData);
                     setDataSource('cache');
                     localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data: validData, index: Math.min(validData.length - 1, 50) }));
                     setShowWelcome(false);
-                    setDrawings([]);
+                    setDrawings(prev => stripLogicalAnchors(prev));
                     setHistory([]);
                     historyStatesRef.current = [];
                     historyPointerRef.current = -1;
@@ -588,10 +658,17 @@ setAllData(validData);
         const activeSymbol = overrideSymbol || symbol;
         const activeTF = overrideTimeframe || timeframe;
 
+        // TradingView keeps the visible time range when switching timeframes.
+        // Capture it so drawings stay on screen after the new data loads.
+        const isTimeframeSwitch = Boolean(overrideTimeframe) && overrideTimeframe !== timeframe && (!overrideSymbol || overrideSymbol === symbol);
+        const prevVisibleRange = isTimeframeSwitch
+            ? (chartRef.current?.timeScale().getVisibleRange?.() as { from: number; to: number } | null) ?? null
+            : null;
+
         try {
             const { data } = await fetchData(overrideSymbol, overrideTimeframe);
             setHistory([]);
-            setDrawings([]);
+            setDrawings(prev => stripLogicalAnchors(prev));
             historyStatesRef.current = [];
             historyPointerRef.current = -1;
             setHistoryStates([]);
@@ -599,7 +676,14 @@ setAllData(validData);
             resetDrawingInteractionState();
             saveToLocalCache(data, overrideSymbol, overrideTimeframe);
             setDataSource('live');
+            setActiveSource('mt5');
             setShowWelcome(false);
+            if (prevVisibleRange) {
+                setCurrentIdx(data.length - 1);
+                window.setTimeout(() => {
+                    chartRef.current?.timeScale().setVisibleRange?.({ from: prevVisibleRange.from, to: prevVisibleRange.to });
+                }, 0);
+            }
             addToast({ type: 'success', title: 'Data Synced', message: `Loaded ${data.length} bars for ${activeSymbol}` });
         } catch (err: any) {
             const cached = loadFromLocalCache(overrideSymbol, overrideTimeframe, { notify: false });
@@ -614,11 +698,11 @@ setAllData(validData);
             }
             addToast({
                 type: 'error',
-                title: 'Sync Failed',
-                message: err.message || 'Make sure bridge is running.'
+                title: 'MT5 Sync Failed',
+                message: 'MT5 Bridge is offline. Start the JournalFX Bridge app, or switch to the cTrader source in the top bar to use historical candles instead.'
             });
         }
-    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe]);
+    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe, setActiveSource]);
 
     const handleFetchCtraderData = useCallback(async (
         overrideSymbol?: string, 
@@ -636,6 +720,13 @@ setAllData(validData);
         setIsCtraderFetching(true);
 
         const hasCustomFilter = Boolean(customOptions?.fromTimestamp || customOptions?.toTimestamp);
+        // TradingView keeps the visible time range when switching timeframes:
+        // capture it so the new timeframe loads the same window and drawings
+        // stay pinned on screen.
+        const isTimeframeSwitch = !hasCustomFilter && Boolean(overrideTimeframe) && overrideTimeframe !== timeframe && (!overrideSymbol || overrideSymbol === symbol);
+        const prevVisibleRange = isTimeframeSwitch
+            ? (chartRef.current?.timeScale().getVisibleRange?.() as { from: number; to: number } | null) ?? null
+            : null;
         // Check local cache first for instant switching if not querying a specific historical date
         const cached = !hasCustomFilter ? loadFromLocalCache(activeSymbol, activeTF, { notify: false }) : null;
         if (cached) {
@@ -645,14 +736,19 @@ setAllData(validData);
 
         try {
             if (!isCtraderAuthenticated()) {
-                setShowCtraderAuthModal(true);
-                addToast({
-                    type: 'warning',
-                    title: 'cTrader Auth Required',
-                    message: 'Please connect your cTrader account first.'
-                });
-                setIsCtraderFetching(false);
-                return;
+                // Try a silent refresh first (covers returning from the OAuth
+                // flow where the refresh token lives in an httpOnly cookie).
+                try { await refreshCtraderToken(); } catch { /* keep status */ }
+                if (!isCtraderAuthenticated()) {
+                    setShowCtraderAuthModal(true);
+                    addToast({
+                        type: 'warning',
+                        title: 'cTrader Auth Required',
+                        message: 'Please connect your cTrader account first.'
+                    });
+                    setIsCtraderFetching(false);
+                    return;
+                }
             }
 
             const accounts = await getCtraderAccounts();
@@ -667,8 +763,13 @@ setAllData(validData);
                 return;
             }
 
-            const account = accounts[0];
-            const candleCount = customOptions?.count || 500;
+            const savedAccountId = getSelectedAccountId();
+            const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
+            // When preserving the visible window, fetch enough bars to cover it
+            // (cTrader returns bars within the from/to range, capped by count).
+            const candleCount = customOptions?.count || (prevVisibleRange ? 5000 : 500);
+            const rangeFromMs = customOptions?.fromTimestamp ?? (prevVisibleRange ? prevVisibleRange.from * 1000 : undefined);
+            const rangeToMs = customOptions?.toTimestamp ?? (prevVisibleRange ? prevVisibleRange.to * 1000 : undefined);
             const candles = await fetchCtraderCandles(
                 account.ctidTraderAccountId,
                 activeSymbol,
@@ -676,8 +777,8 @@ setAllData(validData);
                 candleCount,
                 account.isDemo,
                 3,
-                customOptions?.fromTimestamp,
-                customOptions?.toTimestamp
+                rangeFromMs,
+                rangeToMs
             );
 
             if (!candles || candles.length === 0) {
@@ -693,13 +794,20 @@ setAllData(validData);
             }
 
             setAllData(candles);
-            if (customOptions?.startAtFirstBar) {
+            if (prevVisibleRange) {
+                // Show every fetched bar, then restore the same visible window
+                // so drawings stay exactly where the user left them.
+                setCurrentIdx(candles.length - 1);
+                window.setTimeout(() => {
+                    chartRef.current?.timeScale().setVisibleRange?.({ from: prevVisibleRange.from, to: prevVisibleRange.to });
+                }, 0);
+            } else if (customOptions?.startAtFirstBar) {
                 setCurrentIdx(Math.min(50, candles.length - 1));
             } else if (!cached) {
                 setCurrentIdx(Math.min(candles.length - 1, 50));
             }
             setHistory([]);
-            setDrawings([]);
+            setDrawings(prev => stripLogicalAnchors(prev));
             historyStatesRef.current = [];
             historyPointerRef.current = -1;
             setHistoryStates([]);
@@ -707,6 +815,7 @@ setAllData(validData);
             resetDrawingInteractionState();
             saveToLocalCache(candles, activeSymbol, activeTF);
             setDataSource('ctrader');
+            setActiveSource('ctrader');
             setShowWelcome(false);
 
             const firstDate = candles[0]?.time ? new Date(candles[0].time * 1000).toLocaleDateString() : '';
@@ -729,7 +838,7 @@ setAllData(validData);
         } finally {
             setIsCtraderFetching(false);
         }
-    }, [symbol, timeframe, setAllData, setCurrentIdx, saveToLocalCache, loadFromLocalCache, setDataSource, setShowWelcome, resetDrawingInteractionState, addToast]);
+    }, [symbol, timeframe, setAllData, setCurrentIdx, saveToLocalCache, loadFromLocalCache, setDataSource, setActiveSource, setShowWelcome, resetDrawingInteractionState, addToast]);
 
     const handleApplyCtraderDatePreset = (daysAgo: number) => {
         const d = new Date();
@@ -760,15 +869,25 @@ setAllData(validData);
         });
     };
 
+    // Switches the active data source in the top bar and syncs from it.
+    const handleSourceSelect = useCallback((source: 'mt5' | 'ctrader') => {
+        setActiveSource(source);
+        if (source === 'mt5') {
+            handleFetchMT5Data();
+        } else {
+            handleFetchCtraderData();
+        }
+    }, [setActiveSource, handleFetchMT5Data, handleFetchCtraderData]);
+
     const handleFetchActiveSourceData = useCallback(async (overrideSymbol?: string, overrideTimeframe?: string) => {
-        if (dataSource === 'ctrader') {
+        if (activeSource === 'ctrader') {
             return handleFetchCtraderData(overrideSymbol, overrideTimeframe);
         }
         return handleFetchMT5Data(overrideSymbol, overrideTimeframe);
-    }, [dataSource, handleFetchCtraderData, handleFetchMT5Data]);
+    }, [activeSource, handleFetchCtraderData, handleFetchMT5Data]);
 
     const handleUpdateData = useCallback(async () => {
-        if (dataSource === 'ctrader') {
+        if (activeSource === 'ctrader') {
             return handleFetchCtraderData();
         }
         if (allData.length === 0) return handleFetchMT5Data();
@@ -777,11 +896,12 @@ setAllData(validData);
             const { data } = await fetchData();
             saveToLocalCache(data);
             setDataSource('live');
+            setActiveSource('mt5');
             addToast({ type: 'success', title: 'Data Updated', message: 'Latest bars synced from MT5' });
         } catch (err: any) {
             addToast({ type: 'error', title: 'Update Failed', message: err.message });
         }
-    }, [dataSource, handleFetchCtraderData, allData.length, handleFetchMT5Data, fetchData, saveToLocalCache, setDataSource, addToast]);
+    }, [activeSource, handleFetchCtraderData, allData.length, handleFetchMT5Data, fetchData, saveToLocalCache, setDataSource, setActiveSource, addToast]);
 
     const resolveTradeIsoTime = useCallback((value?: string, fallbackDate?: string, fallbackTime?: string) => {
         if (value) {
@@ -1091,8 +1211,13 @@ setAllData(validData);
             const entryPrice = snapped.price;
             const defaults = toolStyle;
             const rrRatio = defaults.rr2 || 2; // Default R:R of 2
-            // Use a reasonable default risk based on price level
-            const defaultRisk = entryPrice * 0.005; // 0.5% default risk
+            // Adaptive risk: average bar range of recent candles, not a fixed %.
+            // This makes the tool scale correctly on every timeframe.
+            const visibleData = allData.slice(Math.max(0, currentIndex - 19), currentIndex + 1);
+            const avgRange = visibleData.length > 0
+                ? visibleData.reduce((sum, c) => sum + (c.high - c.low), 0) / visibleData.length
+                : entryPrice * 0.005;
+            const defaultRisk = avgRange || entryPrice * 0.005;
             drawingProps.entry = entryPrice;
             drawingProps.target = isLong ? entryPrice + (defaultRisk * rrRatio) : entryPrice - (defaultRisk * rrRatio);
             drawingProps.stop = isLong ? entryPrice - defaultRisk : entryPrice + defaultRisk;
@@ -1166,7 +1291,12 @@ setAllData(validData);
                 const mousePriceDist = Math.abs(snp.price - entryPrice);
                 const defaults = toolDefaults[currentDrawing.type] || {};
                 const rrRatio = defaults.rr2 || 2;
-                const risk = mousePriceDist > 0 ? mousePriceDist : entryPrice * 0.005;
+                // Adaptive fallback: average range instead of fixed %
+                const visibleData = allData.slice(Math.max(0, currentIndex - 19), currentIndex + 1);
+                const avgRange = visibleData.length > 0
+                    ? visibleData.reduce((sum, c) => sum + (c.high - c.low), 0) / visibleData.length
+                    : entryPrice * 0.005;
+                const risk = mousePriceDist > 0 ? mousePriceDist : (avgRange || entryPrice * 0.005);
 
                 setCurrentDrawing(prev => prev ? {
                     ...prev,
@@ -1290,9 +1420,31 @@ setAllData(validData);
             if (chartRef.current) {
                 // Handle horizontal following logic intelligently
                 chartRef.current.timeScale().updateOffsetForNewBar(isAutoFollow);
-            }
-        } else { setIsPlaying(false); addToast({ type: 'info', title: 'End of Data' }); }
+            }        } else { setIsPlaying(false); addToast({ type: 'info', title: 'End of Data' }); }
     };
+
+    const stepBack = useCallback(() => {
+        if (currentIndex > 0) {
+            setCurrentIdx(currentIndex - 1);
+            setTick(t => t + 1);
+            if (chartRef.current) {
+                chartRef.current.timeScale().updateOffsetForNewBar(isAutoFollow);
+            }
+        }
+    }, [currentIndex, isAutoFollow]);
+
+    const handleProgressBarClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (allData.length === 0) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const idx = Math.round(ratio * (allData.length - 1));
+        setIsPlaying(false);
+        setCurrentIdx(idx);
+        setTick(t => t + 1);
+        if (chartRef.current) {
+            chartRef.current.timeScale().updateOffsetForNewBar(isAutoFollow);
+        }
+    }, [allData.length, isAutoFollow]);
 
     useEffect(() => {
         let interval: any; if (isPlaying) interval = setInterval(stepForward, playSpeed);
@@ -1347,6 +1499,34 @@ setAllData(validData);
             setTick(t => t + 1);
         }
     }, []);
+
+    // Watchlist sorted: starred first, then alphabetical
+    const sortedWatchlist = useMemo(() => {
+        const list = WATCHLISTS[watchlistCategory] || [];
+        return [...list].sort((a, b) => {
+            const aStar = starredSymbols.includes(a) ? -1 : 0;
+            const bStar = starredSymbols.includes(b) ? -1 : 0;
+            if (aStar !== bStar) return aStar - bStar;
+            return a.localeCompare(b);
+        });
+    }, [watchlistCategory, starredSymbols]);
+
+    const handleWatchlistSymbolClick = useCallback(async (fullSymbol: string) => {
+        // Strip prefix: 'FX:EURUSD' -> 'EURUSD'
+        const bareSymbol = fullSymbol.split(':')[1] || fullSymbol;
+        setSymbol(bareSymbol);
+        setIsWatchlistOpen(false);
+        handleFetchActiveSourceData(bareSymbol);
+    }, [setSymbol, handleFetchActiveSourceData]);
+
+    const toggleStar = useCallback((fullSymbol: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setStarredSymbols(prev =>
+            prev.includes(fullSymbol)
+                ? prev.filter(s => s !== fullSymbol)
+                : [...prev, fullSymbol]
+        );
+    }, [setStarredSymbols]);
 
     // Tool keyboard shortcuts mapping
     const toolShortcuts: Record<string, ToolType> = {
@@ -1467,42 +1647,8 @@ setAllData(validData);
                                     {bridgeStatus === 'online' ? 'Bridge Online' : bridgeStatus === 'checking' ? 'Checking Bridge...' : bridgeError || 'Bridge Offline'}
                                 </div>
                             </div>
-                            <Search size={14} className="text-zinc-500 ml-1" />
-                            <input
-                                id="backtest-symbol-input"
-                                name="symbol"
-                                aria-label="Enter trading symbol for backtesting"
-                                value={symbol}
-                                onChange={(e) => { setSymbol(e.target.value.toUpperCase()); setIsSymbolMenuOpen(true); }}
-                                onFocus={() => setIsSymbolMenuOpen(true)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') { handleFetchActiveSourceData(symbol); setIsSymbolMenuOpen(false); } }}
-                                className={`bg-transparent text-xs font-black w-20 py-2 outline-none uppercase text-center ${isDarkMode ? 'text-white' : 'text-slate-900'}`}
-                                placeholder="SYMBOL"
-                            />
+                            <span className={`text-xs font-black uppercase ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{symbol}</span>
                         </div>
-
-                        {isSymbolMenuOpen && (
-                            <>
-                                <div className="fixed inset-0 z-[90]" onClick={() => setIsSymbolMenuOpen(false)} />
-                                <div className={`absolute top-full left-0 mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-[100] max-h-80 overflow-y-auto ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
-                                    <input
-                                        type="text"
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
-                                        placeholder="Search symbols..."
-                                        className={`w-full px-3 py-2 mb-2 rounded-lg text-xs font-bold outline-none ${isDarkMode ? 'bg-black text-white placeholder-zinc-500' : 'bg-slate-100 text-slate-900 placeholder-slate-400'}`}
-                                        autoFocus
-                                    />
-                                    {POPULAR_SYMBOLS.filter(s => searchTerm === '' || s.includes(searchTerm)).map(s => (
-                                        <button key={s} onClick={() => { setSymbol(s); setIsSymbolMenuOpen(false); handleFetchActiveSourceData(s); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left ${symbol === s ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
-                                            <span className="text-xs font-black">{s}</span>
-                                            {symbol === s && <Check size={14} />}
-                                        </button>
-                                    ))}
-                                </div>
-                            </>
-                        )}
-
                         <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`} />
                         <div className="relative group/tf">
                             <button onClick={() => setIsTFMenuOpen(!isTFMenuOpen)} className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isDarkMode ? 'text-zinc-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
@@ -1531,44 +1677,76 @@ setAllData(validData);
                         </button>
                     </div>
 
-                    <button onClick={() => handleFetchMT5Data()} disabled={isFetching} className={`h-9 px-4 rounded-xl border text-[10px] font-black uppercase tracking-widest backdrop-blur-xl transition-all ${isFetching ? 'bg-black/40 border-white/10 text-zinc-500 cursor-wait' : 'bg-[#FF4F01]/20 border-[#FF4F01]/35 text-orange-100 hover:bg-[#FF4F01]/30 hover:border-[#FF4F01]/55 active:scale-95 shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(255,79,1,0.12)]'}`}>
-                        {isFetching ? 'Syncing...' : 'MT5 Sync'}
-                    </button>
-                    <button
-                        onClick={() => handleExecuteCtraderDateFetch()}
-                        disabled={isCtraderFetching}
-                        title="Fetch historical candles by date from cTrader Open API"
-                        className={`h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
-                            isCtraderFetching
-                            ? 'bg-black/40 border-white/10 text-zinc-500 cursor-wait'
-                                : 'bg-[#1689ff]/20 border-[#48c8ff]/40 text-cyan-100 hover:bg-[#1689ff]/30 hover:border-[#48c8ff]/60 active:scale-95 shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(22,137,255,0.14)]'
-                        }`}
-                    >
-                        {isCtraderFetching ? (
-                            <><RefreshCw size={12} className="animate-spin" /> Fetching...</>
-                        ) : (
-                            <><Calendar size={12} /> cTrader</>
-                        )}
-                    </button>
+                    {/* Data source selector: MT5 ⇄ cTrader */}
+                    <div className={`flex items-center p-1 rounded-xl border gap-0.5 ${isDarkMode ? 'bg-black/60 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
+                        <button
+                            onClick={() => handleSourceSelect('mt5')}
+                            disabled={isFetching}
+                            title="Sync live bars from your MT5 terminal via the JournalFX Bridge"
+                            className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-all active:scale-95 ${
+                                activeSource === 'mt5'
+                                    ? 'bg-[#FF4F01] text-white shadow-lg shadow-[#FF4F01]/25'
+                                    : isDarkMode ? 'text-zinc-400 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                            }`}
+                        >
+                            <RefreshCw size={12} className={isFetching && activeSource === 'mt5' ? 'animate-spin' : ''} />
+                            MT5
+                            <span className={`w-1.5 h-1.5 rounded-full ${bridgeStatus === 'online' ? 'bg-emerald-400' : bridgeStatus === 'checking' ? 'bg-amber-400' : 'bg-rose-500'}`} />
+                        </button>
+                        <button
+                            onClick={() => handleSourceSelect('ctrader')}
+                            disabled={isCtraderFetching}
+                            title="Fetch historical candles from the cTrader Open API"
+                            className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-all active:scale-95 ${
+                                activeSource === 'ctrader'
+                                    ? 'bg-[#1689ff] text-white shadow-lg shadow-[#1689ff]/25'
+                                    : isDarkMode ? 'text-zinc-400 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                            }`}
+                        >
+                            <Calendar size={12} />
+                            cTrader
+                            <span className={`w-1.5 h-1.5 rounded-full ${ctraderConnected ? 'bg-emerald-400' : 'bg-rose-500'}`} />
+                        </button>
+                    </div>
                 </div>
 
-                <div className="flex items-center gap-6 w-72 justify-end">
+                <div className="flex items-center gap-4 justify-end">
                     {allData.length > 0 && (
-                        <div className="flex flex-col w-full">
-                            <div className="flex justify-between items-center mb-1">
-                                <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Replay Progress</span>
-                                <span className={`text-[10px] font-mono font-bold ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
-                                    {currentIndex + 1} / {allData.length} Bars
-                                </span>
-                            </div>
-                            <div className={`w-full h-1.5 rounded-full overflow-hidden ${isDarkMode ? 'bg-black' : 'bg-slate-200'}`}>
+                        <div className="flex items-center gap-2">
+                            <button onClick={stepBack} disabled={currentIndex <= 0} title="Scroll Left" className={`p-1 rounded-lg transition-all ${currentIndex <= 0 ? 'opacity-30 cursor-not-allowed' : isDarkMode ? 'hover:bg-white/5 text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}>
+                                <ChevronLeft size={14} />
+                            </button>
+                            <div className="flex flex-col w-56">
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Replay Progress</span>
+                                    <span className={`text-[10px] font-mono font-bold ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
+                                        {currentIndex + 1} / {allData.length} Bars
+                                    </span>
+                                </div>
                                 <div
-                                    className="h-full bg-emerald-500 transition-all duration-300 ease-out"
-                                    style={{ width: `${Math.min(100, ((currentIndex + 1) / allData.length) * 100)}%` }}
-                                />
+                                    onClick={handleProgressBarClick}
+                                    className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer ${isDarkMode ? 'bg-black hover:bg-zinc-900' : 'bg-slate-200 hover:bg-slate-300'} transition-colors`}
+                                    title="Click to jump to bar"
+                                >
+                                    <div
+                                        className="h-full bg-emerald-500 transition-all duration-300 ease-out"
+                                        style={{ width: `${Math.min(100, ((currentIndex + 1) / allData.length) * 100)}%` }}
+                                    />
+                                </div>
                             </div>
+                            <button onClick={stepForward} disabled={currentIndex >= allData.length - 1} title="Scroll Right" className={`p-1 rounded-lg transition-all ${currentIndex >= allData.length - 1 ? 'opacity-30 cursor-not-allowed' : isDarkMode ? 'hover:bg-white/5 text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}>
+                                <ChevronRight size={14} />
+                            </button>
                         </div>
                     )}
+                    <div className={`w-px h-6 ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
+                    <button
+                        onClick={() => setIsWatchlistOpen(!isWatchlistOpen)}
+                        title="Toggle Watchlist Sidebar"
+                        className={`p-2 rounded-lg ${isWatchlistOpen ? 'bg-black text-white' : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}
+                    >
+                        <List size={20} />
+                    </button>
                 </div>
             </div>
 
@@ -1614,6 +1792,9 @@ setAllData(validData);
                             trades={history as any}
                             drawings={drawings}
                             isDarkMode={isDarkMode}
+                            symbol={symbol}
+                            timeframe={timeframe}
+                            tradingView
                             isSelectBarMode={isSelectBarMode}
                             onSelectBar={(idx) => { setCurrentIdx(idx); setIsSelectBarMode(false); }}
                             onCoordinatesChange={handleCoordinatesChange}
@@ -1641,6 +1822,10 @@ setAllData(validData);
                                             <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>Live Source</p>
                                             <h3 className={`text-xl font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Live MT5 Sync</h3>
                                             <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Requires JournalFX Bridge to be running<br />Connects directly to your MT5 Terminal</p>
+                                        </div>
+                                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-widest ${bridgeStatus === 'online' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : bridgeStatus === 'checking' ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' : 'border-rose-500/30 bg-rose-500/10 text-rose-400'}`}>
+                                            <span className={`w-1.5 h-1.5 rounded-full ${bridgeStatus === 'online' ? 'bg-emerald-400 animate-pulse' : bridgeStatus === 'checking' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'}`} />
+                                            {bridgeStatus === 'online' ? 'Bridge Online' : bridgeStatus === 'checking' ? 'Checking Bridge...' : bridgeError || 'Bridge Offline'}
                                         </div>
                                         <div className={`px-6 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'bg-black border-zinc-700 text-zinc-400 group-hover:text-emerald-400' : 'bg-white border-slate-200 text-slate-500 group-hover:text-emerald-600'}`}>
                                             {isFetching ? 'Connecting...' : 'Start Sync'}
@@ -1756,6 +1941,12 @@ setAllData(validData);
                                             </div>
                                         </div>
 
+                                        {/* Connection status */}
+                                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-widest ${ctraderConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-rose-500/30 bg-rose-500/10 text-rose-400'}`}>
+                                            <span className={`w-1.5 h-1.5 rounded-full ${ctraderConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+                                            {ctraderConnected ? 'Connected' : 'Not Connected'}
+                                        </div>
+
                                         {/* In-Card Date Selection Controls */}
                                         <div className="w-full space-y-2.5 bg-black/20 p-3 rounded-2xl border border-zinc-800/60">
                                             {/* Quick Date Presets */}
@@ -1859,19 +2050,27 @@ setAllData(validData);
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
+                                                if (!ctraderConnected) {
+                                                    setShowCtraderAuthModal(true);
+                                                    return;
+                                                }
                                                 handleExecuteCtraderDateFetch();
                                             }}
                                             disabled={isCtraderFetching}
                                             className={`w-full py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md ${
                                                 isCtraderFetching
                                                     ? 'bg-black border-zinc-800 text-zinc-500 cursor-wait'
-                                                    : 'bg-[#1689ff]/20 border-[#48c8ff]/40 text-cyan-100 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(22,137,255,0.14)] hover:bg-[#1689ff]/30 hover:border-[#48c8ff]/60'
+                                                    : ctraderConnected
+                                                        ? 'bg-[#1689ff]/20 border-[#48c8ff]/40 text-cyan-100 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(22,137,255,0.14)] hover:bg-[#1689ff]/30 hover:border-[#48c8ff]/60'
+                                                        : 'bg-[#0061FF] border-[#0061FF] text-white shadow-lg shadow-[#0061FF]/25 hover:bg-[#0052d4]'
                                             }`}
                                         >
                                             {isCtraderFetching ? (
                                                 <><RefreshCw size={12} className="animate-spin" /> Pulling Data...</>
-                                            ) : (
+                                            ) : ctraderConnected ? (
                                                 <><Calendar size={12} /> Pull from Date</>
+                                            ) : (
+                                                <><Zap size={12} /> Connect cTrader</>
                                             )}
                                         </button>
                                     </div>
@@ -1916,56 +2115,26 @@ setAllData(validData);
                         )}
                     </AnimatePresence>
 
-                    {/* cTrader Re-auth Modal */}
-                    <AnimatePresence>
-                        {showCtraderAuthModal && (
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                className="absolute inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
-                            >
-                                <div className={`w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-6 ${isDarkMode ? 'bg-zinc-950 border-zinc-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-3 rounded-2xl bg-[#0061FF]/10 text-[#0061FF]">
-                                                <Zap size={24} />
-                                            </div>
-                                            <div>
-                                                <h3 className="text-lg font-black uppercase tracking-tight">cTrader Connection Required</h3>
-                                                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Authentication Warning</p>
-                                            </div>
-                                        </div>
-                                        <button onClick={() => setShowCtraderAuthModal(false)} className="p-2 rounded-xl hover:bg-zinc-800/50 text-zinc-400">
-                                            <X size={18} />
-                                        </button>
-                                    </div>
-
-                                    <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
-                                        You are currently not connected to cTrader Open API. Please authenticate your cTrader account in Settings to pull historical candlesticks directly into the Backtest Lab.
-                                    </p>
-
-                                    <div className="flex items-center justify-end gap-3 pt-2">
-                                        <button
-                                            onClick={() => setShowCtraderAuthModal(false)}
-                                            className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                                        >
-                                            Dismiss
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setShowCtraderAuthModal(false);
-                                                setIsSettingsOpen(true);
-                                            }}
-                                            className="px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider bg-gradient-to-r from-[#0061FF] to-[#60efff] text-white active:scale-95 shadow-lg shadow-[#0061FF]/25"
-                                        >
-                                            Open Settings & Connect
-                                        </button>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                    {/* cTrader Auth Required Modal */}
+                    <CtraderAuthModal
+                        isOpen={showCtraderAuthModal}
+                        isDarkMode={isDarkMode}
+                        onClose={() => setShowCtraderAuthModal(false)}
+                        onConnect={async () => {
+                            setShowCtraderAuthModal(false);
+                            try {
+                                const { getAuthorizeUrl } = await import('../services/ctraderService');
+                                window.location.href = getAuthorizeUrl();
+                            } catch (err: any) {
+                                addToast({
+                                    type: 'error',
+                                    title: 'cTrader Not Configured',
+                                    message: err?.message || 'Failed to initiate cTrader connection.'
+                                });
+                                setIsSettingsOpen(true);
+                            }
+                        }}
+                    />
 
                     {analysisResult && (
                         <div className={`absolute top-4 right-4 w-64 p-4 rounded-xl border backdrop-blur-md shadow-2xl z-20 ${isDarkMode ? 'bg-black/90 border-zinc-800' : 'bg-white/90 border-slate-200'}`}>
@@ -1998,6 +2167,34 @@ setAllData(validData);
                         </div>
                     </div>
                 )}
+
+                {/* TradingView-style Watchlist Sidebar (matches ChartGrid) */}
+                <div className={`${isWatchlistOpen ? 'w-72 translate-x-0' : 'w-0 translate-x-full'} shrink-0 border-l flex flex-col overflow-hidden transition-all duration-300 ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200'}`}>
+                    <div className="p-4 border-b shrink-0 flex items-center justify-between">
+                        <h3 className="font-bold text-sm">Watchlist</h3>
+                        <button onClick={() => setIsWatchlistOpen(false)} className="opacity-50 hover:opacity-100"><X size={16} /></button>
+                    </div>
+                    <div className="flex p-2 gap-1 overflow-x-auto border-b no-scrollbar">
+                        {(Object.keys(WATCHLISTS)).map(cat => (
+                            <button key={cat} onClick={() => setWatchlistCategory(cat)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${watchlistCategory === cat ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-600'}`}>{cat}</button>
+                        ))}
+                    </div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+                        {sortedWatchlist.map(fullSymbol => {
+                            const isStarred = starredSymbols.includes(fullSymbol);
+                            const displaySymbol = fullSymbol.split(':')[1] || fullSymbol;
+                            const bareSymbol = displaySymbol;
+                            const isActive = symbol === bareSymbol;
+                            return (
+                                <button key={fullSymbol} onClick={() => handleWatchlistSymbolClick(fullSymbol)} className={`w-full flex items-center justify-between p-3 rounded-lg text-left group ${isActive ? (isDarkMode ? 'bg-[#FF4F01]/10 text-[#FF4F01]' : 'bg-[#FF4F01]/10 text-[#FF4F01]') : isDarkMode ? 'hover:bg-black text-zinc-300' : 'hover:bg-slate-50 text-slate-700'}`}>                                    <span className="font-bold text-sm">{displaySymbol}</span>
+                                    <div onClick={(e) => toggleStar(fullSymbol, e)} className={`opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 ${isStarred ? 'opacity-100 text-amber-400' : 'text-zinc-500'}`}>
+                                        <Star size={14} fill={isStarred ? 'currentColor' : 'none'} />
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
             </div>
 
             {activeLabTab === 'chart' && (
@@ -2032,7 +2229,7 @@ setAllData(validData);
                                 <span className="px-2 py-1 rounded bg-rose-500/20 text-rose-500 text-[8px] font-black uppercase tracking-widest">LOCKED</span>
                             </div>
                         )}
-                        <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => setIsSettingsOpen(true)} title="Settings" className={`relative z-50 p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-blue-500' : 'hover:bg-blue-50 text-blue-600'}`}>
+                        <button onClick={() => setIsSettingsOpen(true)} title="Settings" className={`p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-blue-500' : 'hover:bg-blue-50 text-blue-600'}`}>
                             <Settings size={20} />
                         </button>
                         <div className="flex flex-col items-end gap-1 relative">

@@ -74,6 +74,30 @@ export function cleanThinkingTags(text: string): string {
   return result.trim();
 }
 
+/**
+ * Produces display-safe assistant content. Some reasoning models occasionally
+ * emit an untagged preamble such as "Here's a thinking process:" in `content`.
+ * That preamble cannot be safely separated from a partial answer, so suppress
+ * the response unless the model explicitly marks the final answer.
+ */
+export function cleanAssistantResponse(text: string): string {
+  const cleaned = cleanThinkingTags(text);
+  if (!cleaned) return '';
+
+  const leakedReasoningPreamble = /^(?:#{1,6}\s*)?(?:(?:here(?:'s|\u2019s| is))(?:\s+(?:my|the|a))?\s+|my\s+)?(?:thinking|reasoning|analysis)(?:\s+process)?\s*:/i;
+  if (!leakedReasoningPreamble.test(cleaned)) {
+    return cleaned;
+  }
+
+  const finalAnswerMarker = /^(?:#{1,6}\s*)?(?:final\s+)?(?:answer|response)\s*:\s*/im;
+  const finalAnswerMatch = finalAnswerMarker.exec(cleaned);
+  if (!finalAnswerMatch) {
+    return '';
+  }
+
+  return cleanThinkingTags(cleaned.slice(finalAnswerMatch.index + finalAnswerMatch[0].length));
+}
+
 export function isInsideThinkingBlock(text: string): boolean {
   const openTags = [
     '<think>',

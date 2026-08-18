@@ -1273,7 +1273,22 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
 
     // --- State variables for 2,3,4,5,6,7,8 ---
     const [profile, setProfile] = useState<any>(null);
-    const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+    const [selectedAccountId, _setSelectedAccountId] = useState<number | null>(null);
+    const mountedRef = useRef(false);
+
+    const setSelectedAccountId = (id: number | null) => {
+        _setSelectedAccountId(id);
+        // Persist selection to localStorage so it survives OAuth redirects.
+        // Only write after first mount (mountedRef) so the initial null state
+        // doesn't clobber the saved preference before handleFetchAccounts reads it.
+        if (!mountedRef.current) return;
+        if (id !== null) {
+            import('../services/ctraderService').then(m => m.setSelectedAccountId(id)).catch(() => {});
+        }
+        // Don't clear on null (back-to-list) — only logout() clears it.
+    };
+
+    useEffect(() => { mountedRef.current = true; }, []);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
     const [accountPositions, setAccountPositions] = useState<any[]>([]);
     const [accountDeals, setAccountDeals] = useState<any[]>([]);
@@ -1548,6 +1563,16 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             const { getAccounts, getTrader } = await import('../services/ctraderService');
             const accs = await getAccounts();
             setAccounts(accs);
+
+            // Auto-select the previously saved account (survives OAuth redirect)
+            const { getSelectedAccountId } = await import('../services/ctraderService');
+            const savedId = getSelectedAccountId();
+            if (savedId !== null && accs.some((a: any) => a.ctidTraderAccountId === savedId)) {
+                const savedAcc = accs.find((a: any) => a.ctidTraderAccountId === savedId)!;
+                _setSelectedAccountId(savedId);
+                // Load details in background (don't await — UI shows list until ready)
+                handleRefreshDetails(savedAcc).catch(() => {});
+            }
 
             // Background-fetch live balance/equity for each account individually
             // Each resolves on its own so the list populates progressively

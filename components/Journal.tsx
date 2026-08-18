@@ -797,7 +797,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                             {/* ── Mode toggle header ── */}
                             <div className={`flex items-center justify-between px-3 py-1.5 border-b shrink-0 ${isDarkMode ? 'border-zinc-800 bg-black/40' : 'border-slate-100 bg-slate-50'}`}>
                                 <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                                    {(canvasMode[trade.id] ?? 'chart') === 'chart' ? 'Live Chart' : 'Screenshots'}
+                                    {(canvasMode[trade.id] ?? 'chart') === 'chart' ? 'Chart' : 'Screenshots'}
                                 </span>
                                 <div className={`flex items-center rounded-lg p-0.5 gap-0.5 ${isDarkMode ? 'bg-zinc-900' : 'bg-slate-100'}`}>
                                     <button
@@ -807,7 +807,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                                 ? (isDarkMode ? 'bg-zinc-700 text-white' : 'bg-white text-slate-900 shadow-sm')
                                                 : (isDarkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-slate-400 hover:text-slate-600')
                                         }`}
-                                        title="Live cTrader Chart"
+                                        title="Historical cTrader Chart"
                                     >
                                         📈 Chart
                                     </button>

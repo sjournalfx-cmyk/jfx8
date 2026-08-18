@@ -427,8 +427,29 @@ export async function refreshToken(): Promise<boolean> {
   return refreshTokensFromCookie();
 }
 
+const SELECTED_ACCOUNT_KEY = 'jfx_ctrader_selected_account';
+
+/** Persist the user's preferred cTrader account so it survives redirects. */
+export function setSelectedAccountId(id: number) {
+  try { localStorage.setItem(SELECTED_ACCOUNT_KEY, String(id)); } catch { /* blocked */ }
+}
+
+/** Read the previously selected cTrader account id, or null. */
+export function getSelectedAccountId(): number | null {
+  try {
+    const raw = localStorage.getItem(SELECTED_ACCOUNT_KEY);
+    return raw ? Number(raw) : null;
+  } catch { return null; }
+}
+
+/** Clear the persisted cTrader account id. */
+export function clearSelectedAccountId() {
+  try { localStorage.removeItem(SELECTED_ACCOUNT_KEY); } catch { /* blocked */ }
+}
+
 export function logout() {
   memoryTokens = null;
+  clearSelectedAccountId();
   // Clear the server-side refresh cookie (best-effort).
   try { void fetch('/api/ctrader/logout', { method: 'POST' }); } catch { /* ignore */ }
   appAuthDone.clear();

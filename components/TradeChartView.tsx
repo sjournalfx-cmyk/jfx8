@@ -5,6 +5,7 @@ import {
   fetchCtraderCandles,
   isAuthenticated as isCtraderAuthenticated,
   getAccounts as getCtraderAccounts,
+  getSelectedAccountId,
 } from '../services/ctraderService';
 import CustomChart from './CustomChart';
 import { Drawing } from './backtest/types';
@@ -140,7 +141,8 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
         return;
       }
 
-      const account = accounts[0];
+      const savedAccountId = getSelectedAccountId();
+      const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
       const tfSec = TF_SECONDS[tf] ?? 3600;
 
       const openMs  = new Date(trade.openTime).getTime();

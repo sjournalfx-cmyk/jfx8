@@ -9,6 +9,10 @@ interface CustomChartProps {
   drawings: Drawing[];
   isDarkMode: boolean;
   showGrid?: boolean;
+  symbol?: string;
+  timeframe?: string;
+  // TradingView-style overlays: crosshair, OHLC legend, last-price line, watermark.
+  tradingView?: boolean;
   onCoordinatesChange?: (chart: any, series: any) => void;
   onMouseUpdate?: (x: number, y: number, coords: { time: number, price: number, logical: number } | null) => void;
   onSelectBar?: (index: number) => void;
@@ -22,12 +26,59 @@ interface CustomChartProps {
 const PADDING_RIGHT = 60;
 const PADDING_BOTTOM = 26;
 
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const roundRectPath = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, r);
+    } else {
+        ctx.rect(x, y, w, h);
+    }
+};
+
+const formatPrice = (p: number): string => {
+    if (!isFinite(p)) return '\u2014';
+    if (p === 0) return '0';
+    return p.toFixed(5).replace(/\.?0+$/, '') || '0';
+};
+
+const formatAxisTime = (time: number, intervalSec: number): string => {
+    const d = new Date(time * 1000);
+    const mo = MONTHS_SHORT[d.getMonth()];
+    if (intervalSec >= 86400) {
+        return `${mo} ${d.getDate()}, ${d.getFullYear()}`;
+    }
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${mo} ${d.getDate()}, ${hh}:${mm}`;
+};
+
+const formatTimeLabel = (time: number, intervalSec: number, prevTime?: number): string => {
+    const d = new Date(time * 1000);
+    if (intervalSec >= 86400) {
+        const sameYear = d.getFullYear() === new Date().getFullYear();
+        return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}${sameYear ? '' : ` '${String(d.getFullYear()).slice(2)}`}`;
+    }
+    if (prevTime !== undefined) {
+        const prev = new Date(prevTime * 1000);
+        const isNewDay = prev.getFullYear() !== d.getFullYear() || prev.getMonth() !== d.getMonth() || prev.getDate() !== d.getDate();
+        if (isNewDay) return `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}`;
+    }
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+};
+
 const CustomChart: React.FC<CustomChartProps> = ({
   data,
   trades,
   drawings,
   isDarkMode,
   showGrid = false,
+  symbol = '',
+  timeframe = '',
+  tradingView = false,
   onCoordinatesChange,
   onMouseUpdate,
   onSelectBar,
@@ -59,6 +110,9 @@ const CustomChart: React.FC<CustomChartProps> = ({
     lastY: 0,
     dragType: 'NONE' as 'NONE' | 'PAN' | 'PRICE_SCALE' | 'TIME_SCALE'
   });
+
+  // TradingView-style crosshair position (screen coords inside the canvas).
+  const crosshairRef = useRef<{ x: number; y: number } | null>(null);
 
   const [chartRevision, setChartRevision] = useState(0);
   // Stable ref so onCoordinatesChange never depends on mockApi identity
@@ -150,6 +204,41 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
             return lastTime + (logical - (data.length - 1)) * interval;
           },
+          // TradingView-style visible range helpers: the host captures the
+          // currently visible time window before a timeframe switch and
+          // restores it after the new data loads, so drawings stay on screen.
+          getVisibleRange: () => {
+            const chartWidth = viewState.current.width - PADDING_RIGHT;
+            const toTime = (logical: number) => {
+              const idx = Math.round(logical);
+              if (idx >= 0 && idx < data.length) return data[idx].time;
+              if (data.length < 2) return null;
+              const interval = data[data.length - 1].time - data[data.length - 2].time;
+              return data[data.length - 1].time + (logical - (data.length - 1)) * interval;
+            };
+            const from = toTime(getIndexFromX(0));
+            const to = toTime(getIndexFromX(chartWidth));
+            if (from === null || to === null) return null;
+            return { from, to };
+          },
+          setVisibleRange: (range: { from: number; to: number }) => {
+            if (!range || data.length < 2) return;
+            const interval = data[data.length - 1].time - data[data.length - 2].time;
+            if (interval <= 0) return;
+            const chartWidth = viewState.current.width - PADDING_RIGHT;
+            if (chartWidth <= 0) return;
+            const lastTime = data[data.length - 1].time;
+            const logicalFrom = (range.from - lastTime) / interval + (data.length - 1);
+            const logicalTo = (range.to - lastTime) / interval + (data.length - 1);
+            const span = logicalTo - logicalFrom;
+            if (span <= 0) return;
+            const newScaleX = Math.max(0.5, Math.min(200, chartWidth / span));
+            viewState.current.scaleX = newScaleX;
+            viewState.current.offsetX = chartWidth - (data.length - 1 - logicalFrom) * newScaleX;
+            setChartRevision(r => r + 1);
+            draw();
+            notifyViewStateChange();
+          },
           fitContent: () => {
             viewState.current.offsetX = 0;
             viewState.current.scaleX = (viewState.current.width - PADDING_RIGHT) / Math.max(data.length, 1);
@@ -230,6 +319,13 @@ const CustomChart: React.FC<CustomChartProps> = ({
     const chartWidth = width - PADDING_RIGHT;
     const chartHeight = height - PADDING_BOTTOM;
     const dpr = width > 0 ? (canvas.width / width) : (window.devicePixelRatio || 1);
+    const intervalSec = getInterval();
+
+    // TradingView-style crosshair (hover state), only active when enabled.
+    const crossPos = crosshairRef.current;
+    const isDragging = mouse.current.isDown;
+    const showCross = tradingView && crossPos !== null && !isDragging &&
+      crossPos.x >= 0 && crossPos.x <= chartWidth && crossPos.y >= 0 && crossPos.y <= chartHeight;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
@@ -333,6 +429,17 @@ const CustomChart: React.FC<CustomChartProps> = ({
       ctx.lineWidth = 1;
       ctx.strokeRect(bodyX, bodyTop, candleWidth, bodyHeight);
     });
+
+    // 4b. Crosshair bar highlight (drawn behind drawings, like TradingView)
+    if (showCross && crossPos) {
+      const hoverIdx = Math.round(getIndexFromX(crossPos.x));
+      if (hoverIdx >= 0 && hoverIdx < data.length) {
+        const barX = getX(hoverIdx);
+        const barW = Math.max(scaleX * 0.85, 1);
+        ctx.fillStyle = isDarkMode ? 'rgba(148, 163, 184, 0.10)' : 'rgba(51, 65, 85, 0.08)';
+        ctx.fillRect(barX - barW / 2, 0, barW, chartHeight);
+      }
+    }
 
     // 5. Drawings (Canvas Layer) — Full visual rendering (SVG is hit-area only)
     drawings.forEach(d => {
@@ -719,6 +826,82 @@ const CustomChart: React.FC<CustomChartProps> = ({
       });
     }
 
+    // 5b. TradingView-style symbol + timeframe watermark
+    if (tradingView && symbol) {
+      ctx.save();
+      ctx.globalAlpha = isDarkMode ? 0.05 : 0.04;
+      ctx.fillStyle = isDarkMode ? '#ffffff' : '#0f172a';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 52px sans-serif';
+      const watermarkText = timeframe ? `${symbol} \u00b7 ${timeframe}` : symbol;
+      ctx.fillText(watermarkText, chartWidth / 2, chartHeight / 2);
+      ctx.restore();
+    }
+
+    // 5c. TradingView-style OHLC legend (top-left) — shows the hovered bar,
+    // or the latest bar when not hovering.
+    if (tradingView) {
+      const hoverBar = showCross && crossPos
+        ? data[Math.round(getIndexFromX(crossPos.x))]
+        : data[data.length - 1];
+      if (hoverBar) {
+        const prevBar = data[data.length - 2];
+        const prevClose = prevBar ? prevBar.close : hoverBar.open;
+        const changePct = prevClose !== 0 ? ((hoverBar.close - prevClose) / prevClose) * 100 : 0;
+        const isUp = hoverBar.close >= hoverBar.open;
+        const accent = isUp ? '#10b981' : '#ef4444';
+
+        const legendX = 8;
+        const legendY = 8;
+
+        ctx.font = 'bold 12px sans-serif';
+        const titleText = [symbol, timeframe].filter(Boolean).join(' \u00b7 ');
+        const titleW = ctx.measureText(titleText).width;
+
+        ctx.font = 'bold 10px monospace';
+        const cVal = formatPrice(hoverBar.close);
+        const ohlcPrefix = `O ${formatPrice(hoverBar.open)}  H ${formatPrice(hoverBar.high)}  L ${formatPrice(hoverBar.low)}  C `;
+        const ohlcW = ctx.measureText(ohlcPrefix + cVal).width;
+
+        const changeText = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+        ctx.font = 'bold 10px sans-serif';
+        const changeW = ctx.measureText(changeText).width;
+
+        const boxW = Math.max(titleW + changeW + 36, ohlcW + 20);
+        const boxH = 44;
+
+        ctx.fillStyle = isDarkMode ? 'rgba(10, 12, 18, 0.62)' : 'rgba(255, 255, 255, 0.85)';
+        roundRectPath(ctx, legendX, legendY, boxW, boxH, 8);
+        ctx.fill();
+
+        // Title row
+        ctx.fillStyle = isDarkMode ? '#d1d5db' : '#334155';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(titleText, legendX + 10, legendY + 15);
+
+        // Change % badge
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = 0.18;
+        roundRectPath(ctx, legendX + 12 + titleW, legendY + 6, changeW + 12, 17, 4);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = accent;
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText(changeText, legendX + 18 + titleW, legendY + 15.5);
+
+        // OHLC row (close value colored by direction)
+        ctx.fillStyle = isDarkMode ? '#a1a1aa' : '#64748b';
+        ctx.font = 'bold 10px monospace';
+        const ohlcPrefixW = ctx.measureText(ohlcPrefix).width;
+        ctx.fillText(ohlcPrefix, legendX + 10, legendY + 33);
+        ctx.fillStyle = accent;
+        ctx.fillText(cVal, legendX + 10 + ohlcPrefixW, legendY + 33);
+      }
+    }
+
     // 6. Axes Rendering
     ctx.fillStyle = '#000000';
     ctx.fillRect(chartWidth, 0, PADDING_RIGHT, height);
@@ -738,20 +921,101 @@ const CustomChart: React.FC<CustomChartProps> = ({
     const priceRange = maxPrice - minPrice;
     for (let i = 0; i <= 8; i++) {
       const p = minPrice + (priceRange * (i / 8));
-      ctx.fillText(p.toFixed(5), chartWidth + 5, getY(p));
+      ctx.fillText(formatPrice(p), chartWidth + 5, getY(p));
     }
 
-    // Time Labels
+    // Time Labels (date-aware: intraday shows day boundaries, D1+ shows month/day)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     for (let i = start - (start % timeStep); i <= end; i += timeStep) {
       const x = getX(i);
       if (x < 0 || x > chartWidth) continue;
-      const date = new Date(data[i].time * 1000);
-      const txt = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
-      ctx.fillText(txt, x, chartHeight + 5);
+      const prevTime = i > 0 ? data[i - 1].time : undefined;
+      ctx.fillText(formatTimeLabel(data[i].time, intervalSec, prevTime), x, chartHeight + 5);
     }
-  }, [data, isDarkMode, getX, getY, getIndexFromX, drawings, trades]);
+
+    // 7. TradingView extras: last-price line and crosshair axis labels
+    if (tradingView) {
+      // Last price line + colored price tag on the right scale
+      if (data.length >= 2) {
+        const lastCandle = data[data.length - 1];
+        const prevCandle = data[data.length - 2];
+        const lastPriceY = getY(lastCandle.close);
+        if (lastPriceY >= 0 && lastPriceY <= chartHeight) {
+          const lastX = getX(data.length - 1);
+          const isUp = lastCandle.close >= prevCandle.close;
+          const tagColor = isUp ? '#10b981' : '#ef4444';
+
+          ctx.save();
+          ctx.strokeStyle = tagColor;
+          ctx.globalAlpha = 0.8;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(lastX, lastPriceY);
+          ctx.lineTo(chartWidth, lastPriceY);
+          ctx.stroke();
+          ctx.restore();
+
+          const tagText = formatPrice(lastCandle.close);
+          ctx.font = 'bold 10px monospace';
+          const tagW = ctx.measureText(tagText).width + 14;
+          ctx.fillStyle = tagColor;
+          roundRectPath(ctx, chartWidth + 1, lastPriceY - 9, tagW, 18, 4);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tagText, chartWidth + 8, lastPriceY);
+        }
+      }
+
+      // Crosshair: dashed lines + price badge (right) + date/time badge (bottom)
+      if (showCross && crossPos) {
+        const cx = crossPos.x;
+        const cy = crossPos.y;
+
+        ctx.save();
+        ctx.strokeStyle = isDarkMode ? 'rgba(148, 163, 184, 0.65)' : 'rgba(100, 116, 139, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(cx, 0); ctx.lineTo(cx, chartHeight);
+        ctx.moveTo(0, cy); ctx.lineTo(chartWidth, cy);
+        ctx.stroke();
+        ctx.restore();
+
+        // Price badge on the right axis
+        const priceText = formatPrice(getPriceFromY(cy));
+        ctx.font = 'bold 10px monospace';
+        const pw = ctx.measureText(priceText).width + 14;
+        const py = Math.max(9, Math.min(chartHeight - 9, cy));
+        ctx.fillStyle = '#787b86';
+        roundRectPath(ctx, chartWidth + 1, py - 9, pw, 18, 4);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(priceText, chartWidth + 8, py);
+
+        // Date/time badge on the bottom axis (the TradingView "horizontal line" readout)
+        const hoverIdx = Math.round(getIndexFromX(cx));
+        if (hoverIdx >= 0 && hoverIdx < data.length) {
+          const tText = formatAxisTime(data[hoverIdx].time, intervalSec);
+          ctx.font = 'bold 10px monospace';
+          const tw = ctx.measureText(tText).width + 14;
+          const tx = Math.max(tw / 2 + 2, Math.min(chartWidth - tw / 2 - 2, cx));
+          ctx.fillStyle = '#787b86';
+          roundRectPath(ctx, tx - tw / 2, chartHeight + 4, tw, 18, 4);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tText, tx, chartHeight + 14);
+        }
+      }
+    }
+  }, [data, isDarkMode, getX, getY, getPriceFromY, getIndexFromX, getInterval, drawings, trades, tradingView, symbol, timeframe]);
 
   // Sync API with parent whenever mockApi changes or onCoordinatesChange updates
   useEffect(() => {
@@ -799,10 +1063,8 @@ const CustomChart: React.FC<CustomChartProps> = ({
     if (!rect) return;
 
     const x = e.clientX - rect.left;
-
     const y = e.clientY - rect.top;
-
-
+    crosshairRef.current = { x, y };
 
     if (mouse.current.isDown) {
 
@@ -879,6 +1141,9 @@ const CustomChart: React.FC<CustomChartProps> = ({
       setChartRevision(r => r + 1);
       draw();
       notifyViewStateChange();
+    } else {
+      // Redraw for the TradingView-style crosshair on plain hover.
+      draw();
     }
 
     if (onMouseUpdate) {
@@ -892,6 +1157,13 @@ const CustomChart: React.FC<CustomChartProps> = ({
   const handleMouseUp = () => {
     mouse.current.isDown = false;
     if (containerRef.current) containerRef.current.style.cursor = 'crosshair';
+  };
+
+  const handleMouseLeave = () => {
+    crosshairRef.current = null;
+    mouse.current.isDown = false;
+    if (containerRef.current) containerRef.current.style.cursor = 'crosshair';
+    draw();
   };
 
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -962,7 +1234,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
         className="w-full h-full block touch-none"
       />
       {children}
