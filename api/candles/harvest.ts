@@ -56,7 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 1. Seed queue when empty (first tick after deploy or after full drain
     //    with a new timeframe set — done rows are re-seeded on demand below).
     const timeframes = (process.env.HARVEST_TIMEFRAMES || 'M15,H1,H4,D1').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
-    const batchSize = Math.max(1, Number(process.env.HARVEST_BATCH_SIZE || 5));
+    const batchSize = Math.max(1, Number(process.env.HARVEST_BATCH_SIZE || 15));
 
     session = await createServiceSession({
       loadRotatedToken: async () => {
