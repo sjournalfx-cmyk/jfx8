@@ -20,6 +20,7 @@ import { UserProfile, BacktestSession, Trade, BacktestTrade, Candle } from '../t
 import { loadSeries, saveSeries, mergeBars, peekMeta, listCachedSeries, CachedSeriesInfo } from '../lib/candleStore';
 import { dataService } from '../services/dataService';
 import { fetchCtraderCandles, isAuthenticated as isCtraderAuthenticated, getAccounts as getCtraderAccounts, refreshToken as refreshCtraderToken, getSelectedAccountId } from '../services/ctraderService';
+import { fetchSharedCandles } from '../lib/sharedCandles';
 import CustomChart from './CustomChart';
 import CtraderAuthModal from './backtest/CtraderAuthModal';
 import StartScreen from './backtest/StartScreen';
@@ -588,6 +589,31 @@ setCurrentIdx(session.data.length - 1);
         finally { ctraderTopUpInFlight.current.delete(key); }
     }, [symbol, timeframe]);
 
+    // Shared-store top-up: same contract as topUpCtraderSeries but reads the
+    // server-harvested candle store, so it works with NO personal cTrader
+    // connection. Returns null when nothing is stored / nothing new / failed.
+    const sharedTopUpInFlight = useRef<Set<string>>(new Set());
+    const topUpSharedSeries = useCallback(async (activeSymbol?: string, activeTF?: string): Promise<{ merged: Candle[]; added: number } | null> => {
+        const sym = activeSymbol || symbol;
+        const tf = activeTF || timeframe;
+        if (!sym || !tf) return null;
+        const key = `shared_${sym}_${tf}`;
+        if (sharedTopUpInFlight.current.has(key)) return null;
+        const meta = peekMeta(sym, tf);
+        if (!meta) return null;
+        sharedTopUpInFlight.current.add(key);
+        try {
+            const fresh = await fetchSharedCandles(sym, tf, meta.lastTime);
+            if (!fresh) return null;
+            const existing = loadSeries(sym, tf) || [];
+            const merged = mergeBars(existing, fresh);
+            if (merged.length === 0) return null;
+            saveSeries(sym, tf, merged);
+            return { merged, added: merged.length - existing.length };
+        } catch { /* silent — background sync */ return null; }
+        finally { sharedTopUpInFlight.current.delete(key); }
+    }, [symbol, timeframe]);
+
     // TradingView-instant timeframe switching: after a successful cTrader load,
     // backfill every standard timeframe in the background. Series already in
     // the persistent store only receive an incremental top-up; brand-new TFs
@@ -606,9 +632,14 @@ setCurrentIdx(session.data.length - 1);
             ctraderPrefetchInFlight.current.add(key);
             window.setTimeout(async () => {
                 try {
+                    if (await topUpSharedSeries(sym, tf)) return;
                     if (await topUpCtraderSeries(sym, tf)) return;
-                    // Nothing stored yet → seed this timeframe fully.
+                    // Nothing stored yet → seed this timeframe from the shared
+                    // store first (no auth needed); personal cTrader only as a
+                    // fallback for pairs the harvester hasn't reached.
                     if (!peekMeta(sym, tf)) {
+                        const shared = await fetchSharedCandles(sym, tf);
+                        if (shared && shared.length > 0) { saveToLocalCache(shared, sym, tf); return; }
                         const accounts = await getCtraderAccounts();
                         const savedAccountId = getSelectedAccountId();
                         const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
@@ -622,7 +653,7 @@ setCurrentIdx(session.data.length - 1);
                 }
             }, 400);
         });
-    }, [symbol, topUpCtraderSeries, saveToLocalCache]);
+    }, [symbol, topUpCtraderSeries, topUpSharedSeries, saveToLocalCache]);
 
     const handleDownloadData = () => {
         if (allData.length === 0) return;
@@ -825,6 +856,45 @@ setAllData(validData);
         }
 
         try {
+            // -----------------------------------------------------------------
+            // Shared candle store FIRST: works with no personal cTrader
+            // connection at all. Only fall back to the personal cTrader flow
+            // when the shared store can't serve this series.
+            // -----------------------------------------------------------------
+            let servedFromShared = false;
+            if (!hasCustomFilter) {
+                const toppedShared = await topUpSharedSeries(activeSymbol, activeTF);
+                if (seq !== activeFetchSeqRef.current) return;
+                if (toppedShared && toppedShared.added > 0) {
+                    setAllData(toppedShared.merged);
+                    setCurrentIdx(prev => Math.min(prev, toppedShared.merged.length - 1));
+                    setDataSource('ctrader');
+                    setActiveSource('ctrader');
+                    setShowWelcome(false);
+                    endChartLoading?.();
+                    setIsCtraderFetching(false);
+                    window.setTimeout(() => backfillCtraderTimeframes(activeSymbol), 1200);
+                    servedFromShared = true;
+                } else {
+                    // Nothing stored locally yet → try a FULL shared-series load.
+                    const sharedFull = await fetchSharedCandles(activeSymbol, activeTF);
+                    if (seq !== activeFetchSeqRef.current) return;
+                    if (sharedFull && sharedFull.length > 0) {
+                        saveToLocalCache(sharedFull, activeSymbol, activeTF);
+                        setCurrentIdx(Math.min(sharedFull.length - 1, 50));
+                        setAllData(sharedFull);
+                        setDataSource('ctrader');
+                        setActiveSource('ctrader');
+                        setShowWelcome(false);
+                        endChartLoading?.();
+                        setIsCtraderFetching(false);
+                        window.setTimeout(() => backfillCtraderTimeframes(activeSymbol), 1200);
+                        servedFromShared = true;
+                    }
+                }
+            }
+            if (servedFromShared) return;
+
             if (!isCtraderAuthenticated()) {
                 // Try a silent refresh first (covers returning from the OAuth
                 // flow where the refresh token lives in an httpOnly cookie).
@@ -978,7 +1048,7 @@ setAllData(validData);
                 endChartLoading();
             }
         }
-    }, [symbol, timeframe, allData, currentIndex, setAllData, setCurrentIdx, saveToLocalCache, loadFromLocalCache, setDataSource, setActiveSource, setShowWelcome, showWelcome, resetDrawingInteractionState, addToast, topUpCtraderSeries, backfillCtraderTimeframes, beginChartLoading, endChartLoading]);
+    }, [symbol, timeframe, allData, currentIndex, setAllData, setCurrentIdx, saveToLocalCache, loadFromLocalCache, setDataSource, setActiveSource, setShowWelcome, showWelcome, resetDrawingInteractionState, addToast, topUpCtraderSeries, topUpSharedSeries, backfillCtraderTimeframes, beginChartLoading, endChartLoading]);
 
     const handleApplyCtraderDatePreset = (daysAgo: number) => {
         const d = new Date();
