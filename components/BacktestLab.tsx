@@ -69,7 +69,7 @@ const BACKTEST_TF_SECONDS: Record<string, number> = {
 const BACKTEST_TFS = Object.keys(BACKTEST_TF_SECONDS);
 
 // TradingView-style watchlist (same data as ChartGrid)
-const WATCHLISTS: Record<string, string[]> = {    'Forex': [
+export const WATCHLISTS: Record<string, string[]> = {    'Forex': [
         'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY', 'FX:AUDUSD', 'FX:USDCAD', 'FX:USDCHF', 'FX:NZDUSD',
         'FX:EURGBP', 'FX:EURJPY', 'FX:GBPJPY', 'FX:CADJPY', 'FX:AUDJPY', 'FX:CHFJPY',
         'FX:EURAUD', 'FX:GBPAUD', 'FX:EURCAD', 'FX:GBPCAD', 'FX:AUDNZD', 'FX:NZDJPY'
@@ -1158,16 +1158,14 @@ setAllData(validData);
         addToast({ type: 'info', title: 'Session Resumed', message: `Restored cached ${resumeSymbol} ${resumeTf}. Use refresh to top up latest bars.` });
     }, [loadFromLocalCache, setCurrentIdx, setSymbol, setTimeframe, addToast]);
 
-    // One-click start from the Start Screen: explicit source choice so stale
-    // persisted activeSource values can never route the fetch incorrectly.
-    const handleStartFresh = useCallback((startSymbol: string, startTf: string, source: 'mt5' | 'ctrader') => {
+    // One-click start from the Start Screen: the shared candle store serves
+    // every pair, so no explicit source choice is needed anymore.
+    const handleStartFresh = useCallback((startSymbol: string, startTf: string) => {
         setSymbol(startSymbol);
         setTimeframe(startTf);
-        setActiveSource(source);
         setShowWelcome(false);
-        if (source === 'ctrader') handleFetchCtraderData(startSymbol, startTf);
-        else handleFetchMT5Data(startSymbol, startTf);
-    }, [setSymbol, setTimeframe, setActiveSource, handleFetchCtraderData, handleFetchMT5Data]);
+        handleFetchCtraderData(startSymbol, startTf);
+    }, [setSymbol, setTimeframe, handleFetchCtraderData]);
     // --------------------------------------------------------------------------
 
     const handleUpdateData = useCallback(async () => {
@@ -1891,14 +1889,8 @@ setAllData(validData);
 
                 <div className={`absolute left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 rounded-2xl border shadow-xl ${isDarkMode ? 'bg-black/80 border-zinc-800 shadow-black/20' : 'bg-slate-50 border-slate-200 shadow-slate-200/50'}`}>
                     <div className={`flex items-center rounded-xl border px-2 relative ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-white border-slate-200'}`}>
-                        <div className="flex items-center gap-2 px-1">
-                            <div className="relative group/status">
-                                <div className={`w-2 h-2 rounded-full shadow-sm ${bridgeStatus === 'online' ? 'bg-emerald-500 animate-pulse' : bridgeStatus === 'checking' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'}`} />
-                                <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 rounded bg-black text-[8px] font-black uppercase tracking-widest text-white whitespace-nowrap opacity-0 group-hover/status:opacity-100 transition-opacity border border-white/5 min-w-[120px] text-center`}>
-                                    {bridgeStatus === 'online' ? 'Bridge Online' : bridgeStatus === 'checking' ? 'Checking Bridge...' : bridgeError || 'Bridge Offline'}
-                                </div>
-                            </div>
-                            <span className={`text-xs font-black uppercase ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{symbol}</span>
+                    <div className="flex items-center gap-2 px-1">
+                        <span className={`text-xs font-black uppercase ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{symbol}</span>
                             {(isCtraderFetching || isFetching) && <Loader2 size={11} className="animate-spin text-[#FF4F01] shrink-0" />}
                         </div>
                         <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`} />
@@ -1927,188 +1919,13 @@ setAllData(validData);
                         <button onClick={handleUpdateData} disabled={isFetching} title="Update to Latest" className={`p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-emerald-500' : 'hover:bg-emerald-50 text-emerald-600'}`}>
                             <RefreshCw size={18} className={isFetching ? 'animate-spin' : ''} />
                         </button>
-                        {/* Fetch history (cTrader): pull a specific date range.
-                            Relocated here from the old welcome card. */}
-                        <div className="relative">
-                            <button
-                                onClick={() => setIsHistoryFetchOpen(o => !o)}
-                                disabled={isCtraderFetching}
-                                title="Fetch historical range from cTrader"
-                                className={`p-2 rounded-xl transition-all ${isHistoryFetchOpen ? 'bg-[#1689ff]/15 text-[#1689ff]' : isDarkMode ? 'hover:bg-white/5 text-zinc-400 hover:text-[#1689ff]' : 'hover:bg-slate-100 text-slate-500 hover:text-[#0061FF]'}`}
-                            >
-                                <Calendar size={16} />
-                            </button>
-                            {isHistoryFetchOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setIsHistoryFetchOpen(false)} />
-                                    <div className={`absolute top-full right-0 mt-2 w-64 border rounded-2xl shadow-2xl p-4 z-[100] space-y-3 ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
-                                        <div>
-                                            <p className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Fetch history</p>
-                                            <p className={`text-[8px] font-bold uppercase tracking-widest mt-0.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{ctraderConnected ? `cTrader · ${symbol} ${ctraderFetchTimeframe}` : 'cTrader connection required'}</p>
-                                        </div>
-                                        <div>
-                                            <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500 mb-1">
-                                                <span>Jump to date</span>
-                                                <span className="text-[#60efff] font-mono">{ctraderFetchDate}</span>
-                                            </div>
-                                            <div className="grid grid-cols-4 gap-1">
-                                                {[
-                                                    { label: '7D', days: 7 },
-                                                    { label: '1M', days: 30 },
-                                                    { label: '3M', days: 90 },
-                                                    { label: '1Y', days: 365 },
-                                                ].map(p => (
-                                                    <button
-                                                        key={p.label}
-                                                        type="button"
-                                                        onClick={() => handleApplyCtraderDatePreset(p.days)}
-                                                        className={`py-1 rounded-lg text-[9px] font-black uppercase transition-all ${isDarkMode ? 'bg-black hover:bg-zinc-900 text-zinc-300 border border-zinc-800 hover:border-[#0061FF]/50' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'}`}
-                                                    >
-                                                        {p.label}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className={`text-[8px] font-black uppercase tracking-widest flex items-center gap-1 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                                                <Calendar size={10} className="text-[#0061FF]" /> Select date
-                                            </label>
-                                            <input
-                                                type="date"
-                                                value={ctraderFetchDate}
-                                                onChange={(e) => setCtraderFetchDate(e.target.value)}
-                                                className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none border transition-all ${isDarkMode ? 'bg-black border-zinc-800 text-white focus:border-[#0061FF]' : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0061FF]'}`}
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <div className="space-y-1">
-                                                <span className={`text-[8px] font-black uppercase tracking-widest block ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>TF</span>
-                                                <select
-                                                    value={ctraderFetchTimeframe}
-                                                    onChange={(e) => setCtraderFetchTimeframe(e.target.value)}
-                                                    className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${isDarkMode ? 'bg-black border-zinc-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                                >
-                                                    {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
-                                                        <option key={tf} value={tf}>{tf}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <span className={`text-[8px] font-black uppercase tracking-widest block ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Bars</span>
-                                                <select
-                                                    value={ctraderFetchCount}
-                                                    onChange={(e) => setCtraderFetchCount(Number(e.target.value))}
-                                                    className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${isDarkMode ? 'bg-black border-zinc-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                                                >
-                                                    <option value={250}>250</option>
-                                                    <option value={500}>500</option>
-                                                    <option value={1000}>1000</option>
-                                                    <option value={2000}>2000</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                if (!ctraderConnected) {
-                                                    setShowCtraderAuthModal(true);
-                                                    setIsHistoryFetchOpen(false);
-                                                    return;
-                                                }
-                                                handleExecuteCtraderDateFetch();
-                                                setIsHistoryFetchOpen(false);
-                                            }}
-                                            disabled={isCtraderFetching}
-                                            className={`w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                                                isCtraderFetching
-                                                    ? 'bg-black border border-zinc-800 text-zinc-500 cursor-wait'
-                                                    : ctraderConnected
-                                                        ? 'bg-[#1689ff]/20 border border-[#48c8ff]/40 text-cyan-100 hover:bg-[#1689ff]/30'
-                                                        : 'bg-[#0061FF] text-white shadow-lg shadow-[#0061FF]/25 hover:bg-[#0052d4]'
-                                            }`}
-                                        >
-                                            {isCtraderFetching
-                                                ? <><RefreshCw size={12} className="animate-spin" /> Pulling Data…</>
-                                                : ctraderConnected
-                                                    ? <><Calendar size={12} /> Pull from Date</>
-                                                    : <><Zap size={12} /> Connect cTrader</>}
-                                        </button>
-                                    </div>
-                                </>
-                            )}
-                        </div>
                     </div>
 
-                    {/* Data source status chip: explicit, visible state. Click for
-                        the source menu (switch / connect) instead of a hidden
-                        persisted toggle. */}
-                    <div className="relative">
-                        <button
-                            onClick={() => setIsSourceMenuOpen(o => !o)}
-                            disabled={isFetching || isCtraderFetching}
-                            title="Data source — click to switch or connect"
-                            className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 border transition-all active:scale-95 ${
-                                activeSource === 'ctrader'
-                                    ? 'bg-[#1689ff]/15 border-[#1689ff]/40 text-[#1689ff]'
-                                    : isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-600'
-                            }`}
-                        >
-                            <span className={`w-1.5 h-1.5 rounded-full ${
-                                activeSource === 'ctrader'
-                                    ? (ctraderConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500')
-                                    : (bridgeStatus === 'online' ? 'bg-emerald-400 animate-pulse' : bridgeStatus === 'checking' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500')
-                            }`} />
-                            {activeSource === 'ctrader' ? 'cTrader' : 'MT5'}
-                            <ChevronDown size={11} className={`transition-transform ${isSourceMenuOpen ? 'rotate-180' : ''}`} />
-                        </button>
-                        {isSourceMenuOpen && (
-                            <>
-                                <div className="fixed inset-0 z-40" onClick={() => setIsSourceMenuOpen(false)} />
-                                <div className={`absolute top-full right-0 mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-[100] ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
-                                    <p className={`px-2 py-1.5 text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Data Source</p>
-                                    <button
-                                        onClick={() => { setIsSourceMenuOpen(false); handleSourceSelect('ctrader'); }}
-                                        disabled={!ctraderConnected}
-                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all ${activeSource === 'ctrader' ? 'bg-[#1689ff]/10' : ''} ${ctraderConnected ? (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50') : 'opacity-40 cursor-not-allowed'}`}
-                                    >
-                                        <span className="flex items-center gap-2">
-                                            <Zap size={13} className="text-[#1689ff]" />
-                                            <span className={`text-xs font-black ${isDarkMode ? 'text-zinc-200' : 'text-slate-800'}`}>cTrader</span>
-                                            <span className={`w-1.5 h-1.5 rounded-full ${ctraderConnected ? 'bg-emerald-400' : 'bg-rose-500'}`} />
-                                        </span>
-                                        {activeSource === 'ctrader'
-                                            ? <Check size={13} className="text-[#1689ff]" />
-                                            : ctraderConnected
-                                                ? <span className={`text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Switch</span>
-                                                : null}
-                                    </button>
-                                    <button
-                                        onClick={() => { setIsSourceMenuOpen(false); handleSourceSelect('mt5'); }}
-                                        disabled={bridgeStatus !== 'online'}
-                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all ${activeSource === 'mt5' ? 'bg-emerald-500/10' : ''} ${bridgeStatus === 'online' ? (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50') : 'opacity-40 cursor-not-allowed'}`}
-                                    >
-                                        <span className="flex items-center gap-2">
-                                            <Monitor size={13} className="text-emerald-500" />
-                                            <span className={`text-xs font-black ${isDarkMode ? 'text-zinc-200' : 'text-slate-800'}`}>MT5 Bridge</span>
-                                            <span className={`w-1.5 h-1.5 rounded-full ${bridgeStatus === 'online' ? 'bg-emerald-400' : bridgeStatus === 'checking' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'}`} />
-                                        </span>
-                                        {activeSource === 'mt5'
-                                            ? <Check size={13} className="text-emerald-500" />
-                                            : bridgeStatus === 'online'
-                                                ? <span className={`text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Switch</span>
-                                                : null}
-                                    </button>
-                                    {!ctraderConnected && (
-                                        <button
-                                            onClick={() => { setIsSourceMenuOpen(false); setShowCtraderAuthModal(true); }}
-                                            className={`w-full mt-1 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest text-left flex items-center gap-1.5 ${isDarkMode ? 'text-[#1689ff] hover:bg-white/5' : 'text-[#0061FF] hover:bg-slate-50'}`}
-                                        >
-                                            <Zap size={11} /> Connect cTrader…
-                                        </button>
-                                    )}
-                                </div>
-                            </>
-                        )}
+                    {/* Data source chip: the shared candle store serves every
+                        pair — no switching or connecting needed. */}
+                    <div className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 border bg-[#1689ff]/15 border-[#1689ff]/40 text-[#1689ff]`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Shared History
                     </div>
                 </div>
 
@@ -2245,9 +2062,6 @@ setAllData(validData);
                             >
                                 <StartScreen
                                     isDarkMode={isDarkMode}
-                                    bridgeStatus={bridgeStatus}
-                                    bridgeError={bridgeError}
-                                    ctraderConnected={ctraderConnected}
                                     cloudSessions={savedSessions}
                                     isLoadingSessions={isLoadingSessions}
                                     cachedSeries={cachedSeries}
@@ -2256,8 +2070,6 @@ setAllData(validData);
                                     onResumeCache={handleResumeFromCache}
                                     onResumeSession={handleLoadSession}
                                     onStart={handleStartFresh}
-                                    onConnectCtrader={handleConnectCtrader}
-                                    onImportJson={handleImportFile}
                                     defaultSymbol={symbol}
                                     defaultTimeframe={timeframe}
                                 />

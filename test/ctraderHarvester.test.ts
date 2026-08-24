@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { decodeTrendbars, normalizeSymbol, mergeBars, type RawTrendbar } from '../api/_lib/ctraderHarvester';
+import { decodeTrendbars, normalizeSymbol, mergeBars } from '../api/_lib/ctraderHarvester';
+
+type RawTrendbar = Parameters<typeof decodeTrendbars>[0][number];
 
 describe('decodeTrendbars', () => {
   // Fixture mirrors ProtoOAGetTrendbarsRes: prices are integers scaled by 10^5,
