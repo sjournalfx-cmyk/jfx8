@@ -305,7 +305,7 @@ const {
     if (force) {
       const usage = psychologyAnalyzeUsage[psychologyInsightsScope];
       const count = usage?.date === todayPsychologyInsightsKey ? usage.count : 0;
-      if (count >= 2) return;
+      if (count >= 3) return;
       setPsychologyAnalyzeUsage((current) => ({
         ...current,
         [psychologyInsightsScope]: {
@@ -530,6 +530,10 @@ const {
     }
     try {
       const addedTrades = await dataService.batchAddTrades(newTrades);
+      setTrades(prev => {
+        const existingIds = new Set(prev.map(t => t.id));
+        return [...addedTrades.filter(t => !existingIds.has(t.id)), ...prev];
+      });
       addToast({
         type: 'success',
         title: 'Import Successful',
@@ -611,8 +615,10 @@ const {
       confirmText: 'Delete',
       variant: 'danger',
       onConfirm: async () => {
+        const removedTrades = trades.filter(t => tradeIds.includes(t.id));
         try {
           await dataService.deleteTrades(tradeIds);
+          setTrades(prev => prev.filter(t => !tradeIds.includes(t.id)));
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
           dataService.logActivity('DELETE_TRADES', { count: tradeIds.length, ids: tradeIds });
 
@@ -626,6 +632,11 @@ const {
               onClick: async () => {
                 try {
                   await dataService.restoreTrades(tradeIds);
+                  setTrades(prev => {
+                    const existingIds = new Set(prev.map(t => t.id));
+                    return [...removedTrades.filter(t => !existingIds.has(t.id)), ...prev]
+                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  });
                   addToast({
                     type: 'success',
                     title: 'Deletion Undone',
@@ -1080,7 +1091,6 @@ const onLogout = async () => {
                 userProfile={activeUserProfile}
                 dailyBias={activeDailyBias}
                 onAddNote={handleAddNote}
-                onUpdateTrade={handleUpdateTrade}
                 eaSession={activeEaSession}
                 lastKnownBridgeBalance={lastKnownBridgeBalance}
                 isBridgeOnline={isBridgeOnline}
@@ -1189,6 +1199,10 @@ const onLogout = async () => {
                 onImportTrades={handleBatchAddTrades}
                 trades={activeTrades}
                 userId={userId}
+                onNavigateToJournal={() => {
+                  setEditingTrade(null);
+                  setCurrentView('history');
+                }}
               />
             )}
             {currentView === 'settings' && activeUserProfile && (

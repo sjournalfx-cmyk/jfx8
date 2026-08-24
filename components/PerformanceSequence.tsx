@@ -5,6 +5,7 @@ import {
   TrendingUp, TrendingDown, ChevronDown, Star, Eye, X, Brain,
   Image as ImageIcon, Clock, Edit3, Trash2, Mic, Telescope
 } from 'lucide-react';
+import { AudioNote } from './ui/AudioNote';
 
 // AIChatDemo: Premium AI chat demo for the landing page
 // Typewriter text animation, inline stat cards, Mentor → Research mode transition
@@ -698,8 +699,20 @@ const MiniTradeHistory: React.FC = () => {
                           <Mic size={11} className="text-zinc-500" />
                         </div>
                         <div className="flex items-center gap-2 text-zinc-600 text-[10px] font-bold uppercase tracking-widest">
-                          <Mic size={10} />
-                          No Voice Note
+                          {trade.voiceNote ? (
+                            trade.voiceNote.startsWith('data:audio') ? (
+                              <AudioNote src={trade.voiceNote} className="w-full h-8" />
+                            ) : (
+                              <span className="text-zinc-300 text-xs font-normal normal-case tracking-normal leading-relaxed whitespace-pre-wrap">
+                                {trade.voiceNote}
+                              </span>
+                            )
+                          ) : (
+                            <>
+                              <Mic size={10} />
+                              No Voice Note
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

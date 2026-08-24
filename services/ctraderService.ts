@@ -108,6 +108,25 @@ export function __setTokensForTesting(tokens: { accessToken: string; expiresAt: 
   memoryTokens = tokens;
 }
 
+// ------------------------------------------------------------------
+// Session persistence marker. The access token itself stays in memory,
+// but this flag records that a cTrader OAuth session exists (the server
+// holds the long-lived refresh credential), so the UI can restore the
+// authenticated view immediately after a reload or view switch instead
+// of flashing the "Connect" screen. Cleared only by an explicit logout.
+// ------------------------------------------------------------------
+const SESSION_FLAG_KEY = 'jfx_ctrader_session';
+const DEV_REFRESH_KEY = 'jfx_ctrader_dev_refresh';
+
+function markSession() {
+  try { localStorage.setItem(SESSION_FLAG_KEY, '1'); } catch { /* blocked */ }
+}
+
+/** True when a cTrader OAuth session exists for this browser. */
+export function hasActiveSession(): boolean {
+  try { return localStorage.getItem(SESSION_FLAG_KEY) === '1'; } catch { return false; }
+}
+
 function getStoredTokens(): { accessToken: string; expiresAt: number } | null {
   if (memoryTokens && Date.now() < memoryTokens.expiresAt) {
     return memoryTokens;
@@ -118,7 +137,20 @@ function getStoredTokens(): { accessToken: string; expiresAt: number } | null {
 /** Refresh the access token from the server (which reads the httpOnly cookie). */
 async function refreshTokensFromCookie(): Promise<boolean> {
   try {
-    const res = await fetch('/api/ctrader/refresh', { method: 'POST' });
+    // Vercel production reads the httpOnly cookie server-side. The local
+    // Vite dev middleware has no cookie jar, so a dev-only stored refresh
+    // token is sent in the body as a fallback (ignored by production).
+    const payload: Record<string, string> = {};
+    try {
+      const devRefresh = localStorage.getItem(DEV_REFRESH_KEY);
+      if (devRefresh) payload.refresh_token = devRefresh;
+    } catch { /* blocked */ }
+
+    const res = await fetch('/api/ctrader/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     if (!res.ok) return false;
     const data = await res.json();
     const accessToken = data.access_token || data.accessToken;
@@ -127,6 +159,12 @@ async function refreshTokensFromCookie(): Promise<boolean> {
       accessToken,
       expiresAt: Date.now() + ((data.expires_in || data.expiresIn || 2628000) * 1000),
     };
+    markSession();
+    // Persist any rotated refresh token for the dev-middleware flow.
+    try {
+      const rotated = data.refresh_token || data.refreshToken;
+      if (rotated) localStorage.setItem(DEV_REFRESH_KEY, String(rotated));
+    } catch { /* blocked */ }
     return true;
   } catch {
     return false;
@@ -273,6 +311,7 @@ async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
       };
       socket.onclose = () => {
         clearTimeout(timeout);
+        stopHeartbeat(isDemo);
         appAuthDone.delete(socket);
         appAuthPromises.delete(socket);
         accountAuthPromises.delete(socket);
@@ -287,6 +326,11 @@ async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
     // Connection succeeded — clear the cached promise so future reconnects work
     if (isDemo) connectPromiseDemo = null;
     else connectPromiseLive = null;
+
+    // Keep the connection alive. cTrader drops sockets that stop exchanging
+    // heartbeats, which used to leave a dead cached socket behind by the time
+    // the user returned to the terminal (surfacing as CANT_ROUTE_REQUEST).
+    startHeartbeat(socket, isDemo);
 
     socket.onmessage = async (event) => {
       try {
@@ -316,7 +360,11 @@ async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
           const pending = pendingReqs.get(clientId)!;
           pendingReqs.delete(clientId);
           if (msg.payloadType === PT.ERROR_RES) {
-            pending.reject(new Error(msg.payload?.errorCode || 'cTrader error'));
+            const errorCode = msg.payload?.errorCode || 'cTrader error';
+            // ProtoOAErrorRes carries a human-readable description alongside
+            // the machine code — surface both for diagnosability.
+            const description = msg.payload?.description;
+            pending.reject(new Error(description ? `${errorCode}: ${description}` : String(errorCode)));
           } else {
             pending.resolve(msg.payload);
           }
@@ -339,16 +387,31 @@ async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
 }
 
 
-function sendWsMessage(socket: WebSocket, payloadType: number, payload: Record<string, any>): Promise<any> {
+function sendWsMessage(socket: WebSocket, payloadType: number, payload: Record<string, any>, timeoutMs: number = 20000): Promise<any> {
   return new Promise((resolve, reject) => {
     const clientMsgId = nextMsgId();
-    pendingReqs.set(clientMsgId, { resolve, reject, payloadType });
-    const msg = JSON.stringify({
-      clientMsgId,
+    // Without a timeout a request sent into a dead/zombie socket would hang
+    // forever (the server is gone, so no response ever arrives).
+    const timer = setTimeout(() => {
+      pendingReqs.delete(clientMsgId);
+      reject(new Error(`Request timed out (payloadType ${payloadType})`));
+    }, timeoutMs);
+    pendingReqs.set(clientMsgId, {
+      resolve: (value: any) => { clearTimeout(timer); resolve(value); },
+      reject: (reason: any) => { clearTimeout(timer); reject(reason); },
       payloadType,
-      payload,
     });
-    socket.send(msg);
+    try {
+      socket.send(JSON.stringify({
+        clientMsgId,
+        payloadType,
+        payload,
+      }));
+    } catch (e) {
+      clearTimeout(timer);
+      pendingReqs.delete(clientMsgId);
+      reject(new Error(`WebSocket send failed: ${String((e as any)?.message || e)}`));
+    }
   });
 }
 
@@ -410,6 +473,12 @@ export async function exchangeCode(code: string): Promise<{ ok: boolean; error?:
         accessToken: data.accessToken,
         expiresAt: Date.now() + (data.expiresIn || 2628000) * 1000,
       };
+      // Dev middleware returns the refresh token in the body (production
+      // delivers it via httpOnly cookie instead) — keep a dev-local copy.
+      try {
+        if (data.refreshToken) localStorage.setItem(DEV_REFRESH_KEY, String(data.refreshToken));
+      } catch { /* blocked */ }
+      markSession();
       return { ok: true };
     }
     return { ok: false, error: data?.error || 'No tokens in response' };
@@ -450,6 +519,8 @@ export function clearSelectedAccountId() {
 export function logout() {
   memoryTokens = null;
   clearSelectedAccountId();
+  try { localStorage.removeItem(SESSION_FLAG_KEY); } catch { /* blocked */ }
+  try { localStorage.removeItem(DEV_REFRESH_KEY); } catch { /* blocked */ }
   // Clear the server-side refresh cookie (best-effort).
   try { void fetch('/api/ctrader/logout', { method: 'POST' }); } catch { /* ignore */ }
   appAuthDone.clear();
@@ -506,6 +577,10 @@ export async function authAccount(ctidTraderAccountId: number, isDemo: boolean =
         appAuthDone.add(socket);
       }
     })();
+    // A failed app auth must not stay cached, otherwise every future call on
+    // this socket reuses the stale rejection (same as account auth below).
+    const currentApp = appPromise;
+    currentApp.catch(() => { appAuthPromises.delete(socket); });
     appAuthPromises.set(socket, appPromise);
   }
   await appPromise;
@@ -525,18 +600,78 @@ export async function authAccount(ctidTraderAccountId: number, isDemo: boolean =
         accessToken: tokens.accessToken,
       });
     })();
+    // A failed auth must not stay cached, otherwise every future call on this
+    // socket reuses the stale rejection (e.g. after a transient disconnect).
+    const current = accPromise;
+    current.catch(() => { socketAccountMap.delete(ctidTraderAccountId); });
     socketAccountMap.set(ctidTraderAccountId, accPromise);
   }
   await accPromise;
 }
-export async function getPositions(ctidTraderAccountId: number, isDemo: boolean = true): Promise<CtraderPosition[]> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
 
-  // Use ProtoOAReconcileReq (2124) — returns current open positions + pending orders
-  const data = await sendWsMessage(socket, PT.RECONCILE_REQ, {
+const isCantRouteError = (e: any) => String(e?.message || e).includes('CANT_ROUTE_REQUEST');
+
+const isRecoverableConnectionError = (e: any) => {
+  const msg = String(e?.message || e);
+  return msg.includes('timed out')
+    || msg.includes('WebSocket closed')
+    || msg.includes('WebSocket send failed')
+    || msg.includes('WebSocket connection');
+};
+
+// Tears down a cached socket and its auth state so the next request
+// reconnects from scratch (used to self-heal stale/zombie connections).
+function forceReconnect(isDemo: boolean) {
+  const socket = isDemo ? wsDemo : wsLive;
+  if (socket) {
+    appAuthDone.delete(socket);
+    appAuthPromises.delete(socket);
+    accountAuthPromises.delete(socket);
+    try { socket.close(); } catch { /* ignore */ }
+  }
+  if (isDemo) { wsDemo = null; connectPromiseDemo = null; }
+  else { wsLive = null; connectPromiseLive = null; }
+  stopHeartbeat(isDemo);
+}
+
+// ensureConnected → authAccount → send, with self-healing: a stale socket
+// (connection died while the user was away — the usual cause of
+// CANT_ROUTE_REQUEST when returning to the terminal) triggers one clean
+// reconnect + retry. Read-only callers may also allow a final retry on the
+// opposite environment, since CANT_ROUTE almost always means the account
+// lives on the other cTrader host (demo vs live). Trading mutations never
+// fall back — silently switching environments there would be dangerous.
+async function authenticatedRequest(
+  ctidTraderAccountId: number,
+  payloadType: number,
+  payload: Record<string, any>,
+  isDemo: boolean,
+  options: { allowEnvironmentFallback?: boolean } = {}
+): Promise<any> {
+  const send = (envIsDemo: boolean) => (async () => {
+    const socket = await ensureConnected(envIsDemo);
+    await authAccount(ctidTraderAccountId, envIsDemo);
+    return sendWsMessage(socket, payloadType, payload);
+  })();
+
+  try {
+    return await send(isDemo);
+  } catch (e) {
+    if (!isCantRouteError(e) && !isRecoverableConnectionError(e)) throw e;
+    forceReconnect(isDemo);
+    try {
+      return await send(isDemo);
+    } catch (retryError) {
+      if (!options.allowEnvironmentFallback || !isCantRouteError(retryError)) throw retryError;
+      forceReconnect(!isDemo);
+      return await send(!isDemo);
+    }
+  }
+}
+export async function getPositions(ctidTraderAccountId: number, isDemo: boolean = true): Promise<CtraderPosition[]> {
+  const data = await authenticatedRequest(ctidTraderAccountId, PT.RECONCILE_REQ, {
     ctidTraderAccountId,
-  });
+  }, isDemo, { allowEnvironmentFallback: true });
 
   return (data.position || []).map((pos: any) => {
     // cTrader positions have nested tradeData for symbol/volume/side
@@ -560,9 +695,6 @@ export async function getPositions(ctidTraderAccountId: number, isDemo: boolean 
 }
 
 export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?: number, toTimestamp?: number, isDemo: boolean = true): Promise<CtraderDeal[]> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-
   const payload: Record<string, any> = {
     ctidTraderAccountId,
   };
@@ -570,7 +702,7 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
   if (fromTimestamp) payload.fromTimestamp = fromTimestamp;
   if (toTimestamp) payload.toTimestamp = toTimestamp;
 
-  const data = await sendWsMessage(socket, PT.DEAL_LIST_REQ, payload);
+  const data = await authenticatedRequest(ctidTraderAccountId, PT.DEAL_LIST_REQ, payload, isDemo, { allowEnvironmentFallback: true });
 
   const rawDeals = data.deal || [];
   const parseTimestamp = (value: unknown): number | undefined => {
@@ -598,7 +730,16 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
     }
   });
 
-  return rawDeals.map((deal: any) => {
+  // cTrader returns every execution deal, including position-opening deals.
+  // Opening deals carry no closePositionDetail (no grossProfit/swap), so they
+  // would surface as commission-only rows in the history. Keep them for the
+  // earliest-execution index above, but exclude them from the results.
+  const closingDeals = rawDeals.filter((deal: any) => {
+    const detail = deal.closePositionDetail;
+    return !!detail && typeof detail === 'object' && Object.keys(detail).length > 0;
+  });
+
+  return closingDeals.map((deal: any) => {
     const tradeData = deal.tradeData || {};
     const closePositionDetail = deal.closePositionDetail || {};
     const rawSymbolId = deal.symbolId ?? tradeData.symbolId ?? deal.closePositionDetail?.symbolId;
@@ -630,6 +771,139 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
       entryPrice: deal.closePositionDetail?.entryPrice ? Number(deal.closePositionDetail.entryPrice) : undefined,
     };
   });
+}
+
+export interface CtraderCashFlow {
+  depositId: number;
+  transactionId: string;
+  operationType: 'deposit' | 'withdrawal';
+  amount: number;
+  timestamp: string;
+  creditFacility: boolean;
+}
+
+/**
+ * Fetches the deposit/withdrawal history (ProtoOACashFlowHistoryListReq/Res,
+ * payload types 2143/2144) for an account.
+ *
+ * Protocol constraints (per help.ctrader.com/open-api/messages):
+ *  - fromTimestamp AND toTimestamp are REQUIRED
+ *  - each window may span at most 604800000 ms (7 days)
+ *  - response repeated field is `depositWithdraw`
+ *
+ * We therefore walk backwards in 7-day windows (batched), dedupe by depositId,
+ * and — because CANT_ROUTE_REQUEST almost always means the account lives on the
+ * OTHER environment (demo vs live host) — automatically retry once on the
+ * opposite host before giving up.
+ */
+export async function getCashFlowHistory(
+  ctidTraderAccountId: number,
+  fromTimestamp?: number,
+  toTimestamp?: number,
+  isDemo: boolean = true
+): Promise<CtraderCashFlow[]> {
+  const MAX_WINDOW_MS = 604800000; // 7 days — server-enforced maximum
+  const MAX_TO_TIMESTAMP = 2147483646000; // 19 Jan 2038 — server-enforced ceiling
+  const BATCH_SIZE = 10;
+
+  const end = Math.min(toTimestamp ?? Date.now(), MAX_TO_TIMESTAMP);
+  const start = Math.max(fromTimestamp ?? end - 3 * 365 * 24 * 60 * 60 * 1000, 0);
+
+  const merged = new Map<number, CtraderCashFlow>();
+
+  const collectEntries = (data: any) => {
+    ((data?.depositWithdraw || data?.depositWithdrawal || data?.depositWithdrawals) || []).forEach((entry: any) => {
+      const depositId = Number(entry.depositId);
+      if (!Number.isFinite(depositId)) return;
+      if (merged.has(depositId)) return;
+
+      // Amount arrives in cents — convert to major units and sign by type
+      // (deposits positive, withdrawals negative) to match CashTransaction norms.
+      const rawAmount = Number(entry.amount ?? 0) / 100;
+      const isWithdrawal = Number(entry.operationType) === 1;
+      const ts = Number(entry.timestamp ?? entry.createTimestamp ?? 0);
+
+      merged.set(depositId, {
+        depositId,
+        transactionId: String(entry.transactionId || ''),
+        operationType: isWithdrawal ? 'withdrawal' : 'deposit',
+        amount: isWithdrawal ? -Math.abs(rawAmount) : Math.abs(rawAmount),
+        timestamp: ts > 0 ? new Date(ts).toISOString() : new Date(end).toISOString(),
+        creditFacility: Boolean(entry.creditFacility),
+      });
+    });
+  };
+
+  // Individual window requests have no built-in timeout; cap them so one hung
+  // response can't stall the entire history walk.
+  const withTimeout = <T,>(p: Promise<T>, ms: number = 20000): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Cash flow window request timed out')), ms);
+      p.then(
+        value => { clearTimeout(timer); resolve(value); },
+        err => { clearTimeout(timer); reject(err); }
+      );
+    });
+
+  const buildWindowPayload = (windowStart: number, windowEnd: number) => ({
+    ctidTraderAccountId,
+    fromTimestamp: Math.max(windowStart, 0),
+    toTimestamp: Math.min(windowEnd, MAX_TO_TIMESTAMP),
+  });
+
+  const isRoutingError = (e: any) => String(e?.message || e).includes('CANT_ROUTE_REQUEST');
+
+  // Probes the newest window first so a misrouted/unsupported account fails
+  // fast instead of after hundreds of requests.
+  const runOnEnvironment = async (envIsDemo: boolean): Promise<void> => {
+    const socket = await ensureConnected(envIsDemo);
+    await authAccount(ctidTraderAccountId, envIsDemo);
+
+    const windows: Array<{ s: number; e: number }> = [];
+    for (let windowEnd = end; windowEnd > start; windowEnd -= MAX_WINDOW_MS) {
+      windows.push({ s: Math.max(start, windowEnd - MAX_WINDOW_MS + 1), e: windowEnd });
+    }
+
+    const [first, ...rest] = windows;
+    await withTimeout(sendWsMessage(socket, PT.CASH_FLOW_HISTORY_LIST_REQ, buildWindowPayload(first.s, first.e)))
+      .then(collectEntries);
+
+    for (let i = 0; i < rest.length; i += BATCH_SIZE) {
+      const batch = rest.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(w => withTimeout(sendWsMessage(socket, PT.CASH_FLOW_HISTORY_LIST_REQ, buildWindowPayload(w.s, w.e))))
+      );
+      results.forEach(res => {
+        if (res.status === 'fulfilled') collectEntries(res.value);
+        else console.warn(`[cTrader] cash flow window failed (${envIsDemo ? 'demo' : 'live'}):`, (res.reason as any)?.message || res.reason);
+      });
+    }
+  };
+
+  try {
+    await runOnEnvironment(isDemo);
+  } catch (error) {
+    if (!isRoutingError(error)) {
+      // Transient/window errors were logged above; only surface a total failure.
+      if (merged.size === 0) {
+        throw new Error(`${String((error as any)?.message || error)} (while fetching cash-flow history for account ${ctidTraderAccountId})`);
+      }
+    } else {
+      // CANT_ROUTE_REQUEST ⇒ almost always a demo/live host mismatch.
+      // Retry the opposite environment once before giving up.
+      try {
+        await runOnEnvironment(!isDemo);
+      } catch (altError) {
+        if (merged.size === 0) {
+          throw new Error(
+            `CANT_ROUTE_REQUEST: could not reach the deposit/withdrawal history endpoint for account ${ctidTraderAccountId} on either cTrader environment. ${(altError as any)?.message || altError}`
+          );
+        }
+      }
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 export function disconnect() {
@@ -713,20 +987,16 @@ export async function getCtidProfile(): Promise<any> {
 }
 
 export async function getTrader(ctidTraderAccountId: number, isDemo: boolean = true): Promise<any> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  const data = await sendWsMessage(socket, PT.TRADER_REQ, {
+  const data = await authenticatedRequest(ctidTraderAccountId, PT.TRADER_REQ, {
     ctidTraderAccountId,
-  });
+  }, isDemo, { allowEnvironmentFallback: true });
   return data.trader;
 }
 
 export async function getPendingOrders(ctidTraderAccountId: number, isDemo: boolean = true): Promise<CtraderOrder[]> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  const data = await sendWsMessage(socket, PT.RECONCILE_REQ, {
+  const data = await authenticatedRequest(ctidTraderAccountId, PT.RECONCILE_REQ, {
     ctidTraderAccountId,
-  });
+  }, isDemo, { allowEnvironmentFallback: true });
   return (data.order || []).map((ord: any) => {
     return {
       orderId: Number(ord.orderId),
@@ -751,9 +1021,6 @@ export async function createNewOrder(
   stopPrice?: number,
   isDemo: boolean = true
 ): Promise<any> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  
   let orderType = 1; // 1=MARKET, 2=LIMIT, 3=STOP, 4=STOP_LIMIT
   if (limitPrice && stopPrice) orderType = 4;
   else if (limitPrice) orderType = 2;
@@ -770,7 +1037,7 @@ export async function createNewOrder(
   if (limitPrice) payload.limitPrice = limitPrice;
   if (stopPrice) payload.stopPrice = stopPrice;
 
-  return sendWsMessage(socket, PT.NEW_ORDER_REQ, payload);
+  return authenticatedRequest(ctidTraderAccountId, PT.NEW_ORDER_REQ, payload, isDemo);
 }
 
 export async function closePosition(
@@ -779,13 +1046,11 @@ export async function closePosition(
   volume: number,
   isDemo: boolean = true
 ): Promise<any> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  return sendWsMessage(socket, PT.CLOSE_POSITION_REQ, {
+  return authenticatedRequest(ctidTraderAccountId, PT.CLOSE_POSITION_REQ, {
     ctidTraderAccountId,
     positionId,
     volume: lotsToCtraderVolume(volume),
-  });
+  }, isDemo);
 }
 
 export async function cancelOrder(
@@ -793,39 +1058,33 @@ export async function cancelOrder(
   orderId: number,
   isDemo: boolean = true
 ): Promise<any> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  return sendWsMessage(socket, PT.CANCEL_ORDER_REQ, {
+  return authenticatedRequest(ctidTraderAccountId, PT.CANCEL_ORDER_REQ, {
     ctidTraderAccountId,
     orderId,
-  });
+  }, isDemo);
 }
 
 export async function getSymbolsList(ctidTraderAccountId: number, isDemo: boolean = true): Promise<any[]> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  const data = await sendWsMessage(socket, PT.SYMBOLS_LIST_REQ, {
+  const data = await authenticatedRequest(ctidTraderAccountId, PT.SYMBOLS_LIST_REQ, {
     ctidTraderAccountId,
-  });
+  }, isDemo, { allowEnvironmentFallback: true });
   return data.symbol || [];
 }
 
 export async function subscribeToSpots(ctidTraderAccountId: number, symbolId: number, isDemo: boolean = true): Promise<any> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  return sendWsMessage(socket, PT.SUBSCRIBE_SPOTS_REQ, {
+  // No environment fallback: spot events are consumed by listeners filtered on
+  // this environment, so a silent host switch would break the live ticks.
+  return authenticatedRequest(ctidTraderAccountId, PT.SUBSCRIBE_SPOTS_REQ, {
     ctidTraderAccountId,
     symbolId: [symbolId],
-  });
+  }, isDemo);
 }
 
 export async function unsubscribeFromSpots(ctidTraderAccountId: number, symbolId: number, isDemo: boolean = true): Promise<any> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  return sendWsMessage(socket, PT.UNSUBSCRIBE_SPOTS_REQ, {
+  return authenticatedRequest(ctidTraderAccountId, PT.UNSUBSCRIBE_SPOTS_REQ, {
     ctidTraderAccountId,
     symbolId: [symbolId],
-  });
+  }, isDemo);
 }
 
 export async function getExpectedMargin(
@@ -834,13 +1093,11 @@ export async function getExpectedMargin(
   volume: number,
   isDemo: boolean = true
 ): Promise<any> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-  return sendWsMessage(socket, PT.EXPECTED_MARGIN_REQ, {
+  return authenticatedRequest(ctidTraderAccountId, PT.EXPECTED_MARGIN_REQ, {
     ctidTraderAccountId,
     symbolId,
     volume: volume * 100,
-  });
+  }, isDemo, { allowEnvironmentFallback: true });
 }
 
 export function mapTimeframeToCtraderPeriod(tf: string): number {
@@ -873,9 +1130,6 @@ export async function getTrendbars(
   digits: number = 5,
   isDemo: boolean = true
 ): Promise<Candle[]> {
-  const socket = await ensureConnected(isDemo);
-  await authAccount(ctidTraderAccountId, isDemo);
-
   const payload: Record<string, any> = {
     ctidTraderAccountId,
     symbolId,
@@ -885,9 +1139,9 @@ export async function getTrendbars(
   if (toTimestamp) payload.toTimestamp = toTimestamp;
   if (count) payload.count = count;
 
-  const res = await sendWsMessage(socket, PT.GET_TRENDBARS_REQ, payload);
+  const res = await authenticatedRequest(ctidTraderAccountId, PT.GET_TRENDBARS_REQ, payload, isDemo, { allowEnvironmentFallback: true });
 
-  const divisor = Math.pow(10, digits);
+  const divisor = 100000;
   const trendbars = res.trendbar || [];
 
   const candles: Candle[] = trendbars.map((bar: any) => {
@@ -919,6 +1173,20 @@ export async function getTrendbars(
   return candles.sort((a, b) => a.time - b.time);
 }
 
+// Resolving a symbol costs a full GET_SYMBOLS round-trip on every candle
+// fetch, which made timeframe switches feel sluggish. Cache the list per
+// account in memory for 10 minutes (symbol definitions rarely change).
+const symbolsListCache = new Map<number, { at: number; symbols: any[] }>();
+const SYMBOLS_LIST_TTL_MS = 10 * 60 * 1000;
+
+export async function getCachedSymbolsList(ctidTraderAccountId: number, isDemo: boolean = true): Promise<any[]> {
+  const hit = symbolsListCache.get(ctidTraderAccountId);
+  if (hit && Date.now() - hit.at < SYMBOLS_LIST_TTL_MS) return hit.symbols;
+  const symbols = await getSymbolsList(ctidTraderAccountId, isDemo);
+  symbolsListCache.set(ctidTraderAccountId, { at: Date.now(), symbols });
+  return symbols;
+}
+
 export async function fetchCtraderCandles(
   ctidTraderAccountId: number,
   symbolName: string,
@@ -932,7 +1200,7 @@ export async function fetchCtraderCandles(
   let lastError: any;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const symbols = await getSymbolsList(ctidTraderAccountId, isDemo);
+      const symbols = await getCachedSymbolsList(ctidTraderAccountId, isDemo);
       const cleanSym = symbolName.toUpperCase().replace('/', '').replace('_', '');
       const match = symbols.find((s: any) => {
         const sName = (s.symbolName || s.name || '').toUpperCase().replace('/', '').replace('_', '');

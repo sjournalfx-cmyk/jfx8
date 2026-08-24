@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useLayoutEffect, useCallback, useState, useMemo } from 'react';
 import { Candle, Trade, Drawing, Point } from '../types';
-import { getRayCoordinates } from './backtest/utils';
+import { getRayCoordinates, timeToLogicalIndex } from './backtest/utils';
 
 interface CustomChartProps {
   data: Candle[];
@@ -173,21 +173,13 @@ const CustomChart: React.FC<CustomChartProps> = ({
       chart: {
         timeScale: () => ({
           timeToCoordinate: (time: number) => {
-            const idx = data.findIndex(d => d.time === time);
-            if (idx !== -1) return getX(idx);
-
-            // If not found, estimate based on last known interval
-            if (data.length < 2) return null;
-
-            // Use the last interval for extrapolation (more stable than average)
-            const lastTime = data[data.length - 1].time;
-            const prevTime = data[data.length - 2].time;
-            const interval = lastTime - prevTime;
-
-            if (interval <= 0) return null; // Should not happen on valid data
-
-            const logicalOffset = (time - lastTime) / interval;
-            return getX(data.length - 1 + logicalOffset);
+            if (data.length === 0) return null;
+            // TradingView-style anchoring: binary-search the bar timeline and
+            // interpolate fractionally between neighbouring bars. Exact-match
+            // findIndex is unnecessary and naive extrapolation from the last
+            // bar drifts across weekend/session gaps, which pushed drawings
+            // off-screen after timeframe switches.
+            return getX(timeToLogicalIndex(data, time));
           },
           logicalToCoordinate: (logical: number) => getX(logical),
           coordinateToLogical: (x: number) => getIndexFromX(x),
@@ -788,7 +780,10 @@ const CustomChart: React.FC<CustomChartProps> = ({
           }
         }
 
-        // Render Entry Arrow on entry candlestick
+        const hasEntryPrice = Number.isFinite(Number(entryPrice)) && Number(entryPrice) > 0;
+        const hasExitPrice = Number.isFinite(Number(exitPrice)) && Number(exitPrice) > 0;
+
+        // Render Entry Arrow on entry candlestick, tipped at the actual fill price when known
         if (entryIdx >= 0) {
           const candle = data[entryIdx];
           const candleX = getX(entryIdx);
@@ -796,17 +791,17 @@ const CustomChart: React.FC<CustomChartProps> = ({
           const entryLabel = isBuy ? 'BUY' : 'SELL';
 
           if (isBuy) {
-            // Long entry -> arrow placed at candle low pointing UP
-            const tipY = getY(candle.low) + 4;
+            // Long entry -> arrow pointing UP at entry price (candle low fallback)
+            const tipY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.low) + 4;
             drawUpArrow(candleX, tipY, entryColor, entryLabel);
           } else {
-            // Short entry -> arrow placed at candle high pointing DOWN
-            const tipY = getY(candle.high) - 4;
+            // Short entry -> arrow pointing DOWN at entry price (candle high fallback)
+            const tipY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.high) - 4;
             drawDownArrow(candleX, tipY, entryColor, entryLabel);
           }
         }
 
-        // Render Exit Arrow on exit candlestick
+        // Render Exit Arrow on exit candlestick, tipped at the actual fill price when known
         if (exitIdx >= 0) {
           const candle = data[exitIdx];
           const exitX = getX(exitIdx);
@@ -814,12 +809,12 @@ const CustomChart: React.FC<CustomChartProps> = ({
           const exitLabel = 'EXIT';
 
           if (isBuy) {
-            // Long exit -> arrow placed at candle high pointing DOWN
-            const tipY = getY(candle.high) - 4;
+            // Long exit -> arrow pointing DOWN at exit price (candle high fallback)
+            const tipY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.high) - 4;
             drawDownArrow(exitX, tipY, exitColor, exitLabel);
           } else {
-            // Short exit -> arrow placed at candle low pointing UP
-            const tipY = getY(candle.low) + 4;
+            // Short exit -> arrow pointing UP at exit price (candle low fallback)
+            const tipY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.low) + 4;
             drawUpArrow(exitX, tipY, exitColor, exitLabel);
           }
         }
@@ -855,50 +850,50 @@ const CustomChart: React.FC<CustomChartProps> = ({
         const legendX = 8;
         const legendY = 8;
 
-        ctx.font = 'bold 12px sans-serif';
+        ctx.font = 'bold 10px sans-serif';
         const titleText = [symbol, timeframe].filter(Boolean).join(' \u00b7 ');
         const titleW = ctx.measureText(titleText).width;
 
-        ctx.font = 'bold 10px monospace';
+        ctx.font = 'bold 8px monospace';
         const cVal = formatPrice(hoverBar.close);
         const ohlcPrefix = `O ${formatPrice(hoverBar.open)}  H ${formatPrice(hoverBar.high)}  L ${formatPrice(hoverBar.low)}  C `;
         const ohlcW = ctx.measureText(ohlcPrefix + cVal).width;
 
         const changeText = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`;
-        ctx.font = 'bold 10px sans-serif';
+        ctx.font = 'bold 8px sans-serif';
         const changeW = ctx.measureText(changeText).width;
 
-        const boxW = Math.max(titleW + changeW + 36, ohlcW + 20);
-        const boxH = 44;
+        const boxW = Math.max(titleW + changeW + 28, ohlcW + 16);
+        const boxH = 32;
 
         ctx.fillStyle = isDarkMode ? 'rgba(10, 12, 18, 0.62)' : 'rgba(255, 255, 255, 0.85)';
-        roundRectPath(ctx, legendX, legendY, boxW, boxH, 8);
+        roundRectPath(ctx, legendX, legendY, boxW, boxH, 6);
         ctx.fill();
 
         // Title row
         ctx.fillStyle = isDarkMode ? '#d1d5db' : '#334155';
-        ctx.font = 'bold 12px sans-serif';
+        ctx.font = 'bold 10px sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(titleText, legendX + 10, legendY + 15);
+        ctx.fillText(titleText, legendX + 8, legendY + 11);
 
         // Change % badge
         ctx.fillStyle = accent;
         ctx.globalAlpha = 0.18;
-        roundRectPath(ctx, legendX + 12 + titleW, legendY + 6, changeW + 12, 17, 4);
+        roundRectPath(ctx, legendX + 10 + titleW, legendY + 4, changeW + 10, 14, 4);
         ctx.fill();
         ctx.globalAlpha = 1;
         ctx.fillStyle = accent;
-        ctx.font = 'bold 10px sans-serif';
-        ctx.fillText(changeText, legendX + 18 + titleW, legendY + 15.5);
+        ctx.font = 'bold 8px sans-serif';
+        ctx.fillText(changeText, legendX + 15 + titleW, legendY + 11);
 
         // OHLC row (close value colored by direction)
         ctx.fillStyle = isDarkMode ? '#a1a1aa' : '#64748b';
-        ctx.font = 'bold 10px monospace';
+        ctx.font = 'bold 8px monospace';
         const ohlcPrefixW = ctx.measureText(ohlcPrefix).width;
-        ctx.fillText(ohlcPrefix, legendX + 10, legendY + 33);
+        ctx.fillText(ohlcPrefix, legendX + 8, legendY + 24);
         ctx.fillStyle = accent;
-        ctx.fillText(cVal, legendX + 10 + ohlcPrefixW, legendY + 33);
+        ctx.fillText(cVal, legendX + 8 + ohlcPrefixW, legendY + 24);
       }
     }
 

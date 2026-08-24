@@ -65,6 +65,9 @@ const readCtraderEnv = (key) => {
       }
     } catch {}
   }
+  // TEMPORARY: restored at user request until credential rotation. These
+  // values are already exposed in git history — rotating the cTrader app and
+  // deleting these two lines is the real fix. Never add NEW secrets here.
   if (key === 'VITE_CTRADER_CLIENT_ID') return '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
   if (key === 'VITE_CTRADER_CLIENT_SECRET') return 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
   return '';
@@ -682,6 +685,12 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             return;
           }
 
+          // Mirror the production endpoint: keep the long-lived refresh token
+          // in an httpOnly cookie so silent re-auth survives page reloads.
+          if (body.refreshToken) {
+            res.setHeader('Set-Cookie', `jfx_ctrader_refresh=${encodeURIComponent(String(body.refreshToken))}; Path=/; HttpOnly; SameSite=Lax`);
+          }
+
           res.end(JSON.stringify({
             accessToken: body.accessToken,
             refreshToken: body.refreshToken,
@@ -835,27 +844,63 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         res.setHeader('Content-Type', 'application/json');
         if (req.method !== 'POST') { res.statusCode = 405; res.end(JSON.stringify({ error: 'Method not allowed' })); return; }
 
-        let body = '';
-        req.on('data', (chunk) => { body += chunk; });
+        let rawBody = '';
+        req.on('data', (chunk) => { rawBody += chunk; });
         req.on('end', async () => {
           try {
-            const { refresh_token } = JSON.parse(body);
-            if (!refresh_token) { res.statusCode = 400; res.end(JSON.stringify({ error: 'Missing refresh_token' })); return; }
+            // Prefer the httpOnly cookie set by /api/ctrader/exchange above,
+            // falling back to the JSON body the client sends in dev.
+            let refreshToken = '';
+            const cookieHeader = req.headers.cookie || '';
+            for (const part of cookieHeader.split(';')) {
+              const eq = part.indexOf('=');
+              if (eq === -1) continue;
+              if (part.slice(0, eq).trim() === 'jfx_ctrader_refresh') {
+                const rawVal = part.slice(eq + 1).trim();
+                try { refreshToken = decodeURIComponent(rawVal); } catch { refreshToken = rawVal; }
+              }
+            }
+            if (!refreshToken) {
+              try {
+                const parsed = JSON.parse(rawBody || '{}');
+                refreshToken = parsed.refresh_token || parsed.refreshToken || '';
+              } catch { /* ignore malformed body */ }
+            }
+            if (!refreshToken) { res.statusCode = 401; res.end(JSON.stringify({ error: 'Missing cTrader session' })); return; }
 
             const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
             const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
 
             const tokenUrl = new URL('https://openapi.ctrader.com/apps/token');
             tokenUrl.searchParams.set('grant_type', 'refresh_token');
-            tokenUrl.searchParams.set('refresh_token', refresh_token);
+            tokenUrl.searchParams.set('refresh_token', refreshToken);
             tokenUrl.searchParams.set('client_id', cid);
             tokenUrl.searchParams.set('client_secret', csec);
 
             const tokenRes = await fetch(tokenUrl.toString(), { headers: { Accept: 'application/json' } });
             const data = await tokenRes.json().catch(() => ({}));
-            if (!tokenRes.ok) { res.statusCode = 502; res.end(JSON.stringify({ error: data?.error || 'Refresh failed' })); return; }
+            if (!tokenRes.ok || !data.accessToken) {
+              console.warn('[cTrader] refresh failed:', tokenRes.status, data?.error || data?.errorCode || '');
+              res.statusCode = 502;
+              res.end(JSON.stringify({ error: data?.error || 'Refresh failed' }));
+              return;
+            }
+
+            // Rotate the cookie when cTrader issues a new refresh token.
+            if (data.refreshToken) {
+              res.setHeader('Set-Cookie', `jfx_ctrader_refresh=${encodeURIComponent(String(data.refreshToken))}; Path=/; HttpOnly; SameSite=Lax`);
+            }
             res.statusCode = 200;
-            res.end(JSON.stringify({ accessToken: data.accessToken, refreshToken: data.refreshToken, expiresIn: data.expiresIn }));
+            // Respond with both naming conventions so the client and any
+            // server-side consumers can read the fields.
+            res.end(JSON.stringify({
+              access_token: data.accessToken,
+              expires_in: data.expiresIn,
+              refresh_token: data.refreshToken,
+              accessToken: data.accessToken,
+              expiresIn: data.expiresIn,
+              refreshToken: data.refreshToken,
+            }));
           } catch (err) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: err.message || 'Refresh error' }));

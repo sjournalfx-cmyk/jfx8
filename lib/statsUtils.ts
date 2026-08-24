@@ -23,7 +23,7 @@ export const calculateStats = (trades: Trade[]) => {
   const netProfit = safeTrades.reduce((acc, t) => acc + toFiniteNumber(t.pnl, 0), 0);
   
   const winRate = totalCount > 0 ? (wins.length / totalCount) * 100 : 0;
-  const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? grossProfit : 0);
+  const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
   
   const totalCommissions = safeTrades.reduce((acc, t) => acc + (t.commissions || 0), 0);
   const totalFees = safeTrades.reduce((acc, t) => acc + (t.fees || 0), 0);

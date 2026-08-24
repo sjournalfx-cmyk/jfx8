@@ -114,6 +114,10 @@ describe('dataService - Trade CRUD', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset the from() queue entirely: leftover mockReturnValueOnce builders
+    // from an earlier test would otherwise be consumed by the next one.
+    (supabase.from as any).mockReset();
+    (supabase.from as any).mockImplementation(() => createMockQueryBuilder());
     (supabase.auth.getUser as any).mockResolvedValue({ data: { user: mockUser } });
   });
 

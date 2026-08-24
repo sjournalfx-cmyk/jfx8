@@ -18,6 +18,7 @@ import { EA_BRIDGE_URL } from '../lib/constants';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
 import { parseMTTradeCSV } from '../lib/trade-import';
+import { hasActiveSession as hasCtraderSession } from '../services/ctraderService';
 
 interface BridgeProps {
     isDarkMode: boolean;
@@ -30,9 +31,10 @@ interface BridgeProps {
     onImportTrades?: (trades: Trade[]) => Promise<void>;
     trades: Trade[];
     userId: string;
+    onNavigateToJournal?: () => void;
 }
 
-const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId }) => {
+const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId, onNavigateToJournal }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
     const { connectionMode, updateConnectionMode } = useConnectionMode(userId, userProfile);
@@ -100,9 +102,9 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             userProfile={userProfile}
             userId={userId}
             onTradeAdded={onTradeAdded}
-            onEditTrade={onEditTrade}
             onAddOffline={onAddOffline}
             trades={trades}
+            onNavigateToJournal={onNavigateToJournal}
         />;
     }
 
@@ -1256,13 +1258,16 @@ interface CtraderConnectProps {
     userProfile?: UserProfile;
     userId?: string;
     onTradeAdded?: (trade: Trade) => void;
-    onEditTrade?: (trade: Trade) => void;
     onAddOffline?: (trade: Trade) => void;
     trades?: Trade[];
+    onNavigateToJournal?: () => void;
 }
 
-const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, userProfile, userId, onTradeAdded, onEditTrade, onAddOffline, trades }) => {
-    const [authState, setAuthState] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, userProfile, userId, onTradeAdded, onAddOffline, trades, onNavigateToJournal }) => {
+    // Start from the persisted session flag so switching views (or reloading)
+    // lands straight back on the authenticated terminal instead of flashing
+    // the "Connect" button. Only an explicit disconnect resets this to idle.
+    const [authState, setAuthState] = useState<'idle' | 'connecting' | 'connected' | 'error'>(() => (hasCtraderSession() ? 'connected' : 'idle'));
     const [accounts, setAccounts] = useState<any[]>([]);
     const [errorMsg, setErrorMsg] = useState('');
     const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
@@ -1324,6 +1329,9 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
 
     const [savingDealId, setSavingDealId] = useState<number | null>(null);
     const [savedDealIds, setSavedDealIds] = useState<Set<number>>(new Set());
+    const [isBulkAdding, setIsBulkAdding] = useState(false);
+    const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
+    const [bulkResult, setBulkResult] = useState<string | null>(null);
 
     const getSymbolName = (d: any) => {
         if (d.symbol && isNaN(Number(d.symbol))) {
@@ -1339,57 +1347,96 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         return d.symbol || 'EURUSD';
     };
 
+    const isDealInJournal = (deal: any) =>
+        trades?.some(t => String(t.ticketId) === String(deal.dealId)) || savedDealIds.has(deal.dealId);
+
+    const buildDealTrade = (deal: any): Trade => {
+        const pairName = getSymbolName(deal);
+        const netPnL = Number(((deal.profit ?? 0) + (deal.swap || 0) + (deal.commission || 0)).toFixed(2));
+        const closeDate = deal.closeTimestamp ? new Date(deal.closeTimestamp) : new Date();
+        const openDate = deal.openTimestamp ? new Date(deal.openTimestamp) : closeDate;
+
+        const sastClose = getSASTDateTime(closeDate);
+
+        return normalizeTrade({
+            id: '',
+            ticketId: String(deal.dealId || deal.orderId || Date.now()),
+            pair: pairName,
+            assetType: 'Forex',
+            date: sastClose.date,
+            time: sastClose.fullTime,
+            openTime: openDate.toISOString(),
+            closeTime: closeDate.toISOString(),
+            direction: deal.tradeSide === 'sell' ? 'Long' : 'Short',
+            entryPrice: deal.entryPrice || deal.price || 0,
+            exitPrice: deal.price || 0,
+            stopLoss: deal.stopLoss || 0,
+            takeProfit: deal.takeProfit || 0,
+            lots: deal.volume || 0.01,
+            result: netPnL > 0 ? 'Win' : netPnL < 0 ? 'Loss' : 'BE',
+            pnl: netPnL,
+            rr: 0,
+            rating: 0,
+            tags: ['cTrader'],
+            notes: `Synced from cTrader. Deal #${deal.dealId} | Order #${deal.orderId}`,
+            planAdherence: 'No Plan',
+            tradingMistake: 'None',
+            mindset: 'Neutral',
+        });
+    };
+
+    const persistDealTrade = async (newTrade: Trade) => {
+        const saved = await dataService.addTrade(newTrade);
+        if (onTradeAdded) {
+            onTradeAdded(saved);
+        }
+    };
+
+    const markDealSaved = (dealId: number) => {
+        setSavedDealIds(prev => new Set(prev).add(dealId));
+    };
+
     const handleAddDealToJournal = async (deal: any) => {
         try {
             setSavingDealId(deal.dealId);
-            const pairName = getSymbolName(deal);
-            const netPnL = Number(((deal.profit ?? 0) + (deal.swap || 0) + (deal.commission || 0)).toFixed(2));
-            const closeDate = deal.closeTimestamp ? new Date(deal.closeTimestamp) : new Date();
-            const openDate = deal.openTimestamp ? new Date(deal.openTimestamp) : closeDate;
-
-            const sastClose = getSASTDateTime(closeDate);
-
-            const newTrade = normalizeTrade({
-                id: '',
-                ticketId: String(deal.dealId || deal.orderId || Date.now()),
-                pair: pairName,
-                assetType: 'Forex',
-                date: sastClose.date,
-                time: sastClose.fullTime,
-                openTime: openDate.toISOString(),
-                closeTime: closeDate.toISOString(),
-                direction: deal.tradeSide === 'buy' ? 'Long' : 'Short',
-                entryPrice: deal.entryPrice || deal.price || 0,
-                exitPrice: deal.price || 0,
-                stopLoss: deal.stopLoss || 0,
-                takeProfit: deal.takeProfit || 0,
-                lots: deal.volume || 0.01,
-                result: netPnL > 0 ? 'Win' : netPnL < 0 ? 'Loss' : 'BE',
-                pnl: netPnL,
-                rr: 0,
-                rating: 0,
-                tags: ['cTrader'],
-                notes: `Synced from cTrader. Deal #${deal.dealId} | Order #${deal.orderId}`,
-                planAdherence: 'No Plan',
-                tradingMistake: 'None',
-                mindset: 'Neutral',
-            });
-
-            if (onEditTrade) {
-                onEditTrade(newTrade);
-            } else {
-                const saved = await dataService.addTrade(newTrade);
-                if (onTradeAdded) {
-                    onTradeAdded(saved);
-                }
-            }
-            setSavedDealIds(prev => new Set(prev).add(deal.dealId));
+            await persistDealTrade(buildDealTrade(deal));
+            markDealSaved(deal.dealId);
         } catch (err) {
             console.error('Failed to add deal to journal:', err);
         } finally {
             setSavingDealId(null);
         }
     };
+
+    const handleAddAllDealsToJournal = async () => {
+        const pendingDeals = accountDeals.filter(d => !isDealInJournal(d));
+        if (pendingDeals.length === 0 || isBulkAdding) return;
+        setIsBulkAdding(true);
+        setBulkProgress({ done: 0, total: pendingDeals.length });
+        setBulkResult(null);
+        let added = 0;
+        let failed = 0;
+        for (const deal of pendingDeals) {
+            try {
+                await persistDealTrade(buildDealTrade(deal));
+                markDealSaved(deal.dealId);
+                added++;
+            } catch (err) {
+                console.error('Failed to add deal to journal:', deal.dealId, err);
+                failed++;
+            }
+            setBulkProgress(prev => ({ ...prev, done: prev.done + 1 }));
+        }
+        setIsBulkAdding(false);
+        if (added > 0 && onNavigateToJournal) {
+            onNavigateToJournal();
+            return;
+        }
+        setBulkResult(failed > 0 ? `Added ${added}, ${failed} failed` : `Added ${added} trade${added === 1 ? '' : 's'}`);
+        setTimeout(() => setBulkResult(null), 4000);
+    };
+
+    const pendingDealsCount = accountDeals.filter(d => !isDealInJournal(d)).length;
 
     const handleRefreshDetails = async (acc: any) => {
         const id = acc.ctidTraderAccountId;
@@ -1596,37 +1643,25 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     };
 
     useEffect(() => {
-        import('../services/ctraderService').then(({ isAuthenticated, refreshToken, getCtidProfile, logout }) => {
-            if (isAuthenticated()) {
-                setAuthState('connected');
-                if (!fetchCalledRef.current) {
-                    fetchCalledRef.current = true;
-                    handleFetchAccounts();
-                    getCtidProfile().then(p => setProfile(p)).catch(() => {});
-                }
-            } else {
-                // If tokens exist but are expired, attempt automatic refresh
-                refreshToken().then(refreshed => {
-                    if (refreshed) {
-                        setAuthState('connected');
-                        if (!fetchCalledRef.current) {
-                            fetchCalledRef.current = true;
-                            handleFetchAccounts();
-                            getCtidProfile().then(p => setProfile(p)).catch(() => {});
-                        }
-                    } else {
-                        // Refresh failed or revoked: log out and fall back cleanly to idle state
-                        logout();
-                        try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
-                        setAuthState('idle');
-                    }
-                }).catch(() => {
-                    logout();
-                    try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
-                    setAuthState('idle');
-                });
+        let cancelled = false;
+        import('../services/ctraderService').then(async ({ isAuthenticated, refreshToken, getCtidProfile }) => {
+            // Memory tokens are lost on page reloads — silently re-mint them
+            // from the server-side session (httpOnly refresh cookie) first.
+            if (!isAuthenticated()) {
+                await refreshToken().catch(() => false);
+            }
+            if (cancelled) return;
+            // Always land back on the authenticated view once a session
+            // exists. A failed refresh does NOT log out here — exiting this
+            // screen requires an explicit "Disconnect from cTrader" click.
+            setAuthState('connected');
+            if (isAuthenticated() && !fetchCalledRef.current) {
+                fetchCalledRef.current = true;
+                handleFetchAccounts();
+                getCtidProfile().then(p => setProfile(p)).catch(() => {});
             }
         });
+        return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -2046,25 +2081,40 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                         {/* Tab Content: HISTORY / CLOSED DEALS */}
                                                         {activeTab === 'history' && (
                                                             <div>
-                                                                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-2">Deal Execution History</p>
+                                                                <div className="flex items-center justify-between mb-2">
+                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Deal Execution History</p>
+                                                                    <div className="flex items-center gap-2">
+                                                                        {bulkResult && <span className="text-[10px] font-bold text-emerald-400">{bulkResult}</span>}
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={handleAddAllDealsToJournal}
+                                                                            disabled={pendingDealsCount === 0 || isBulkAdding}
+                                                                            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md bg-[#FF4F00]/10 text-[#FF4F00] hover:bg-[#FF4F00]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                            title="Add all deals that are not yet in the journal"
+                                                                        >
+                                                                            {isBulkAdding ? <Loader2 size={12} className="animate-spin" /> : <PlusCircle size={12} />}
+                                                                            {isBulkAdding ? `Adding ${bulkProgress.done}/${bulkProgress.total}` : pendingDealsCount > 0 ? `Add all (${pendingDealsCount})` : 'All in journal'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
                                                                 {accountDeals.length === 0 ? (
                                                                     <div className="text-center py-6 border border-dashed border-white/5 rounded-xl">
                                                                         <p className="text-xs text-zinc-600">No closed deal logs found</p>
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="border border-white/10 rounded-lg overflow-hidden overflow-x-auto bg-[#000000]">
+                                                                    <div className="border border-white/10 rounded-lg max-h-[420px] overflow-y-auto overflow-x-auto custom-scrollbar bg-[#000000]">
                                                                         <table className="w-full text-left text-xs text-zinc-300 border-collapse">
                                                                             <thead>
-                                                                                <tr className="border-b border-white/10 bg-white/[0.02] text-[11px] font-medium text-zinc-400">
-                                                                                    <th className="py-2.5 px-3 font-normal">Symbol</th>
-                                                                                    <th className="py-2.5 px-3 font-normal">Opening direction</th>
-                                                                                    <th className="py-2.5 px-3 font-normal">Closing time</th>
-                                                                                    <th className="py-2.5 px-3 font-normal">Entry price</th>
-                                                                                    <th className="py-2.5 px-3 font-normal">Closing price</th>
-                                                                                    <th className="py-2.5 px-3 font-normal">Closing Quantity</th>
-                                                                                    <th className="py-2.5 px-3 font-normal">Closing volume</th>
-                                                                                    <th className="py-2.5 px-3 font-normal">Net $</th>
-                                                                                    <th className="py-2.5 px-3 font-normal text-right">Add to journal</th>
+                                                                                <tr className="border-b border-white/10 text-[11px] font-medium text-zinc-400">
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Symbol</th>
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Opening direction</th>
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Closing time</th>
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Entry price</th>
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Closing price</th>
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Closing Quantity</th>
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Closing volume</th>
+                                                                                    <th className="py-2.5 px-3 font-normal sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Net $</th>
+                                                                                    <th className="py-2.5 px-3 font-normal text-right sticky top-0 z-10 bg-[#18181b] shadow-[inset_0_-1px_0_rgba(255,255,255,0.1)]">Add to journal</th>
                                                                                 </tr>
                                                                             </thead>
                                                                             <tbody className="divide-y divide-white/5 font-sans">
@@ -2085,12 +2135,12 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                                     const closingVolNum = Number(d.volume || 0) * 100000;
                                                                                     const formattedVol = `$ ${closingVolNum.toLocaleString('en-US').replace(/,/g, ' ')}`;
                                                                                     const netProfit = Number(((d.profit ?? 0) + (d.swap || 0) + (d.commission || 0)).toFixed(2));
-                                                                                    const isAlreadyInJournal = trades.some(t => String(t.ticketId) === String(d.dealId)) || savedDealIds.has(d.dealId);
+                                                                                    const isAlreadyInJournal = isDealInJournal(d);
 
                                                                                     return (
                                                                                         <tr key={`${d.dealId}_${idx}`} className="hover:bg-white/[0.02] transition-colors">
                                                                                             <td className="py-2.5 px-3 font-bold text-white">{getSymbolName(d)}</td>
-                                                                                            <td className="py-2.5 px-3 font-bold text-white capitalize">{d.tradeSide === 'buy' ? 'Buy' : 'Sell'}</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white capitalize">{d.tradeSide === 'sell' ? 'Long' : 'Short'}</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{formattedTime}</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{d.entryPrice !== undefined ? d.entryPrice : (d.price || '-')}</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{d.price || '-'}</td>
@@ -2102,7 +2152,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                                             <td className="py-2.5 px-3 text-right">
                                                                                                 <button
                                                                                                     type="button"
-                                                                                                    disabled={savingDealId === d.dealId || isAlreadyInJournal}
+                                                                                                    disabled={savingDealId === d.dealId || isBulkAdding || isAlreadyInJournal}
                                                                                                     onClick={() => handleAddDealToJournal(d)}
                                                                                                     className="p-1 text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
                                                                                                     title={isAlreadyInJournal ? "Already in journal" : "Add to journal"}

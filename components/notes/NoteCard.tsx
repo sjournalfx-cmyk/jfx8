@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Pin, Image as ImageIcon, Archive, MoreVertical, CheckCircle2, Square, CheckSquare, Trash2, RotateCcw } from 'lucide-react';
+import { Pin, Archive, Trash2, RotateCcw, Square, CheckSquare, GripVertical } from 'lucide-react';
 import { Note, ColorStyles } from './types';
 
 interface NoteCardProps {
@@ -10,32 +10,21 @@ interface NoteCardProps {
   onArchive: (e: React.MouseEvent, note: Note) => void;
   onDelete?: (e: React.MouseEvent, note: Note) => void;
   onRestore?: (e: React.MouseEvent, note: Note) => void;
-  onUpdate?: (note: Note) => void;
-  onDragStart?: (note: Note) => void;
-  onDragEnd?: () => void;
-  onDrop?: (targetNote: Note) => void;
   isDragging?: boolean;
+  dragHandleProps?: Record<string, any>;
 }
 
-const NoteCard: React.FC<NoteCardProps> = ({ 
-  note, 
-  onClick, 
-  onPin, 
-  onArchive, 
+const NoteCard: React.FC<NoteCardProps> = ({
+  note,
+  onClick,
+  onPin,
+  onArchive,
   onDelete,
   onRestore,
-  onUpdate,
-  onDragStart,
-  onDragEnd,
-  onDrop,
-  isDragging 
+  isDragging,
+  dragHandleProps,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
 
   const renderContent = () => {
     if (note.isList && note.listItems && note.listItems.length > 0) {
@@ -106,7 +95,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
 
   return (
     <div
-      className={`relative rounded-xl border transition-all duration-200 ease-out cursor-grab active:cursor-grabbing group overflow-hidden
+      className={`relative rounded-xl border transition-all duration-200 ease-out group overflow-hidden
         ${ColorStyles[note.color]} 
         ${note.color === 'DEFAULT' ? 'border-[var(--notebook-divider)]' : 'border-transparent'}
         ${isDragging ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}
@@ -116,6 +105,17 @@ const NoteCard: React.FC<NoteCardProps> = ({
       onMouseLeave={() => setIsHovered(false)}
       onClick={() => onClick(note)}
     >
+      {!note.isTrashed && (
+        <button
+          {...(dragHandleProps || {})}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-2 right-10 z-10 p-1 rounded-full text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] transition-all duration-150 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing"
+          title="Drag to reorder"
+          aria-label="Drag to reorder"
+        >
+          <GripVertical className="w-4 h-4" />
+        </button>
+      )}
       {note.image && (
           <div className="w-full h-auto max-h-48 overflow-hidden border-b border-white/5 pointer-events-none">
               <img src={note.image} alt="Note attachment" className="w-full object-cover" />
@@ -138,6 +138,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
               }}
               className={`text-[var(--notebook-text)] p-1.5 -mr-1 -mt-1 rounded-full hover:bg-[var(--notebook-hover)] transition-all duration-150 pointer-events-auto ${isHovered || note.isPinned ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}
               title={note.isPinned ? "Unpin note" : "Pin note"}
+              aria-label={note.isPinned ? "Unpin note" : "Pin note"}
             >
               <Pin className={`w-4 h-4 ${note.isPinned ? 'fill-current' : ''}`} />
             </button>
@@ -180,8 +181,6 @@ const NoteCard: React.FC<NoteCardProps> = ({
                </>
              ) : (
                <>
-                 <ToolbarButton icon={<BellIcon />} title="Reminders are not configured yet" disabled />
-                 <ToolbarButton icon={<ImageIcon className="w-3 h-3" />} title="Add image" />
                  <ToolbarButton 
                     onClick={(e) => {
                       e.stopPropagation();
@@ -198,7 +197,6 @@ const NoteCard: React.FC<NoteCardProps> = ({
                     icon={<Trash2 className="w-3 h-3" />} 
                     title="Delete" 
                  />
-                 <ToolbarButton icon={<MoreVertical className="w-3 h-3" />} title="More" />
                </>
              )}
          </div>
@@ -207,20 +205,21 @@ const NoteCard: React.FC<NoteCardProps> = ({
   );
 };
 
-const ToolbarButton = ({ icon, title, onClick, disabled }: { icon: React.ReactNode, title: string, onClick?: (e: React.MouseEvent) => void, disabled?: boolean }) => (
+const ToolbarButton = ({ icon, title, onClick }: { icon: React.ReactNode, title: string, onClick?: (e: React.MouseEvent) => void }) => (
     <button 
         onClick={(e) => {
             e.stopPropagation();
             if(onClick) onClick(e);
         }}
-        disabled={disabled}
-        className={`w-6 h-6 flex items-center justify-center rounded-full text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] transition-colors ${disabled ? 'opacity-35 cursor-not-allowed hover:bg-transparent hover:text-[var(--notebook-muted)]' : ''}`} 
+        className="w-6 h-6 flex items-center justify-center rounded-full text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] transition-colors" 
         title={title}
+        aria-label={title}
     >
         {icon}
     </button>
 )
 
-const BellIcon = () => <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>;
-
-export default NoteCard;
+export default React.memo(NoteCard, (prevProps, nextProps) =>
+  prevProps.note === nextProps.note &&
+  prevProps.isDragging === nextProps.isDragging
+);

@@ -43,6 +43,7 @@ import { RobustnessLab } from './analytics/RobustnessLab';
 import { ComparisonView } from './analytics/ComparisonView';
 import { TradeGradeDistributionWidget } from './analytics/TradeGradeDistributionWidget';
 import { PsychologicalSlipWidget } from './analytics/PsychologicalSlipWidget';
+import { PsychologyAnalyzeLoader, PsychologyAnalyzeEmptyState } from './analytics/PsychologyAnalyzeState';
 import { TimeAnalysisMatrixWidget } from './analytics/TimeAnalysisMatrixWidget';
 import { DetailedStatistics } from './analytics/DetailedStatistics';
 import { PLByPlanAdherenceWidget } from './analytics/PLByPlanAdherenceWidget';
@@ -559,16 +560,23 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                             </Tooltip>
                         </div>
-                        <button
-                            type="button"
-                            onClick={onRefreshPsychologyInsights}
-                            disabled={!onRefreshPsychologyInsights || isRefreshingPsychologyInsights || psychologyAnalyzeLimitReached}
-                            aria-label="Analyze psychology insights"
-                            title={psychologyAnalyzeLimitReached ? 'Daily Analyze limit reached (2/2)' : 'Analyze psychology insights'}
-                            className="group inline-flex items-center justify-center rounded-full p-1.5 text-[#93c5fd] transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-                        >
-                            <RotateCcw size={14} className={isRefreshingPsychologyInsights ? 'animate-spin text-white' : 'transition-transform duration-200 group-hover:rotate-12'} />
-                        </button>
+                        <div className="flex shrink-0 items-center gap-2.5">
+                            {dailyPsychologyInsights?.generatedAt && !isRefreshingPsychologyInsights ? (
+                                <span className="text-[10px] text-[#52525b]">
+                                    Last sync: {new Date(dailyPsychologyInsights.generatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={onRefreshPsychologyInsights}
+                                disabled={!onRefreshPsychologyInsights || isRefreshingPsychologyInsights || psychologyAnalyzeLimitReached}
+                                aria-label="Analyze psychology insights"
+                                title={psychologyAnalyzeLimitReached ? 'Daily Analyze limit reached (3/3)' : 'Analyze psychology insights'}
+                                className="group inline-flex items-center justify-center rounded-full p-1.5 text-[#93c5fd] transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                            >
+                                <RotateCcw size={14} className={isRefreshingPsychologyInsights ? 'animate-spin text-white' : 'transition-transform duration-200 group-hover:rotate-12'} />
+                            </button>
+                        </div>
                     </div>
 
                     {dailyPsychologyInsights?.content ? (
@@ -613,12 +621,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                                 </pre>
                             </div>
                         )
+                    ) : isRefreshingPsychologyInsights ? (
+                        <PsychologyAnalyzeLoader />
                     ) : (
-                        <div className="flex flex-1 items-center justify-center rounded-[14px] border border-dashed border-[#1f1f1f] bg-[#080808] px-6 text-center">
-                            <p className="max-w-sm text-[13px] leading-5 text-white">
-                                Click <span className="font-semibold text-white">Analyze</span> to generate today&apos;s real psychology insights from your live journal data.
-                            </p>
-                        </div>
+                        <PsychologyAnalyzeEmptyState />
                     )}
                 </section>
             </div>

@@ -1,4 +1,3 @@
-
 import { supabase } from '../lib/supabase';
 import { Trade, Note, DailyBias, UserProfile, Goal, StrategyDiagram, DBTrade, DBGoal, BacktestSession, CashTransaction, DBCashTransaction } from '../types';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from '../lib/constants';
@@ -15,6 +14,51 @@ const toStringArray = (value: unknown, fallback: string[] = []): string[] => {
 
 const toSafeString = (value: unknown, fallback = ''): string => {
   return typeof value === 'string' ? value : fallback;
+};
+
+const sanitizeTimestamp = (value: unknown): string | null => {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const timestamp = Date.parse(trimmed);
+  if (isNaN(timestamp)) return null;
+  return new Date(timestamp).toISOString();
+};
+
+export const extractMissingColumnName = (error: any): string | null => {
+  if (!error) return null;
+  const message = String(error.message || error.details || error.hint || '');
+  const status = Number(error.status || error.statusCode || 0);
+  const code = String(error.code || '');
+
+  const isColumnError =
+    code === '42703' ||
+    code === 'PGRST204' ||
+    code === 'PGRST200' ||
+    status === 400 ||
+    message.toLowerCase().includes('column') ||
+    message.toLowerCase().includes('schema cache');
+
+  if (!isColumnError) return null;
+
+  const patterns = [
+    /Could not find the '([^']+)' column/i,
+    /column "([^"]+)" of relation/i,
+    /column "([^"]+)" does not exist/i,
+    /column "([^"]+)"/i,
+    /column ([a-zA-Z0-9_]+) of/i,
+    /'([^']+)' column/i,
+    /relation [^ ]+ does not have a column ([a-zA-Z0-9_]+)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[1]) {
+      return match[1].replace(/["']/g, '').trim();
+    }
+  }
+
+  return null;
 };
 
 // Helper to map DB Trade to App Trade
@@ -98,8 +142,8 @@ const buildTradeDbPayload = (trade: Partial<Trade>, userId: string, fallback: Pa
     mindset: merged.mindset,
     exit_comment: merged.exitComment,
     voice_note: merged.voiceNote,
-    open_time: merged.openTime,
-    close_time: merged.closeTime,
+    open_time: sanitizeTimestamp(merged.openTime),
+    close_time: sanitizeTimestamp(merged.closeTime),
     before_screenshot: merged.beforeScreenshot,
     after_screenshot: merged.afterScreenshot,
     setup_id: merged.setupId || null,
@@ -142,9 +186,200 @@ const normalizeCashTransactionAmount = (tx: Pick<CashTransaction, 'type' | 'amou
 };
 
 const CASH_TRANSACTION_CACHE_PREFIX = 'jfx_cash_transactions_cache_';
-let cashTransactionsBackendUnavailable = false;
+const CASH_TRANSACTION_TOMBSTONE_PREFIX = 'jfx_cash_tx_tombstones_';
+const CASH_TRANSACTION_UNSYNCED_PREFIX = 'jfx_cash_tx_unsynced_';
+const CASH_TX_RETRY_DELAY_MS = 2 * 60 * 1000; // retry the backend 2 min after a failure
+// Module-level flag with automatic recovery — never a permanent kill-switch.
+let cashTransactionsBackendUnavailableAt = 0;
+
+const cashBackendAvailable = () =>
+  !cashTransactionsBackendUnavailableAt || Date.now() - cashTransactionsBackendUnavailableAt > CASH_TX_RETRY_DELAY_MS;
 
 const getCashTransactionCacheKey = (userId: string) => `${CASH_TRANSACTION_CACHE_PREFIX}${userId}`;
+const getCashTransactionTombstoneKey = (userId: string) => `${CASH_TRANSACTION_TOMBSTONE_PREFIX}${userId}`;
+const getCashTransactionUnsyncedKey = (userId: string) => `${CASH_TRANSACTION_UNSYNCED_PREFIX}${userId}`;
+
+/**
+ * A stable signature for duplicate/ghost detection. Used for tombstones so an
+ * intentionally deleted transaction can NEVER resurrect from a stale cache or
+ * a refetch race, regardless of which id it carries.
+ */
+export const cashTransactionSignature = (tx: Pick<CashTransaction, 'type' | 'amount' | 'date' | 'description'>) => {
+  const marker = tx.description?.match(/\[CW:(\d+)\]/)?.[1];
+  if (marker) return `cw:${marker}`;
+  return `${tx.type}|${tx.date}|${Math.abs(Number(tx.amount) || 0).toFixed(2)}|${(tx.description || '').trim().toLowerCase()}`;
+};
+
+// --- Tombstones -----------------------------------------------------------
+const readTombstones = (userId: string): { ids: Set<string>; signatures: Set<string> } => {
+  const ids = new Set<string>();
+  const signatures = new Set<string>();
+  if (typeof window === 'undefined') return { ids, signatures };
+  try {
+    const raw = window.localStorage.getItem(getCashTransactionTombstoneKey(userId));
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) {
+      parsed.forEach((entry: any) => {
+        if (typeof entry === 'string') {
+          // Legacy/plain entries are ids
+          if (entry.startsWith('sig:')) signatures.add(entry.slice(4));
+          else ids.add(entry);
+        } else {
+          if (entry?.id) ids.add(String(entry.id));
+          if (entry?.signature) signatures.add(String(entry.signature));
+        }
+      });
+    }
+  } catch { /* corrupted — start fresh */ }
+  return { ids, signatures };
+};
+
+const writeTombstone = (userId: string, transaction: CashTransaction) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const { ids, signatures } = readTombstones(userId);
+    if (transaction.id && !transaction.id.startsWith('local-')) ids.add(transaction.id);
+    signatures.add(cashTransactionSignature(transaction));
+    // Cap to avoid unbounded growth; oldest entries fall off.
+    const idList = Array.from(ids).slice(-400);
+    const sigList = Array.from(signatures).slice(-400);
+    window.localStorage.setItem(
+      getCashTransactionTombstoneKey(userId),
+      JSON.stringify({ ids: idList, sigs: sigList })
+    );
+  } catch { /* storage full/blocked — non-fatal */ }
+};
+
+/** Remove a tombstone once the server confirms the row is truly gone. */
+const pruneTombstone = (userId: string, transactionId: string, signature?: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const { ids, signatures } = readTombstones(userId);
+    ids.delete(transactionId);
+    if (signature) signatures.delete(signature);
+    window.localStorage.setItem(
+      getCashTransactionTombstoneKey(userId),
+      JSON.stringify({ ids: Array.from(ids).slice(-400), sigs: Array.from(signatures).slice(-400) })
+    );
+  } catch { /* non-fatal */ }
+};
+
+/**
+ * Clears any tombstone matching a transaction's signature so a legitimate
+ * RE-ADD of identical content is never swallowed by deletion history.
+ */
+const pruneTombstoneBySignature = (userId: string, transaction: CashTransaction) => {
+  const { signatures } = readTombstones(userId);
+  const sig = cashTransactionSignature(transaction);
+  if (!signatures.has(sig)) return;
+  pruneTombstone(userId, '', sig);
+};
+
+// Tombstones created before the server confirmed deletion get pruned lazily:
+// every successful fetch re-checks and drops stale ones.
+const applyTombstoneFilter = (userId: string, transactions: CashTransaction[]): CashTransaction[] => {
+  const { ids, signatures } = readTombstones(userId);
+  if (ids.size === 0 && signatures.size === 0) return transactions;
+
+  const remainingIds = new Set(ids);
+  const remainingSigs = new Set(signatures);
+  const filtered = transactions.filter(tx => {
+    const sig = cashTransactionSignature(tx);
+    const isTombstoned = ids.has(tx.id) || signatures.has(sig);
+    if (!isTombstoned) {
+      // Server no longer returns this row → deletion was confirmed → forget it.
+      remainingIds.delete(tx.id);
+      remainingSigs.delete(sig);
+    }
+    return !isTombstoned;
+  });
+
+  try {
+    window.localStorage.setItem(
+      getCashTransactionTombstoneKey(userId),
+      JSON.stringify({ ids: Array.from(remainingIds).slice(-400), sigs: Array.from(remainingSigs).slice(-400) })
+    );
+  } catch { /* non-fatal */ }
+
+  return filtered;
+};
+
+// --- Unsynced queue (survives reloads when the backend write failed) -------
+const readUnsynced = (userId: string): CashTransaction[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(getCashTransactionUnsyncedKey(userId));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.filter((t: any) => t?.id && t?.type && t?.date) : [];
+  } catch { return []; }
+};
+
+const writeUnsynced = (userId: string, transactions: CashTransaction[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(getCashTransactionUnsyncedKey(userId), JSON.stringify(transactions.slice(-500)));
+  } catch { /* non-fatal */ }
+};
+
+const markUnsynced = (userId: string, transaction: CashTransaction) => {
+  const next = readUnsynced(userId).filter(t => t.id !== transaction.id);
+  next.unshift(transaction);
+  writeUnsynced(userId, next);
+};
+
+const clearUnsynced = (userId: string, transactionId: string) => {
+  writeUnsynced(userId, readUnsynced(userId).filter(t => t.id !== transactionId));
+};
+
+/**
+ * Merges locally-queued unsynced transactions into a fetched list:
+ *  - queued rows with an id the server also returns REPLACE the stale copy
+ *    (offline edits win until they sync),
+ *  - rows whose content already exists are dropped,
+ *  - everything else is prepended so offline adds stay visible.
+ */
+const mergeUnsynced = (userId: string, serverList: CashTransaction[]): CashTransaction[] => {
+  const queued = readUnsynced(userId);
+  if (queued.length === 0) return serverList;
+
+  const knownSigs = new Set(serverList.map(cashTransactionSignature));
+  const result = [...serverList];
+  const prepend: CashTransaction[] = [];
+
+  queued.forEach(tx => {
+    const idx = result.findIndex(t => t.id === tx.id);
+    if (idx >= 0) {
+      result[idx] = tx; // offline edit overrides stale server copy
+      return;
+    }
+    const sig = cashTransactionSignature(tx);
+    if (knownSigs.has(sig)) return;
+    knownSigs.add(sig);
+    prepend.push(tx);
+  });
+
+  return prepend.length === 0 ? result : [...prepend, ...result];
+};
+
+/**
+ * Pushes locally-queued (unsynced) transactions to the backend. Called after a
+ * successful fetch proves the backend is reachable again.
+ */
+const flushUnsyncedCashTransactions = async (userId: string): Promise<void> => {
+  const queued = readUnsynced(userId);
+  if (queued.length === 0) return;
+
+  const stillUnsynced: CashTransaction[] = [];
+  for (const tx of queued) {
+    try {
+      await supabase.from('cash_transactions').insert(mapCashTransactionToDB(tx, userId));
+    } catch (error: any) {
+      if (isMissingCashTransactionsTableError(error)) throw error;
+      stillUnsynced.push(tx); // keep for next attempt (e.g. duplicate → drop silently)
+    }
+  }
+  writeUnsynced(userId, stillUnsynced);
+};
 
 const readCashTransactionCache = (userId: string): CashTransaction[] => {
   if (typeof window === 'undefined') return [];
@@ -214,12 +449,16 @@ const notifyCashTransactionsAvailability = (available: boolean) => {
 
 const isMissingCashTransactionsTableError = (error: any) => {
   const message = String(error?.message || '').toLowerCase();
+  // STRICT matching only — a broad "mentions the table name" check used to
+  // misclassify RLS violations as a missing table and permanently disable
+  // the feature.
   return (
     error?.status === 404 ||
     error?.code === '42P01' ||
     error?.code === 'PGRST205' ||
-    message.includes('cash_transactions') ||
-    message.includes('does not exist')
+    message.includes("relation \"public.cash_transactions\" does not exist") ||
+    (message.includes('does not exist') && message.includes('cash_transactions')) ||
+    message.includes('schema cache')
   );
 };
 
@@ -256,16 +495,14 @@ const uploadImage = async (userId: string, imageSource: string | undefined, type
   if (imageSource.startsWith('http')) return imageSource;
 
   try {
-    // Convert base64 to Blob
     const response = await fetch(imageSource);
     const blob = await response.blob();
 
-    // 1MB Limit check for sanity
     if (blob.size > 1024 * 1024) {
       console.warn(`Image ${type} is too large (${(blob.size / 1024).toFixed(1)}KB). Consider compressing.`);
     }
 
-    const fileExt = 'png'; 
+    const fileExt = 'png';
     const fileName = `${userId}/${Date.now()}-${type}.${fileExt}`;
 
     const { data, error } = await supabase.storage
@@ -289,12 +526,10 @@ const uploadImage = async (userId: string, imageSource: string | undefined, type
     return publicUrl;
   } catch (err) {
     console.error(`Error uploading ${type} screenshot:`, err);
-    // If it's a base64 string and upload failed, we only return it if it's small enough
-    // to avoid DB payload errors (limit to ~100KB for inline storage)
     if (imageSource.length < 150000) {
-      return imageSource; 
+      return imageSource;
     }
-    return undefined; // Drop it rather than crashing the DB save
+    return undefined;
   }
 };
 
@@ -303,7 +538,6 @@ export const uploadNoteImage = async (file: File): Promise<string | null> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    // Check user plan limits
     const { data: profile } = await supabase
       .from('profiles')
       .select('plan')
@@ -320,7 +554,7 @@ export const uploadNoteImage = async (file: File): Promise<string | null> => {
     const fileName = `notes/${user.id}/${Date.now()}.${fileExt}`;
 
     const { data, error } = await supabase.storage
-      .from('trade-images') // Reusing existing bucket
+      .from('trade-images')
       .upload(fileName, file, {
         contentType: file.type,
         upsert: true
@@ -343,8 +577,6 @@ const deleteImageFile = async (imageUrl: string | undefined) => {
   if (!imageUrl || !imageUrl.includes('trade-images')) return;
 
   try {
-    // Extract path from public URL
-    // URL format: .../storage/v1/object/public/trade-images/userId/filename.png
     const pathParts = imageUrl.split('trade-images/');
     if (pathParts.length < 2) return;
 
@@ -357,6 +589,73 @@ const deleteImageFile = async (imageUrl: string | undefined) => {
     if (error) throw error;
   } catch (err) {
     console.error('Error deleting image file:', err);
+  }
+};
+
+const uploadVoiceNote = async (userId: string, voiceSource: string | undefined): Promise<string | undefined> => {
+  if (!voiceSource) return undefined;
+  if (voiceSource.startsWith('http')) return voiceSource;
+  if (!voiceSource.startsWith('data:audio') && !voiceSource.startsWith('blob:')) {
+    return voiceSource;
+  }
+
+  try {
+    const response = await fetch(voiceSource);
+    const blob = await response.blob();
+    if (blob.size === 0) return undefined;
+
+    let fileExt = 'webm';
+    if (blob.type.includes('mp4') || blob.type.includes('m4a')) fileExt = 'm4a';
+    else if (blob.type.includes('ogg')) fileExt = 'ogg';
+    else if (blob.type.includes('wav')) fileExt = 'wav';
+    else if (blob.type.includes('mp3') || blob.type.includes('mpeg')) fileExt = 'mp3';
+
+    const fileName = `${userId}/${Date.now()}-voice.${fileExt}`;
+
+    const { data, error } = await supabase.storage
+      .from('trade-images')
+      .upload(fileName, blob, {
+        contentType: blob.type || 'audio/webm',
+        upsert: true
+      });
+
+    if (error) {
+      if (error.message === 'The resource was not found') {
+        console.warn('Storage bucket "trade-images" not found.');
+      }
+      throw error;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('trade-images')
+      .getPublicUrl(data.path);
+
+    return publicUrl;
+  } catch (err) {
+    console.error('Error uploading voice note:', err);
+    if (voiceSource.length < 500000) {
+      return voiceSource;
+    }
+    return undefined;
+  }
+};
+
+const deleteVoiceNoteFile = async (voiceUrl: string | undefined) => {
+  if (!voiceUrl || !voiceUrl.includes('trade-images')) return;
+
+  try {
+    const pathParts = voiceUrl.split('trade-images/');
+    if (pathParts.length < 2) return;
+
+    const filePath = pathParts[1];
+
+    const { error } = await supabase.storage
+      .from('trade-images')
+      .remove([filePath]);
+
+    if (error) throw error;
+  } catch (err) {
+    console.error('Error deleting voice note file:', err);
   }
 };
 
@@ -393,7 +692,6 @@ export const dataService = {
   },
 
   async getMonthlyTradeCount(userId: string, year: number, month: number) {
-    // Month is 1-indexed for the DB query (YYYY-MM-DD)
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const lastDay = new Date(year, month, 0).getDate();
     const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
@@ -416,19 +714,21 @@ export const dataService = {
 
     const normalizedInput = normalizeTrade(trade, {}, { preserveProvidedPnl: trade.ticketId !== undefined });
 
-    // Upload images if they are base64 (keep awaiting images as they are small and critical)
-    const beforeUrl = await uploadImage(user.id, normalizedInput.beforeScreenshot, 'before');
-    const afterUrl = await uploadImage(user.id, normalizedInput.afterScreenshot, 'after');
+    const [beforeUrl, afterUrl, voiceUrl] = await Promise.all([
+      uploadImage(user.id, normalizedInput.beforeScreenshot, 'before'),
+      uploadImage(user.id, normalizedInput.afterScreenshot, 'after'),
+      uploadVoiceNote(user.id, normalizedInput.voiceNote),
+    ]);
 
     const tradeToSave = {
       ...normalizedInput,
       beforeScreenshot: beforeUrl,
       afterScreenshot: afterUrl,
+      voiceNote: voiceUrl,
     };
 
     const dbTrade = buildTradeDbPayload(tradeToSave, user.id);
 
-    // If it has a ticketId, we want to prevent duplicates
     if (dbTrade.ticket_id) {
       const { data: existing } = await supabase
         .from('trades')
@@ -439,7 +739,6 @@ export const dataService = {
 
       if (existing) {
         console.warn(`Trade with ticket ${dbTrade.ticket_id} already exists. Skipping.`);
-        // Return the existing trade
         const { data } = await supabase
           .from('trades')
           .select('*')
@@ -449,13 +748,26 @@ export const dataService = {
       }
     }
 
-    const { data, error } = await supabase
-      .from('trades')
-      .insert(dbTrade)
-      .select()
-      .single();
+    const performInsert = async (data: Partial<DBTrade>): Promise<DBTrade> => {
+      const { data: insertedRow, error } = await supabase
+        .from('trades')
+        .insert(data)
+        .select()
+        .single();
 
-    if (error) throw error;
+      if (error) {
+        const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
+        if (missingField && missingField in data) {
+          console.warn(`Column ${missingField} missing in trades table. Retrying insert without it.`);
+          const { [missingField]: _, ...safeData } = data;
+          return performInsert(safeData);
+        }
+        throw error;
+      }
+      return insertedRow as DBTrade;
+    };
+
+    const data = await performInsert(dbTrade);
     return mapTradeFromDB(data);
   },
 
@@ -467,7 +779,6 @@ export const dataService = {
       normalizeTrade(trade, {}, { preserveProvidedPnl: trade.ticketId !== undefined })
     );
 
-    // Filter out duplicates before sending to DB if ticket IDs are provided
     const ticketIds = normalizedTrades.map(t => t.ticketId).filter(Boolean) as string[];
     
     let existingTicketIds = new Set<string>();
@@ -487,12 +798,28 @@ export const dataService = {
 
     if (tradesToSave.length === 0) return [];
 
-    const { data, error } = await supabase
-      .from('trades')
-      .insert(tradesToSave)
-      .select();
+    const performBatchInsert = async (records: Partial<DBTrade>[]): Promise<DBTrade[]> => {
+      const { data, error } = await supabase
+        .from('trades')
+        .insert(records)
+        .select();
 
-    if (error) throw error;
+      if (error) {
+        const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
+        if (missingField) {
+          console.warn(`Column ${missingField} missing in trades table. Retrying batch insert without it.`);
+          const safeRecords = records.map(r => {
+            const { [missingField]: _, ...rest } = r;
+            return rest;
+          });
+          return performBatchInsert(safeRecords);
+        }
+        throw error;
+      }
+      return (data || []) as DBTrade[];
+    };
+
+    const data = await performBatchInsert(tradesToSave);
     return (data || []).map(mapTradeFromDB);
   },
 
@@ -500,7 +827,6 @@ export const dataService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    // Get current record to check for deleted files
     const { data: currentTradeRow } = await supabase
       .from('trades')
       .select('*')
@@ -512,10 +838,11 @@ export const dataService = {
       currentTrade?.ticketId ||
       currentTrade?.tags?.some(tag => /MT[45]_Auto_Journal|Imported/i.test(tag))
     );
-    const hasOwnProperty = (key: keyof Pick<Trade, 'beforeScreenshot' | 'afterScreenshot'>) =>
+    const hasOwnProperty = (key: keyof Pick<Trade, 'beforeScreenshot' | 'afterScreenshot' | 'voiceNote'>) =>
       Object.prototype.hasOwnProperty.call(trade, key);
     const beforeScreenshotCleared = hasOwnProperty('beforeScreenshot') && !trade.beforeScreenshot;
     const afterScreenshotCleared = hasOwnProperty('afterScreenshot') && !trade.afterScreenshot;
+    const voiceNoteCleared = hasOwnProperty('voiceNote') && !trade.voiceNote;
 
     const tradeForSave = isBridgeManagedTrade && currentTrade
       ? {
@@ -534,24 +861,31 @@ export const dataService = {
       { preserveProvidedPnl: true }
     );
 
+    const deletePromises: Promise<void>[] = [];
     if (currentTradeRow) {
-      // Handle images
       if (currentTradeRow.before_screenshot && (!normalizedInput.beforeScreenshot || normalizedInput.beforeScreenshot.startsWith('data:'))) {
-        await deleteImageFile(currentTradeRow.before_screenshot);
+        deletePromises.push(deleteImageFile(currentTradeRow.before_screenshot));
       }
       if (currentTradeRow.after_screenshot && (!normalizedInput.afterScreenshot || normalizedInput.afterScreenshot.startsWith('data:'))) {
-        await deleteImageFile(currentTradeRow.after_screenshot);
+        deletePromises.push(deleteImageFile(currentTradeRow.after_screenshot));
+      }
+      if (currentTradeRow.voice_note && (!normalizedInput.voiceNote || normalizedInput.voiceNote.startsWith('data:') || normalizedInput.voiceNote !== currentTradeRow.voice_note)) {
+        deletePromises.push(deleteVoiceNoteFile(currentTradeRow.voice_note));
       }
     }
 
-    // Upload images if they are base64
-    const beforeUrl = await uploadImage(user.id, normalizedInput.beforeScreenshot, 'before');
-    const afterUrl = await uploadImage(user.id, normalizedInput.afterScreenshot, 'after');
+    const [beforeUrl, afterUrl, voiceUrl] = await Promise.all([
+      uploadImage(user.id, normalizedInput.beforeScreenshot, 'before'),
+      uploadImage(user.id, normalizedInput.afterScreenshot, 'after'),
+      uploadVoiceNote(user.id, normalizedInput.voiceNote),
+      ...deletePromises,
+    ]);
 
     const tradeToUpdate = {
       ...normalizedInput,
       beforeScreenshot: beforeUrl,
       afterScreenshot: afterUrl,
+      voiceNote: voiceUrl,
     };
 
     let updateData = buildTradeDbPayload(tradeToUpdate, user.id, currentTrade || trade);
@@ -561,46 +895,39 @@ export const dataService = {
     if (afterScreenshotCleared) {
       (updateData as any).after_screenshot = null;
     }
+    if (voiceNoteCleared) {
+      (updateData as any).voice_note = null;
+    }
     
-    // Recursive update function to handle missing columns
-    const performUpdate = async (data: Partial<DBTrade>): Promise<void> => {
-      const { error } = await supabase.from('trades').update(data).eq('id', trade.id);
+    const performUpdate = async (data: Partial<DBTrade>): Promise<DBTrade> => {
+      const { data: updatedRow, error } = await supabase
+        .from('trades')
+        .update(data)
+        .eq('id', trade.id)
+        .eq('user_id', user.id)
+        .select('*')
+        .single();
       
       if (error) {
-        if (error.code === '42703' || error.code === 'PGRST204' || ((error as any).status === 400 && error.message.includes('column'))) {
-          const fieldMatch = error.message.match(/column "(.+)"/i) || 
-                             error.message.match(/column (.+) of/i) || 
-                             error.message.match(/'(.+)' column/i);
-          if (fieldMatch && (fieldMatch[1] || fieldMatch[2] || fieldMatch[3])) {
-            const missingField = (fieldMatch[1] || fieldMatch[2] || fieldMatch[3]).replace(/"/g, '').replace(/'/g, '') as keyof DBTrade;
-            console.warn(`Column ${missingField} missing. Retrying without it.`);
-            const { [missingField]: _, ...safeData } = data;
-            return performUpdate(safeData);
-          }
+        const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
+        if (missingField && missingField in data) {
+          console.warn(`Column ${missingField} missing. Retrying without it.`);
+          const { [missingField]: _, ...safeData } = data;
+          return performUpdate(safeData);
         }
         throw error;
       }
+      return updatedRow as DBTrade;
     };
 
-    await performUpdate(updateData);
-
-    const { data: refreshedTrade, error: refreshError } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('id', trade.id)
-      .single();
-
-    if (refreshError) throw refreshError;
-    return mapTradeFromDB(refreshedTrade as DBTrade);
+    const refreshedTrade = await performUpdate(updateData);
+    return mapTradeFromDB(refreshedTrade);
   },
 
   async updateTradeComments(tradeId: string, notes: string | undefined, exitComment: string | undefined): Promise<Trade> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    // Notes are edited frequently and do not require the full trade/image update
-    // workflow. Updating only these columns also prevents an older trade payload
-    // from briefly overwriting the comment in the realtime UI.
     const { data, error } = await supabase
       .from('trades')
       .update({ notes: notes || null, exit_comment: exitComment || null })
@@ -619,30 +946,23 @@ export const dataService = {
 
     const performBatch = async (dataList: { id: string, data: Partial<DBTrade> }[]): Promise<void> => {
       const promises = dataList.map(item => 
-        supabase.from('trades').update(item.data).eq('id', item.id)
+        supabase.from('trades').update(item.data).eq('id', item.id).eq('user_id', user.id)
       );
 
       const results = await Promise.all(promises);
       const failedResult = results.find(r => r.error);
       
       if (failedResult && failedResult.error) {
-        const error = failedResult.error;
-        if (error.code === '42703' || error.code === 'PGRST204' || ((error as any).status === 400 && error.message.includes('column'))) {
-          const fieldMatch = error.message.match(/column "(.+)"/i) || 
-                             error.message.match(/column (.+) of/i) || 
-                             error.message.match(/'(.+)' column/i);
-          if (fieldMatch && (fieldMatch[1] || fieldMatch[2] || fieldMatch[3])) {
-            const missingField = (fieldMatch[1] || fieldMatch[2] || fieldMatch[3]).replace(/"/g, '').replace(/'/g, '') as keyof DBTrade;
-            console.warn(`Batch: Column ${missingField} missing. Stripping and retrying.`);
-            
-            const nextDataList = dataList.map(item => {
-              const { [missingField]: _, ...safeData } = item.data;
-              return { id: item.id, data: safeData };
-            });
-            return performBatch(nextDataList);
-          }
+        const missingField = extractMissingColumnName(failedResult.error) as keyof DBTrade | null;
+        if (missingField) {
+          console.warn(`Batch: Column ${missingField} missing. Stripping and retrying.`);
+          const nextDataList = dataList.map(item => {
+            const { [missingField]: _, ...safeData } = item.data;
+            return { id: item.id, data: safeData };
+          });
+          return performBatch(nextDataList);
         }
-        throw error;
+        throw failedResult.error;
       }
     };
 
@@ -658,19 +978,27 @@ export const dataService = {
   },
 
   async deleteTrades(tradeIds: string[]) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
     const { error } = await supabase
       .from('trades')
       .update({ deleted_at: new Date().toISOString() })
-      .in('id', tradeIds);
+      .in('id', tradeIds)
+      .eq('user_id', user.id);
 
     if (error) throw error;
   },
 
   async restoreTrades(tradeIds: string[]) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
     const { error } = await supabase
       .from('trades')
       .update({ deleted_at: null })
-      .in('id', tradeIds);
+      .in('id', tradeIds)
+      .eq('user_id', user.id);
 
     if (error) throw error;
   },
@@ -679,7 +1007,6 @@ export const dataService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    // Fetch all active manual trades (no ticket_id)
     const { data: manualTrades, error } = await supabase
       .from('trades')
       .select('id, pair, date, entry_price, direction, lots')
@@ -694,7 +1021,6 @@ export const dataService = {
     const duplicateIds: string[] = [];
 
     manualTrades.forEach(trade => {
-      // Create a unique key for the trade properties
       const key = `${trade.date}-${trade.pair}-${trade.direction}-${trade.entry_price}-${trade.lots}`;
       if (seen.has(key)) {
         duplicateIds.push(trade.id);
@@ -735,7 +1061,6 @@ export const dataService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    // Upload image if it is base64
     const imageUrl = await uploadImage(user.id, note.image, 'after');
 
     const insertData = {
@@ -764,17 +1089,11 @@ export const dataService = {
 
       if (error) {
         console.error("Supabase addNote error:", error);
-        // Handle missing columns by stripping them and retrying
-        if (error.code === '42703' || error.code === 'PGRST204' || ((error as any).status === 400 && error.message.includes('column'))) {
-          const fieldMatch = error.message.match(/column "(.+)"/i) || 
-                             error.message.match(/column (.+) of/i) || 
-                             error.message.match(/'(.+)' column/i);
-          if (fieldMatch && (fieldMatch[1] || fieldMatch[2] || fieldMatch[3])) {
-            const missingField = (fieldMatch[1] || fieldMatch[2] || fieldMatch[3]).replace(/"/g, '').replace(/'/g, '') as string;
-            console.warn(`Column ${missingField} missing in notes table. Retrying insert without it.`);
-            const { [missingField]: _, ...safeData } = data;
-            return performInsert(safeData);
-          }
+        const missingField = extractMissingColumnName(error);
+        if (missingField && missingField in data) {
+          console.warn(`Column ${missingField} missing in notes table. Retrying insert without it.`);
+          const { [missingField]: _, ...safeData } = data;
+          return performInsert(safeData);
         }
         throw error;
       }
@@ -783,7 +1102,6 @@ export const dataService = {
 
     const data = await performInsert(insertData);
     
-    // Fully map the returned note
     return {
       ...data,
       isPinned: data.is_pinned,
@@ -841,7 +1159,6 @@ export const dataService = {
 
       if (error) {
         console.error("Supabase updateNote error:", error);
-        // Handle missing columns by stripping them and retrying
         if (error.code === '42703' || error.code === 'PGRST204' || ((error as any).status === 400 && error.message.includes('column'))) {
           const fieldMatch = error.message.match(/column "(.+)"/i) || 
                              error.message.match(/column (.+) of/i) || 
@@ -920,7 +1237,6 @@ export const dataService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    // Check for potential duplicate goals (same title, type, target)
     const { data: existing } = await supabase
       .from('goals')
       .select('id')
@@ -1029,7 +1345,6 @@ export const dataService = {
 
     if (error) {
       console.error('Error updating profile:', error);
-      // Fallback for missing columns (common in beta migrations)
       if (error.code === '42703' || error.code === 'PGRST204' || ((error as any).status === 400 && error.message.includes('column'))) {
         const fieldMatch = error.message.match(/column "(.+)"/i) || 
                            error.message.match(/column (.+) of/i) || 
@@ -1194,10 +1509,16 @@ export const dataService = {
     if (error) throw error;
   },
 
-  // --- Cash Transactions ---
+  // --- Cash Transactions -----------------------------------------------------
+  // Design guarantees:
+  //  1. A transaction the user deletes can never reappear (tombstones).
+  //  2. A transaction the user adds is never silently lost — if the backend
+  //     write fails it lands in an unsynced queue that survives reloads and
+  //     auto-flushes once the backend is reachable again.
+  //  3. Backend outages degrade gracefully and RECOVER automatically.
   async getCashTransactions(userId: string) {
-    if (cashTransactionsBackendUnavailable) {
-      return readCashTransactionCache(userId);
+    if (!cashBackendAvailable()) {
+      return applyTombstoneFilter(userId, mergeUnsynced(userId, readCashTransactionCache(userId)));
     }
 
     const { data, error } = await supabase
@@ -1208,125 +1529,167 @@ export const dataService = {
 
     if (error) {
       if (isMissingCashTransactionsTableError(error)) {
-        cashTransactionsBackendUnavailable = true;
+        cashTransactionsBackendUnavailableAt = Date.now();
         notifyCashTransactionsAvailability(false);
-        return readCashTransactionCache(userId);
+        return applyTombstoneFilter(userId, mergeUnsynced(userId, readCashTransactionCache(userId)));
       }
-      throw error;
+      // Transient failure (network/RLS/etc.): serve cache + unsynced without
+      // tripping the kill-switch, so a flaky request can't blank the feature.
+      console.warn('getCashTransactions failed; serving local data:', error?.message || error);
+      return applyTombstoneFilter(userId, mergeUnsynced(userId, readCashTransactionCache(userId)));
     }
 
-    const mapped = (data || []).map(mapCashTransactionFromDB);
-    writeCashTransactionCache(userId, mapped);
-    return mapped;
+    cashTransactionsBackendUnavailableAt = 0;
+    notifyCashTransactionsAvailability(true);
+
+    // Opportunistically push anything queued while offline.
+    try { await flushUnsyncedCashTransactions(userId); } catch { /* retry later */ }
+
+    const mapped = applyTombstoneFilter(userId, (data || []).map(mapCashTransactionFromDB));
+    // Merge in any still-unsynced rows so they stay visible until flushed.
+    const mergedList = mergeUnsynced(userId, mapped);
+    writeCashTransactionCache(userId, mergedList);
+    return mergedList;
   },
 
   async addCashTransaction(transaction: CashTransaction) {
-    const { data: { user } } = await supabase.auth.getUser();
+    let user: any = null;
+    try {
+      const authResult = await supabase.auth.getUser();
+      user = authResult?.data?.user;
+    } catch { /* handled below */ }
     if (!user) throw new Error('User not authenticated');
 
-    const dbTransaction = mapCashTransactionToDB(transaction, user.id);
+    const saved: CashTransaction = {
+      ...transaction,
+      id: transaction.id && !transaction.id.startsWith('local-') ? transaction.id : crypto.randomUUID(),
+      amount: normalizeCashTransactionAmount(transaction),
+    };
 
-    if (cashTransactionsBackendUnavailable) {
-      const saved = { ...transaction, id: transaction.id || crypto.randomUUID(), amount: normalizeCashTransactionAmount(transaction) };
+    if (!cashBackendAvailable()) {
       upsertCashTransactionCache(user.id, saved);
+      markUnsynced(user.id, saved);
       notifyCashTransactionsChanged(user.id);
       return saved;
     }
 
-    const { data, error } = await supabase
-      .from('cash_transactions')
-      .insert(dbTransaction)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('cash_transactions')
+        .insert(mapCashTransactionToDB(saved, user.id))
+        .select()
+        .single();
 
-    if (error) {
+      if (error) throw error;
+
+      const mapped = mapCashTransactionFromDB(data);
+      clearUnsynced(user.id, saved.id);
+      upsertCashTransactionCache(user.id, mapped);
+      pruneTombstoneBySignature(user.id, mapped);
+      notifyCashTransactionsChanged(user.id);
+      return mapped;
+    } catch (error) {
       if (isMissingCashTransactionsTableError(error)) {
-        cashTransactionsBackendUnavailable = true;
+        cashTransactionsBackendUnavailableAt = Date.now();
         notifyCashTransactionsAvailability(false);
-        const saved = { ...transaction, id: transaction.id || crypto.randomUUID(), amount: normalizeCashTransactionAmount(transaction) };
-        upsertCashTransactionCache(user.id, saved);
-        notifyCashTransactionsChanged(user.id);
-        return saved;
+      } else {
+        console.warn('addCashTransaction backend write failed; queued locally:', error?.message || error);
       }
-      throw error;
+      // NEVER lose the row: keep it visible via cache + unsynced queue.
+      upsertCashTransactionCache(user.id, saved);
+      markUnsynced(user.id, saved);
+      notifyCashTransactionsChanged(user.id);
+      // Re-throw ONLY as a typed marker the UI understands (row stays visible,
+      // marked as pending sync).
+      (saved as any).__unsynced = true;
+      return saved;
     }
-
-    const mapped = mapCashTransactionFromDB(data);
-    upsertCashTransactionCache(user.id, mapped);
-    notifyCashTransactionsChanged(user.id);
-    return mapped;
   },
 
   async updateCashTransaction(transaction: CashTransaction) {
-    const { data: { user } } = await supabase.auth.getUser();
+    let user: any = null;
+    try {
+      const authResult = await supabase.auth.getUser();
+      user = authResult?.data?.user;
+    } catch { /* handled below */ }
     if (!user) throw new Error('User not authenticated');
 
-    if (cashTransactionsBackendUnavailable) {
-      const updated = { ...transaction, amount: normalizeCashTransactionAmount(transaction) };
-      upsertCashTransactionCache(user.id, updated);
-      notifyCashTransactionsChanged(user.id);
-      return;
-    }
+    const updated: CashTransaction = { ...transaction, amount: normalizeCashTransactionAmount(transaction) };
 
-    const query = supabase
-      .from('cash_transactions')
-      .update({
-        type: transaction.type,
-        amount: normalizeCashTransactionAmount(transaction),
-        date: transaction.date,
-        description: transaction.description,
-      })
-      .eq('id', transaction.id)
-      .eq('user_id', user.id);
+    if (cashBackendAvailable()) {
+      try {
+        const { error } = await supabase
+          .from('cash_transactions')
+          .update({
+            type: updated.type,
+            amount: updated.amount,
+            date: updated.date,
+            description: updated.description,
+          })
+          .eq('id', updated.id)
+          .eq('user_id', user.id);
 
-    const { error } = await query;
-
-    if (error) {
-      if (isMissingCashTransactionsTableError(error)) {
-        cashTransactionsBackendUnavailable = true;
-        notifyCashTransactionsAvailability(false);
-        const updated = { ...transaction, amount: normalizeCashTransactionAmount(transaction) };
+        if (error) throw error;
+        clearUnsynced(user.id, updated.id);
         upsertCashTransactionCache(user.id, updated);
         notifyCashTransactionsChanged(user.id);
         return;
+      } catch (error) {
+        if (isMissingCashTransactionsTableError(error)) {
+          cashTransactionsBackendUnavailableAt = Date.now();
+          notifyCashTransactionsAvailability(false);
+        } else {
+          console.warn('updateCashTransaction backend write failed; kept locally:', error?.message || error);
+        }
       }
-      throw error;
     }
-
-    const updated = { ...transaction, amount: normalizeCashTransactionAmount(transaction) };
     upsertCashTransactionCache(user.id, updated);
+    markUnsynced(user.id, updated);
     notifyCashTransactionsChanged(user.id);
   },
 
   async deleteCashTransaction(transactionId: string) {
-    const { data: { user } } = await supabase.auth.getUser();
+    let user: any = null;
+    try {
+      const authResult = await supabase.auth.getUser();
+      user = authResult?.data?.user;
+    } catch { /* handled below */ }
     if (!user) throw new Error('User not authenticated');
 
-    if (cashTransactionsBackendUnavailable) {
-      removeCashTransactionFromCache(user.id, transactionId);
+    // Tombstone FIRST so no refetch race can resurrect the row mid-delete.
+    const cached = readCashTransactionCache(user.id).find(t => t.id === transactionId);
+    if (cached) writeTombstone(user.id, cached);
+
+    removeCashTransactionFromCache(user.id, transactionId);
+    clearUnsynced(user.id, transactionId);
+
+    if (transactionId.startsWith('local-')) {
       notifyCashTransactionsChanged(user.id);
       return;
     }
 
-    const { error } = await supabase
-      .from('cash_transactions')
-      .delete()
-      .eq('id', transactionId)
-      .eq('user_id', user.id);
+    if (cashBackendAvailable()) {
+      try {
+        const { error } = await supabase
+          .from('cash_transactions')
+          .delete()
+          .eq('id', transactionId)
+          .eq('user_id', user.id);
 
-    if (error) {
-      if (isMissingCashTransactionsTableError(error)) {
-        cashTransactionsBackendUnavailable = true;
-        notifyCashTransactionsAvailability(false);
-        removeCashTransactionFromCache(user.id, transactionId);
+        if (error) throw error;
+        if (cached) pruneTombstone(user.id, transactionId, cashTransactionSignature(cached));
         notifyCashTransactionsChanged(user.id);
         return;
+      } catch (error) {
+        console.warn('deleteCashTransaction failed; tombstone keeps it hidden:', error?.message || error);
+        if (isMissingCashTransactionsTableError(error)) {
+          cashTransactionsBackendUnavailableAt = Date.now();
+          notifyCashTransactionsAvailability(false);
+        }
       }
-      throw error;
     }
-
-    removeCashTransactionFromCache(user.id, transactionId);
+    // Keep the tombstone — the row stays hidden even though the server delete
+    // didn't confirm. It will be pruned once a fetch proves it's gone.
     notifyCashTransactionsChanged(user.id);
   },
 };
-

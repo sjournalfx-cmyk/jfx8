@@ -12,6 +12,7 @@ import { getSASTDateTime, getDefaultTimezone } from '../lib/timeUtils';
 import { sanitizeRichTextHtml } from '../lib/htmlSanitizer';
 import { JournalSkeleton, EmptyState } from './ui/Skeleton';
 import TradeChartView from './TradeChartView';
+import { AudioNote, isAudioSource } from './ui/AudioNote';
 
 interface JournalProps {
   isDarkMode: boolean;
@@ -70,6 +71,10 @@ const safePnL = (value: unknown): number => {
     const n = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(n) ? n : 0;
 };
+
+const PLATFORM_TAGS = ['cTrader', 'MT5', 'Others'];
+
+const getStrategyTags = (trade: Trade) => (trade.tags || []).filter(t => !PLATFORM_TAGS.includes(t));
 
 const buildSetupName = (trades: Trade[]) => {
     const uniquePairs = Array.from(new Set(trades.map(trade => trade.pair).filter(Boolean)));
@@ -669,10 +674,206 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
     const saveStrategyEdit = (trade: Trade) => {
         if (!editingStrategy || editingStrategy.tradeId !== trade.id) return;
         const trimmed = editingStrategy.value.trim();
-        const newTags = trimmed ? trimmed.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const newStrategyTags = trimmed ? trimmed.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const platformTags = (trade.tags || []).filter(t => PLATFORM_TAGS.includes(t));
         onUpdateTrade({
             ...trade,
-            tags: newTags
+            tags: [...newStrategyTags, ...platformTags]
+        });
+        setEditingStrategy(null);
+    };
+
+    const saveRatingEdit = (trade: Trade, directValue?: number) => {
+        const val = directValue !== undefined 
+            ? directValue 
+            : (editingRating?.hoverValue !== undefined ? editingRating.hoverValue : (editingRating?.value ?? trade.rating ?? 0));
+        
+        onUpdateTrade({
+            ...trade,
+            rating: val
+        });
+            // Date range filter
+            const matchesDateRange = !dateRange || (
+                t.date >= dateRange.start && t.date <= dateRange.end
+            );
+            
+            return matchesSearch && matchesDateRange;
+        });
+    }, [trades, searchTerm, dateRange]);
+
+    const groupedTrades = useMemo(() => {
+        const groups: Record<string, GroupedTrade> = {};
+        const result: GroupedTrade[] = [];
+        const standaloneTradeCounts: Record<string, number> = {};
+
+        // Add pending trades at the very top
+        offlineQueue.forEach((trade, index) => {
+            result.push({
+                type: 'pending',
+                trades: [trade],
+                date: trade.date,
+                id: `pending-${trade.ticketId || trade.id || index}`
+            });
+        });
+
+        filteredTrades.forEach(trade => {
+            if (trade.setupId) {
+                if (!groups[trade.setupId]) {
+                    groups[trade.setupId] = {
+                        type: 'setup',
+                        setupId: trade.setupId,
+                        setupName: trade.setupName,
+                        trades: [],
+                        date: trade.date,
+                        id: `setup-${trade.setupId}`
+                    };
+                    result.push(groups[trade.setupId]);
+                }
+                if (!groups[trade.setupId].setupName && trade.setupName) {
+                    groups[trade.setupId].setupName = trade.setupName;
+                }
+                groups[trade.setupId].trades.push(trade);
+                if (new Date(trade.date) > new Date(groups[trade.setupId].date)) {
+                    groups[trade.setupId].date = trade.date;
+                }
+            } else {
+                const seenCount = standaloneTradeCounts[trade.id] || 0;
+                standaloneTradeCounts[trade.id] = seenCount + 1;
+                result.push({
+                    type: 'standalone',
+                    trades: [trade],
+                    date: trade.date,
+                    id: `standalone-${trade.id}-${seenCount}`
+                });
+            }
+        });
+
+        return result.sort((a, b) => {
+            const dateTimeA = new Date(`${a.date}T${a.trades[0].time}`);
+            const dateTimeB = new Date(`${b.date}T${b.trades[0].time}`);
+            return dateTimeB.getTime() - dateTimeA.getTime();
+        });
+    }, [filteredTrades, offlineQueue]);
+
+    const toggleExpand = (id: string) => { setExpandedTradeId(expandedTradeId === id ? null : id); };
+    const toggleSetupExpand = (id: string) => {
+        if (expandedSetupIds.includes(id)) {
+            setExpandedSetupIds(prev => prev.filter(sid => sid !== id));
+        } else {
+            setExpandedSetupIds(prev => [...prev, id]);
+        }
+    };
+
+    const handleSelectAll = () => { 
+        const allTradeIds = filteredTrades.map(t => t.id);
+        if (selectedIds.length === allTradeIds.length) setSelectedIds([]); 
+        else setSelectedIds(allTradeIds); 
+    };
+
+    const handleSelectOne = (id: string) => { if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(item => item !== id)); else setSelectedIds(prev => [...prev, id]); };
+    const handleSelectSetup = (setupId: string, tradeIds: string[]) => {
+        const allSelected = tradeIds.every(id => selectedIds.includes(id));
+        if (allSelected) {
+            setSelectedIds(prev => prev.filter(id => !tradeIds.includes(id)));
+        } else {
+            setSelectedIds(prev => Array.from(new Set([...prev, ...tradeIds])));
+        }
+    };
+
+    const handleBulkDelete = () => { if (selectedIds.length === 0) return; onDeleteTrades(selectedIds); setSelectedIds([]); };
+
+    const handleLinkSelected = async () => {
+        if (selectedIds.length < 2) return;
+
+        const cleanSetupName = draftSetupName.trim() || buildSetupName(selectedTrades);
+        const setupId = buildSetupId();
+        const tradesToUpdate = selectedTrades
+            .filter(t => selectedIds.includes(t.id))
+            .map(t => ({
+                ...t,
+                setupId,
+                setupName: cleanSetupName
+            }));
+
+        const updated = await onBatchUpdateTrades(tradesToUpdate);
+        if (updated) {
+            setSelectedIds([]);
+            setIsLinkModalOpen(false);
+            setDraftSetupName('');
+        }
+    };
+
+    const handleDetachSelected = async () => {
+        if (selectedIds.length === 0) return;
+        const tradesToUpdate = selectedTrades
+            .filter(t => selectedIds.includes(t.id))
+            .map(t => ({
+                ...t,
+                setupId: undefined,
+                setupName: undefined
+            }));
+
+        const updated = await onBatchUpdateTrades(tradesToUpdate);
+        if (updated) {
+            setSelectedIds([]);
+        }
+    };
+
+    const handleBreakCluster = async (setupId: string) => {
+        const tradesToUpdate = trades
+            .filter(t => t.setupId === setupId)
+            .map(t => ({
+                ...t,
+                setupId: undefined,
+                setupName: undefined
+            }));
+
+        const updated = await onBatchUpdateTrades(tradesToUpdate);
+        if (updated) {
+            setExpandedSetupIds(prev => prev.filter(id => id !== setupId));
+        }
+    };
+
+    const handleUpload = (trade: Trade, type: 'before' | 'after', e: React.ChangeEvent<HTMLInputElement>) => { if (!e.target.files || !e.target.files[0]) return; const file = e.target.files[0]; const reader = new FileReader(); reader.onloadend = () => { onUpdateTrade({ ...trade, [type === 'before' ? 'beforeScreenshot' : 'afterScreenshot']: reader.result as string }); }; reader.readAsDataURL(file); };
+    const handleDeleteImage = (trade: Trade, type: 'before' | 'after') => {
+        onUpdateTrade({
+            ...trade,
+            [type === 'before' ? 'beforeScreenshot' : 'afterScreenshot']: undefined
+        });
+    };
+
+    const [previewImage, setPreviewImage] = useState<{ url: string, title: string } | null>(null);
+    // Track per-trade canvas mode: 'chart' (default) or 'screenshots'
+    const [canvasMode, setCanvasMode] = useState<Record<string, 'chart' | 'screenshots'>>({});
+    const [editingComment, setEditingComment] = useState<{ tradeId: string; field: 'notes' | 'exitComment'; value: string } | null>(null);
+    const [editingStrategy, setEditingStrategy] = useState<{ tradeId: string; value: string } | null>(null);
+    const [editingRating, setEditingRating] = useState<{ tradeId: string; value: number; hoverValue?: number } | null>(null);
+
+    const beginCommentEdit = (trade: Trade, field: 'notes' | 'exitComment') => {
+        setEditingComment({
+            tradeId: trade.id,
+            field,
+            value: field === 'notes' ? (trade.notes || '') : (trade.exitComment || '')
+        });
+    };
+
+    const saveCommentEdit = (trade: Trade) => {
+        if (!editingComment || editingComment.tradeId !== trade.id) return;
+        onUpdateTrade({
+            ...trade,
+            [editingComment.field]: editingComment.value
+        });
+        setEditingComment(null);
+    };
+
+    const saveStrategyEdit = (trade: Trade) => {
+        if (!editingStrategy || editingStrategy.tradeId !== trade.id) return;
+        const trimmed = editingStrategy.value.trim();
+        const newStrategyTags = trimmed ? trimmed.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const platformTags = (trade.tags || []).filter(t => PLATFORM_TAGS.includes(t));
+        onUpdateTrade({
+            ...trade,
+            tags: [...newStrategyTags, ...platformTags]
         });
         setEditingStrategy(null);
     };
@@ -763,7 +964,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     <div className="flex justify-between text-[10px]"><span className="opacity-50 uppercase font-bold">Closed</span><span className="font-mono opacity-80">{new Date(trade.closeTime).toLocaleString('en-ZA', { timeZone: getDefaultTimezone() })}</span></div>
                                 )}
                                 <div className="flex justify-between"><span className="opacity-50">Volume</span><span className="font-bold">{trade.lots} Lots</span></div>
-                                <div className="flex justify-between"><span className="opacity-50">R:R Ratio</span><span className="font-bold text-indigo-500">1 : {trade.rr}</span></div>
+                                <div className="flex justify-between"><span className="opacity-50">R:R Ratio</span><span className="font-bold text-indigo-500">{trade.rr > 0 ? `1 : ${trade.rr}` : '—'}</span></div>
                             </div>
                         </div>
                         <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-black/30 border-zinc-800' : 'bg-slate-50/50 border-slate-200'}`}>
@@ -780,9 +981,13 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 <Mic size={12} className="opacity-40" />
                             </div>
                             {trade.voiceNote ? (
-                                <p className="text-[11px] leading-relaxed whitespace-pre-wrap max-h-24 overflow-auto pr-1">
-                                    {trade.voiceNote}
-                                </p>
+                                isAudioSource(trade.voiceNote) ? (
+                                    <AudioNote src={trade.voiceNote} className="w-full h-8" />
+                                ) : (
+                                    <p className="text-[11px] leading-relaxed whitespace-pre-wrap max-h-24 overflow-auto pr-1">
+                                        {trade.voiceNote}
+                                    </p>
+                                )
                             ) : (
                                 <div className="flex items-center gap-2 opacity-40 text-[10px] font-bold uppercase tracking-widest">
                                     <Mic size={11} />
@@ -939,9 +1144,13 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                             {trade.voiceNote && (
                                 <div className="mt-2 pt-2 border-t border-dashed border-current/10 shrink-0">
                                     <h5 className="text-[9px] font-black uppercase tracking-widest opacity-40 mb-1">Voice Note</h5>
-                                    <p className="text-xs leading-relaxed whitespace-pre-wrap opacity-90">
-                                        {trade.voiceNote}
-                                    </p>
+                                    {trade.voiceNote.startsWith('data:audio') ? (
+                                    <AudioNote src={trade.voiceNote} className="w-full h-8" />
+                                    ) : (
+                                        <p className="text-xs leading-relaxed whitespace-pre-wrap opacity-90">
+                                            {trade.voiceNote}
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1106,13 +1315,13 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                 >
                     <span 
                         className={`text-xs font-medium truncate ${
-                            (trade.tags && trade.tags.length > 0) 
+                            getStrategyTags(trade).length > 0 
                                 ? (isDarkMode ? 'text-zinc-300' : 'text-slate-700') 
                                 : 'opacity-40 italic'
                         }`}
-                        title={trade.tags?.join(', ')}
+                        title={getStrategyTags(trade).join(', ')}
                     >
-                        {trade.tags && trade.tags.length > 0 ? trade.tags.join(', ') : 'No Strategy'}
+                        {getStrategyTags(trade).length > 0 ? getStrategyTags(trade).join(', ') : 'No Strategy'}
                     </span>
                     <button
                         type="button"
@@ -1120,7 +1329,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                         onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            setEditingStrategy({ tradeId: trade.id, value: trade.tags?.join(', ') || '' });
+                            setEditingStrategy({ tradeId: trade.id, value: getStrategyTags(trade).join(', ') });
                         }}
                         className={`p-1 rounded opacity-0 group-hover/strategy:opacity-100 transition-opacity shrink-0 ${
                             isDarkMode ? 'text-zinc-400 hover:text-zinc-200 hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'

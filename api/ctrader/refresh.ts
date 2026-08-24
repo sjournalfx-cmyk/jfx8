@@ -55,8 +55,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!tokenRes.ok) {
-      const errText = await tokenRes.text();
-      console.error('cTrader refresh failed:', tokenRes.status, errText);
+      // Log the status code only — upstream response bodies can contain
+      // sensitive fragments and must not end up in server logs.
+      console.error('cTrader refresh failed:', tokenRes.status);
       res.status(502).json({
         error: 'Token refresh failed',
         status: tokenRes.status,

@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCorsHeaders } from '../_lib/cors';
+import { requireUser } from '../_lib/auth';
+import { rateLimit } from '../_lib/rateLimit';
 
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
 
@@ -54,6 +56,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  // Require an authenticated Supabase user so this paid proxy cannot be
+  // abused anonymously — CORS restricts browsers only, not curl/scripts.
+  const auth = await requireUser(req.headers);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  // Per-user rate limit (FMP free tier allows ~250 req/day).
+  const rl = rateLimit(`fmp:${auth.userId}`, 30, 60_000);
+  if (!rl.allowed) {
+    res.setHeader('Retry-After', String(Math.ceil((rl.retryAfterMs ?? 0) / 1000)));
+    res.status(429).json({ error: 'Rate limit exceeded. Please slow down and try again in a moment.' });
     return;
   }
 

@@ -121,7 +121,7 @@ const getColor = (pnl: number) => {
             <div className={`py-4 px-0 sm:p-8 rounded-none sm:rounded-[32px] border flex flex-col items-center min-h-[400px] h-full bg-[#000000] border-zinc-800 shadow-2xl`}>
                 <div className="flex items-center gap-3 mb-4">
                     <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-100'} text-emerald-500`}><LayoutGrid size={20} /></div>
-                    <h3 className="text-xl font-bold tracking-tight">Pair Distribution (Treemap)</h3>
+                    <h3 className="text-xl font-bold tracking-tight">Pair Distribution</h3>
                     <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
                 </div>
                 <div className="flex-1 flex items-center justify-center text-xs opacity-40 w-full h-full">No trade data</div>
@@ -133,7 +133,7 @@ const getColor = (pnl: number) => {
         <div className={`py-4 px-0 sm:p-8 rounded-none sm:rounded-[32px] border flex flex-col min-h-[400px] h-full bg-[#000000] border-zinc-800 shadow-2xl`}>
             <div className="flex items-center gap-3 mb-4">
                 <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-100'} text-emerald-500`}><LayoutGrid size={20} /></div>
-                <h3 className="text-xl font-bold tracking-tight">Pair Distribution (Treemap)</h3>
+                <h3 className="text-xl font-bold tracking-tight">Pair Distribution</h3>
                 <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
             </div>
             <div className="flex-1 flex flex-col w-full">
