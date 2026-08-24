@@ -490,13 +490,43 @@ export const mapGoalFromDB = (dbGoal: DBGoal): Goal => ({
   manualEntries: dbGoal.manual_entries || []
 });
 
+const sourceToBlob = async (source: string): Promise<Blob | null> => {
+  if (source.startsWith('data:')) {
+    try {
+      const commaIndex = source.indexOf(',');
+      if (commaIndex === -1) return null;
+      const meta = source.slice(0, commaIndex);
+      const mimeMatch = meta.match(/^data:([^;,]+)/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const base64 = source.slice(commaIndex + 1);
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Uint8Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      return new Blob([byteNumbers], { type: mimeType });
+    } catch (e) {
+      console.error('Error decoding base64 data URL:', e);
+      return null;
+    }
+  }
+
+  try {
+    const response = await fetch(source);
+    return await response.blob();
+  } catch (e) {
+    console.error('Error fetching source blob:', e);
+    return null;
+  }
+};
+
 const uploadImage = async (userId: string, imageSource: string | undefined, type: 'before' | 'after'): Promise<string | undefined> => {
   if (!imageSource) return undefined;
   if (imageSource.startsWith('http')) return imageSource;
 
   try {
-    const response = await fetch(imageSource);
-    const blob = await response.blob();
+    const blob = await sourceToBlob(imageSource);
+    if (!blob || blob.size === 0) return undefined;
 
     if (blob.size > 1024 * 1024) {
       console.warn(`Image ${type} is too large (${(blob.size / 1024).toFixed(1)}KB). Consider compressing.`);
@@ -508,7 +538,7 @@ const uploadImage = async (userId: string, imageSource: string | undefined, type
     const { data, error } = await supabase.storage
       .from('trade-images')
       .upload(fileName, blob, {
-        contentType: blob.type,
+        contentType: blob.type || 'image/png',
         upsert: true
       });
 
@@ -600,9 +630,8 @@ const uploadVoiceNote = async (userId: string, voiceSource: string | undefined):
   }
 
   try {
-    const response = await fetch(voiceSource);
-    const blob = await response.blob();
-    if (blob.size === 0) return undefined;
+    const blob = await sourceToBlob(voiceSource);
+    if (!blob || blob.size === 0) return undefined;
 
     let fileExt = 'webm';
     if (blob.type.includes('mp4') || blob.type.includes('m4a')) fileExt = 'm4a';
