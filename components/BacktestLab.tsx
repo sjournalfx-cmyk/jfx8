@@ -803,15 +803,39 @@ setAllData(validData);
                 });
                 return;
             }
-            addToast({
-                type: 'error',
-                title: 'MT5 Sync Failed',
-                message: 'MT5 Bridge is offline. Start the JournalFX Bridge app, or switch to the cTrader source in the top bar to use historical candles instead.'
-            });
+            // Shared candle store fallback: when MT5 can't serve the chart
+            // (bridge offline) and nothing is cached locally, try the
+            // server-harvested store before giving up. This lets users who
+            // never connected cTrader browse charts seamlessly — and silently
+            // switches the active source to cTrader for subsequent loads.
+            const sharedFull = seq === activeFetchSeqRef.current
+                ? await fetchSharedCandles(activeSymbol, activeTF)
+                : null;
+            if (seq !== activeFetchSeqRef.current) return;
+            if (sharedFull && sharedFull.length > 0) {
+                saveToLocalCache(sharedFull, activeSymbol, activeTF);
+                setCurrentIdx(Math.min(sharedFull.length - 1, 50));
+                setAllData(sharedFull);
+                setDataSource('ctrader');
+                setActiveSource('ctrader');
+                setShowWelcome(false);
+                window.setTimeout(() => backfillCtraderTimeframes(activeSymbol), 1200);
+                addToast({
+                    type: 'info',
+                    title: 'Loaded from Shared History',
+                    message: `MT5 unavailable — loaded ${sharedFull.length} bars for ${activeSymbol} (${activeTF}) from the shared candle history.`
+                });
+            } else {
+                addToast({
+                    type: 'error',
+                    title: 'MT5 Sync Failed',
+                    message: 'MT5 Bridge is offline. Start the JournalFX Bridge app to sync live data.'
+                });
+            }
         } finally {
             if (seq === activeFetchSeqRef.current) endChartLoading();
         }
-    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe, setActiveSource, allData, currentIndex, beginChartLoading, endChartLoading]);
+    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe, setActiveSource, allData, currentIndex, beginChartLoading, endChartLoading, backfillCtraderTimeframes]);
 
     const handleFetchCtraderData = useCallback(async (
         overrideSymbol?: string, 
