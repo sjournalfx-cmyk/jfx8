@@ -6,6 +6,12 @@ import { createRequire } from 'module';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
+// Static ESM imports so the dev middleware never touches Vite's module runner
+// (dynamic import() inside middleware throws "Vite module runner has been closed").
+const harvestNet = await import('./api/_lib/harvesterNet.mjs');
+const harvestCore = await import('./api/_lib/harvestCore.mjs');
+const supabaseJs = await import('@supabase/supabase-js');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const _require = createRequire(import.meta.url);
@@ -611,11 +617,9 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         res.setHeader('Content-Type', 'application/json');
         if (req.method !== 'POST') { res.statusCode = 405; res.end(JSON.stringify({ error: 'Method not allowed' })); return; }
         try {
-          const { createServiceSession, listSymbols, fetchTrendbarsServer, closeSession } =
-            await import('./api/_lib/harvesterNet.mjs');
-          const { mergeBars, capToNewest } = await import('./api/_lib/harvestCore.mjs');
-          const { createClient } = await import('@supabase/supabase-js');
-
+          const { createServiceSession, listSymbols, fetchTrendbarsServer, closeSession } = harvestNet;
+          const { mergeBars, capToNewest } = harvestCore;
+          const { createClient } = supabaseJs;
           const url = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
           const key = readCtraderEnv('SUPABASE_SERVICE_ROLE_KEY') || '';
           if (!url || !key) { res.statusCode = 503; res.end(JSON.stringify({ error: 'Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local' })); return; }
@@ -702,7 +706,7 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           const since = Number(requestUrl.searchParams.get('since') || 0);
           if (!symbol || !timeframe) { res.statusCode = 400; res.end(JSON.stringify({ error: 'symbol and timeframe are required' })); return; }
 
-          const { createClient } = await import('@supabase/supabase-js');
+          const { createClient } = supabaseJs;
           const url = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
           const key = readCtraderEnv('SUPABASE_SERVICE_ROLE_KEY') || process.env.VITE_SUPABASE_ANON_KEY || '';
           if (!url || !key) { res.statusCode = 503; res.end(JSON.stringify({ error: 'Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local' })); return; }
