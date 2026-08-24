@@ -602,6 +602,130 @@ const mt5PythonPlugin = () => {
 
 const readCtraderEnvScoped = (key) => readCtraderEnv(key);
 
+      // -----------------------------------------------------------------------
+      // /api/candles — shared candle store (dev middleware mirroring
+      // api/candles/index.ts). Reads Supabase directly with the service role
+      // key from .env.local. No auth: public read, same as production RLS.
+      // -----------------------------------------------------------------------
+      server.middlewares.use('/api/candles/harvest', async (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (req.method !== 'POST') { res.statusCode = 405; res.end(JSON.stringify({ error: 'Method not allowed' })); return; }
+        try {
+          const { createServiceSession, listSymbols, fetchTrendbarsServer, closeSession } =
+            await import('./api/_lib/harvesterNet.mjs');
+          const { mergeBars, capToNewest } = await import('./api/_lib/harvestCore.mjs');
+          const { createClient } = await import('@supabase/supabase-js');
+
+          const url = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
+          const key = readCtraderEnv('SUPABASE_SERVICE_ROLE_KEY') || '';
+          if (!url || !key) { res.statusCode = 503; res.end(JSON.stringify({ error: 'Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local' })); return; }
+          const supabase = createClient(url, key);
+
+          // Service-account credentials come from .env.local via readCtraderEnv
+          // (vite middleware runs outside Vercel's process.env injection).
+          const session = await createServiceSession({
+            refreshToken: readCtraderEnv('CTRADER_SERVICE_REFRESH_TOKEN') || '',
+            accountId: Number(readCtraderEnv('CTRADER_SERVICE_ACCOUNT_ID') || 0),
+            isDemo: readCtraderEnv('CTRADER_SERVICE_IS_DEMO') || 'true',
+            clientId: readCtraderEnv('VITE_CTRADER_CLIENT_ID') || process.env.CTRADER_CLIENT_ID || '',
+            clientSecret: readCtraderEnv('VITE_CTRADER_CLIENT_SECRET') || process.env.CTRADER_CLIENT_SECRET || '',
+          });
+
+          const timeframes = (readCtraderEnv('HARVEST_TIMEFRAMES') || 'M15,H1,H4,D1').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+          const batchSize = Math.max(1, Number(readCtraderEnv('HARVEST_BATCH_SIZE') || 5));
+          const MAX_BARS = 2000;
+
+          let { data: queue } = await supabase.from('harvest_queue')
+            .select('id, symbol, symbol_id, digits, timeframe')
+            .eq('status', 'pending').order('id', { ascending: true }).limit(batchSize);
+
+          if (!queue || queue.length === 0) {
+            const targets = await listSymbols(session);
+            const rows = targets.flatMap(t => timeframes.map(tf => ({ symbol: t.symbolName, symbol_id: t.symbolId, digits: t.digits, timeframe: tf })));
+            if (rows.length > 0) {
+              await supabase.from('harvest_queue').upsert(rows, { onConflict: 'symbol_id,timeframe', ignoreDuplicates: true });
+            }
+            ({ data: queue } = await supabase.from('harvest_queue')
+              .select('id, symbol, symbol_id, digits, timeframe')
+              .eq('status', 'pending').order('id', { ascending: true }).limit(batchSize));
+          }
+
+          if (!queue || queue.length === 0) {
+            closeSession(session);
+            res.end(JSON.stringify({ ok: true, processed: 0, remaining: 0, note: 'queue empty or fully seeded' }));
+            return;
+          }
+
+          let processed = 0;
+          const errors = [];
+          for (const job of queue) {
+            try {
+              const target = { symbolName: job.symbol, symbolId: job.symbol_id, digits: job.digits };
+              const incoming = await fetchTrendbarsServer(session, target, job.timeframe, { count: MAX_BARS });
+              const { data: existingRow } = await supabase.from('candle_series')
+                .select('bars').eq('symbol', job.symbol).eq('timeframe', job.timeframe).maybeSingle();
+              const merged = capToNewest(mergeBars(Array.isArray(existingRow?.bars) ? existingRow.bars : null, incoming), MAX_BARS);
+              const { error: upsertErr } = await supabase.from('candle_series').upsert({
+                symbol: job.symbol, timeframe: job.timeframe, bars: merged,
+                bar_count: merged.length,
+                last_bar_time: merged.length > 0 ? merged[merged.length - 1].time : 0,
+                digits: job.digits, updated_at: new Date().toISOString(),
+              }, { onConflict: 'symbol,timeframe' });
+              if (upsertErr) throw upsertErr;
+              await supabase.from('harvest_queue').update({ status: 'done', updated_at: new Date().toISOString() }).eq('id', job.id);
+              processed++;
+            } catch (err) {
+              errors.push(`${job.symbol}/${job.timeframe}: ${err?.message || err}`);
+              await supabase.from('harvest_queue').update({ status: 'error', updated_at: new Date().toISOString() }).eq('id', job.id);
+              break;
+            }
+          }
+
+          const { count: remaining } = await supabase.from('harvest_queue')
+            .select('id', { count: 'exact', head: true }).eq('status', 'pending');
+
+          closeSession(session);
+          res.end(JSON.stringify({ ok: errors.length === 0, processed, remaining: remaining ?? 0, errors }));
+        } catch (err) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err?.message || String(err) }));
+        }
+      });
+
+      server.middlewares.use('/api/candles', async (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (req.method !== 'GET') { res.statusCode = 405; res.end(JSON.stringify({ error: 'Method not allowed' })); return; }
+        try {
+          const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
+          const symbol = (requestUrl.searchParams.get('symbol') || '').toUpperCase().replace(/[/_]/g, '');
+          const timeframe = (requestUrl.searchParams.get('timeframe') || '').toUpperCase();
+          const since = Number(requestUrl.searchParams.get('since') || 0);
+          if (!symbol || !timeframe) { res.statusCode = 400; res.end(JSON.stringify({ error: 'symbol and timeframe are required' })); return; }
+
+          const { createClient } = await import('@supabase/supabase-js');
+          const url = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
+          const key = readCtraderEnv('SUPABASE_SERVICE_ROLE_KEY') || process.env.VITE_SUPABASE_ANON_KEY || '';
+          if (!url || !key) { res.statusCode = 503; res.end(JSON.stringify({ error: 'Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local' })); return; }
+          const supabase = createClient(url, key);
+
+          const { data, error } = await supabase.from('candle_series')
+            .select('symbol,timeframe,bars,bar_count,last_bar_time,digits,updated_at')
+            .eq('symbol', symbol).eq('timeframe', timeframe).limit(1);
+          if (error) { res.statusCode = 500; res.end(JSON.stringify({ error: error.message })); return; }
+          const row = data?.[0];
+          if (!row) { res.statusCode = 404; res.end(JSON.stringify({ error: 'not_found' })); return; }
+          const bars = Array.isArray(row.bars) ? (since > 0 ? row.bars.filter(b => Number(b?.time) > since) : row.bars) : [];
+          res.setHeader('Cache-Control', 'public, max-age=60');
+          res.end(JSON.stringify({
+            symbol: row.symbol, timeframe: row.timeframe, bar_count: row.bar_count,
+            last_bar_time: row.last_bar_time, digits: row.digits, updated_at: row.updated_at, bars,
+          }));
+        } catch (err) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err?.message || String(err) }));
+        }
+      });
+
       // Redirect cTrader OAuth callback to root so Vite serves the SPA through its normal pipeline
       server.middlewares.use('/api/ctrader/callback', async (req, res) => {
         const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
