@@ -329,25 +329,6 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                 </div>
             )}
 
-            {initialTrade?.ticketId && !isReadOnly && (
-                <div className="px-8 pt-4">
-                    <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                                <Lock size={14} className="text-violet-400" />
-                            </div>
-                            <div>
-                                <p className="text-sm font-semibold text-violet-300">Broker-Locked PnL</p>
-                                <p className="text-xs text-violet-400/70 mt-0.5">Net PnL sourced directly from the broker. Will not be recalculated.</p>
-                            </div>
-                        </div>
-                        <div className={`text-lg font-bold tabular-nums ${(initialTrade.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {(initialTrade.pnl ?? 0) >= 0 ? '+' : ''}{(initialTrade.pnl ?? 0).toFixed(2)}
-                        </div>
-                    </div>
-                </div>
-            )}
-
 
             <div className="flex flex-1 overflow-hidden relative">
                 <div className="flex-1 overflow-y-auto custom-scrollbar">

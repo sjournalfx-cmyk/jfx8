@@ -4,25 +4,26 @@ import {
     Play, Pause, ChevronRight, ChevronLeft, RotateCcw,
     TrendingUp, TrendingDown, XCircle, X,
     Settings, Zap, ArrowLeftToLine, StepForward, ChevronDown, Database,
-    Trash2, Lock, Unlock, Check, Search, Download, FileUp, RefreshCw, Clock, Brain,
-    ZoomIn, ZoomOut, Calendar, List, Star
+    Trash2, Lock, Unlock, Check, Search, Download, FileUp, RefreshCw,
+    ZoomIn, ZoomOut, Calendar, List, Star, Loader2, Monitor
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { DrawingToolbar } from './backtest/DrawingToolbar';
 import { DrawingLayer } from './backtest/DrawingLayer';
 import { Drawing, Point, ToolType } from './backtest/types';
+import { timeToNearestBarIndex } from './backtest/utils';
 import { useMT5Bridge } from '../hooks/useMT5Bridge';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { MT5_BRIDGE_URL } from '../lib/constants';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
-import { UserProfile, BacktestSession, Trade, BacktestTrade } from '../types';
+import { UserProfile, BacktestSession, Trade, BacktestTrade, Candle } from '../types';
+import { loadSeries, saveSeries, mergeBars, peekMeta, listCachedSeries, CachedSeriesInfo } from '../lib/candleStore';
 import { dataService } from '../services/dataService';
 import { fetchCtraderCandles, isAuthenticated as isCtraderAuthenticated, getAccounts as getCtraderAccounts, refreshToken as refreshCtraderToken, getSelectedAccountId } from '../services/ctraderService';
 import CustomChart from './CustomChart';
-import { OptimizationHeatmap } from './backtest/OptimizationHeatmap';
 import CtraderAuthModal from './backtest/CtraderAuthModal';
+import StartScreen from './backtest/StartScreen';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
-import { OptimizationResult } from '../types';
 import { Waves, LayoutDashboard, Target } from 'lucide-react';
 
 interface BacktestLabProps {
@@ -61,9 +62,13 @@ const optimizeCandleData = (data: any[]) => data.map(d => ({
     close: Number(d.close.toFixed(5))
 }));
 
+const BACKTEST_TF_SECONDS: Record<string, number> = {
+    'M1': 60, 'M5': 300, 'M15': 900, 'M30': 1800, 'H1': 3600, 'H4': 14400, 'D1': 86400
+};
+const BACKTEST_TFS = Object.keys(BACKTEST_TF_SECONDS);
+
 // TradingView-style watchlist (same data as ChartGrid)
-const WATCHLISTS: Record<string, string[]> = {
-    'Forex': [
+const WATCHLISTS: Record<string, string[]> = {    'Forex': [
         'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY', 'FX:AUDUSD', 'FX:USDCAD', 'FX:USDCHF', 'FX:NZDUSD',
         'FX:EURGBP', 'FX:EURJPY', 'FX:GBPJPY', 'FX:CADJPY', 'FX:AUDJPY', 'FX:CHFJPY',
         'FX:EURAUD', 'FX:GBPAUD', 'FX:EURCAD', 'FX:GBPCAD', 'FX:AUDNZD', 'FX:NZDJPY'
@@ -121,6 +126,30 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     // to the wrong backend (e.g. MT5 bridge errors while connected to cTrader).
     const [activeSource, setActiveSource] = useLocalStorage<'mt5' | 'ctrader'>('jfx_backtest_active_source', 'mt5');
     const [isCtraderFetching, setIsCtraderFetching] = useState(false);
+    // Chart-area loading feedback: while a pair/timeframe load is in flight,
+    // dim the previous candles under a "Loading SYM · TF" overlay so users
+    // always see why nothing appears to happen yet. The label only becomes
+    // visible after a short delay so instant cache hits / fast MT5 responses
+    // never flash the overlay.
+    const [chartLoadingLabel, setChartLoadingLabel] = useState<string | null>(null);
+    const chartLoadingTimerRef = useRef<number | null>(null);
+    // Monotonic sequence for user-initiated data loads: a slow response from a
+    // previously selected pair must never overwrite or dismiss a newer one.
+    const activeFetchSeqRef = useRef(0);
+    const beginChartLoading = useCallback((label: string) => {
+        if (chartLoadingTimerRef.current) window.clearTimeout(chartLoadingTimerRef.current);
+        chartLoadingTimerRef.current = window.setTimeout(() => setChartLoadingLabel(label), 350);
+    }, []);
+    const endChartLoading = useCallback(() => {
+        if (chartLoadingTimerRef.current) {
+            window.clearTimeout(chartLoadingTimerRef.current);
+            chartLoadingTimerRef.current = null;
+        }
+        setChartLoadingLabel(null);
+    }, []);
+    useEffect(() => () => {
+        if (chartLoadingTimerRef.current) window.clearTimeout(chartLoadingTimerRef.current);
+    }, []);
     const [showCtraderAuthModal, setShowCtraderAuthModal] = useState(false);
     // Live cTrader auth status: re-checked on an interval and when the tab
     // regains focus, so returning from the cTrader OAuth flow (Settings or the
@@ -325,6 +354,8 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
 // Replay Modes
     const [isSelectBarMode, setIsSelectBarMode] = useState(false);
     const [isTFMenuOpen, setIsTFMenuOpen] = useState(false);
+    const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
+    const [isHistoryFetchOpen, setIsHistoryFetchOpen] = useState(false);
 
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, drawing: Drawing } | null>(null);
     const [clipboard, setClipboard] = useState<Drawing | null>(null);
@@ -351,35 +382,6 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [isLoadingSessions, setIsLoadingSessions] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const importTimeoutRef = useRef<number | null>(null);
-
-    // Feature: AI Analysis
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [analysisResult, setAnalysisResult] = useState<any>(null);
-
-    // Feature: Strategy Optimization
-    const [activeLabTab, setActiveLabTab] = useState<'chart' | 'optimizer'>('chart');
-    const [optMetric, setOptMetric] = useState<'equity' | 'drawdown' | 'winrate' | 'profitfactor'>('equity');
-
-    const MOCK_OPTIMIZATION_DATA: OptimizationResult[] = useMemo(() => {
-        const results: OptimizationResult[] = [];
-        for (let x = 10; x <= 40; x += 2) {
-            for (let y = 60; y <= 90; y += 2) {
-                // Generate some "realistic" looking optimization data
-                const dist = Math.sqrt(Math.pow(x - 26, 2) + Math.pow(y - 76, 2));
-                const baseEquity = 120000 * Math.exp(-dist / 15);
-                results.push({
-                    paramXValue: x,
-                    paramYValue: y,
-                    equity: Math.max(20000, baseEquity + (Math.random() * 5000)),
-                    drawdown: Math.min(45, (dist / 2) + (Math.random() * 5)),
-                    winrate: Math.max(30, 75 - dist + (Math.random() * 5)),
-                    profitfactor: Math.max(0.8, 2.5 - (dist / 20) + (Math.random() * 0.2))
-                });
-            }
-        }
-        return results;
-    }, []);
-
 
     const fetchSavedSessions = useCallback(async () => {
         setIsLoadingSessions(true);
@@ -504,65 +506,123 @@ setCurrentIdx(session.data.length - 1);
         chartRef.current.timeScale().fitContent();
     }, []);
 
-    const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour TTL
-
+    // Persistent incremental history: fetched bars are merged into the store
+    // (dedupe by bar open time) so deep history accumulates across sessions
+    // instead of being replaced by each fetch window.
     const saveToLocalCache = useCallback((data: any[], overrideSymbol?: string, overrideTimeframe?: string) => {
         try {
             const activeSymbol = overrideSymbol || symbol;
             const activeTF = overrideTimeframe || timeframe;
-            const key = `jfx_backtest_cache_${activeSymbol}_${activeTF}`;
-            const optimized = optimizeCandleData(data);
-            const payload = {
-                timestamp: Date.now(),
-                data: optimized
-            };
-            localStorage.setItem(key, JSON.stringify(payload));
+            const merged = mergeBars(loadSeries(activeSymbol, activeTF), (Array.isArray(data) ? data : []) as Candle[]);
+            if (merged.length === 0) return;
+            saveSeries(activeSymbol, activeTF, merged);
+            // Legacy global blob used by the welcome-screen restore.
+            localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({
+                data: optimizeCandleData(merged),
+                index: Math.min(merged.length - 1, 50)
+            }));
         } catch (e) {
             console.error('Failed to cache data', e);
         }
     }, [symbol, timeframe]);
 
-    const loadFromLocalCache = useCallback((overrideSymbol?: string, overrideTimeframe?: string, options?: { notify?: boolean, ignoreTTL?: boolean }) => {
+    // Staleness never blocks display: any stored series renders instantly and
+    // the network only ever tops up bars newer than the last saved one.
+    const loadFromLocalCache = useCallback((overrideSymbol?: string, overrideTimeframe?: string, options?: { notify?: boolean, cursorTime?: number | null }) => {
         const activeSymbol = overrideSymbol || symbol;
         const activeTF = overrideTimeframe || timeframe;
-        const key = `jfx_backtest_cache_${activeSymbol}_${activeTF}`;
-        const cached = localStorage.getItem(key);
-        if (cached) {
-            try {
-                const parsed = JSON.parse(cached);
-                // Backward compatibility if raw array was saved
-                const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
-                const savedAt = Array.isArray(parsed) ? 0 : (parsed.timestamp || 0);
+        const data = loadSeries(activeSymbol, activeTF);
+        if (!data) return false;
 
-                // TTL check: if older than 1 hour and ignoreTTL is not set, invalidate cache
-                if (!options?.ignoreTTL && savedAt > 0 && (Date.now() - savedAt > CACHE_TTL_MS)) {
-                    localStorage.removeItem(key);
-                    return false;
-                }
-
-                if (Array.isArray(data) && data.length > 0) {
-                    setAllData(data);
-                    setCurrentIdx(Math.min(data.length - 1, 50));
-                    setDataSource('cache');
-                    localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data, index: Math.min(data.length - 1, 50) }));
-                    setDrawings(prev => stripLogicalAnchors(prev));
-                    setHistory([]);
-                    historyStatesRef.current = [];
-                    historyPointerRef.current = -1;
-                    setHistoryStates([]);
-                    setHistoryStep(-1);
-                    resetDrawingInteractionState();
-                    if (options?.notify !== false) {
-                        addToast({ type: 'info', title: 'Loaded from Cache', message: `Restored ${data.length} bars for ${activeSymbol}` });
-                    }
-                    return true;
-                }
-            } catch (e) {
-                console.error('Error parsing local cache', e);
-            }
+        setAllData(data);
+        // TradingView-style: land on the same market moment the user
+        // was looking at, not blindly on bar 50.
+        const mappedIdx = timeToNearestBarIndex(data, options?.cursorTime) ?? Math.min(data.length - 1, 50);
+        setCurrentIdx(mappedIdx);
+        // Persist immediately so the restore effect cannot clobber
+        // this with a stale index from a previous session.
+        localStorage.setItem(getReplayIndexKey(activeSymbol, activeTF), String(mappedIdx));
+        setDataSource('cache');
+        localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data, index: Math.min(data.length - 1, 50) }));
+        setDrawings(prev => stripLogicalAnchors(prev));
+        setHistory([]);
+        historyStatesRef.current = [];
+        historyPointerRef.current = -1;
+        setHistoryStates([]);
+        setHistoryStep(-1);
+        resetDrawingInteractionState();
+        if (options?.notify !== false) {
+            addToast({ type: 'info', title: 'Loaded from History', message: `Restored ${data.length} stored bars for ${activeSymbol}` });
         }
-        return false;
+        return true;
     }, [symbol, timeframe, setAllData, setCurrentIdx, setDataSource, addToast]);
+
+    // Incremental top-up: fetch ONLY bars at/after the last saved bar and
+    // merge them into the persistent store. Returns the merged series and how
+    // many bars were added, or null when nothing is stored / nothing is new /
+    // the request failed — callers keep their current chart state then.
+    const ctraderTopUpInFlight = useRef<Set<string>>(new Set());
+    const topUpCtraderSeries = useCallback(async (activeSymbol?: string, activeTF?: string): Promise<{ merged: Candle[]; added: number } | null> => {
+        const sym = activeSymbol || symbol;
+        const tf = activeTF || timeframe;
+        if (!sym || !tf) return null;
+        const key = `${sym}_${tf}`;
+        if (ctraderTopUpInFlight.current.has(key)) return null;
+        const meta = peekMeta(sym, tf);
+        if (!meta) return null;
+        ctraderTopUpInFlight.current.add(key);
+        try {
+            const accounts = await getCtraderAccounts();
+            const savedAccountId = getSelectedAccountId();
+            const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
+            if (!account) return null;
+            // Inclusive fromTimestamp so the still-open live bar gets its
+            // final values; 300 bars comfortably covers any short absence.
+            const fresh = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 300, account.isDemo, 2, meta.lastTime * 1000);
+            const existing = loadSeries(sym, tf) || [];
+            const merged = mergeBars(existing, fresh);
+            if (merged.length === 0) return null;
+            saveSeries(sym, tf, merged);
+            return { merged, added: merged.length - existing.length };
+        } catch { /* silent — background sync */ return null; }
+        finally { ctraderTopUpInFlight.current.delete(key); }
+    }, [symbol, timeframe]);
+
+    // TradingView-instant timeframe switching: after a successful cTrader load,
+    // backfill every standard timeframe in the background. Series already in
+    // the persistent store only receive an incremental top-up; brand-new TFs
+    // are seeded with a full fetch. Subsequent switches render from the store
+    // on the same tick instead of waiting on the network.
+    const ctraderPrefetchInFlight = useRef<Set<string>>(new Set());
+    const backfillCtraderTimeframes = useCallback((baseSymbol?: string) => {
+        const sym = baseSymbol || symbol;
+        if (!sym) return;
+        BACKTEST_TFS.forEach((tf) => {
+            const key = `${sym}_${tf}`;
+            if (ctraderPrefetchInFlight.current.has(key)) return;
+            const meta = peekMeta(sym, tf);
+            // Fresh within ~3 intervals → nothing to do.
+            if (meta && (Date.now() / 1000 - meta.lastTime) < 3 * (BACKTEST_TF_SECONDS[tf] || 3600)) return;
+            ctraderPrefetchInFlight.current.add(key);
+            window.setTimeout(async () => {
+                try {
+                    if (await topUpCtraderSeries(sym, tf)) return;
+                    // Nothing stored yet → seed this timeframe fully.
+                    if (!peekMeta(sym, tf)) {
+                        const accounts = await getCtraderAccounts();
+                        const savedAccountId = getSelectedAccountId();
+                        const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
+                        if (!account) return;
+                        const candles = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 500, account.isDemo, 2);
+                        if (candles && candles.length > 0) saveToLocalCache(candles, sym, tf);
+                    }
+                } catch { /* silent — background warm-up only */ }
+                finally {
+                    ctraderPrefetchInFlight.current.delete(key);
+                }
+            }, 400);
+        });
+    }, [symbol, topUpCtraderSeries, saveToLocalCache]);
 
     const handleDownloadData = () => {
         if (allData.length === 0) return;
@@ -592,8 +652,7 @@ setCurrentIdx(session.data.length - 1);
         );
     };
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
+    const handleImportFile = (file: File) => {
         if (!file) return;
         if (importTimeoutRef.current !== null) {
             window.clearTimeout(importTimeoutRef.current);
@@ -655,18 +714,25 @@ setAllData(validData);
 
     const handleFetchMT5Data = useCallback(async (overrideSymbol?: string, overrideTimeframe?: string) => {
         setIsPlaying(false);
+        const seq = ++activeFetchSeqRef.current;
         const activeSymbol = overrideSymbol || symbol;
         const activeTF = overrideTimeframe || timeframe;
+        beginChartLoading(`${activeSymbol} · ${activeTF}`);
 
         // TradingView keeps the visible time range when switching timeframes.
-        // Capture it so drawings stay on screen after the new data loads.
+        // Capture it so drawings stay on screen after the new data loads, and
+        // capture the replay cursor's bar time so the cursor lands on the same
+        // market moment instead of jumping to bar 50 / the last bar (which
+        // orphans drawings off-screen and reveals future bars).
         const isTimeframeSwitch = Boolean(overrideTimeframe) && overrideTimeframe !== timeframe && (!overrideSymbol || overrideSymbol === symbol);
         const prevVisibleRange = isTimeframeSwitch
             ? (chartRef.current?.timeScale().getVisibleRange?.() as { from: number; to: number } | null) ?? null
             : null;
+        const prevCursorTime = isTimeframeSwitch ? allData[currentIndex]?.time ?? null : null;
 
         try {
             const { data } = await fetchData(overrideSymbol, overrideTimeframe);
+            if (seq !== activeFetchSeqRef.current) return;
             setHistory([]);
             setDrawings(prev => stripLogicalAnchors(prev));
             historyStatesRef.current = [];
@@ -679,10 +745,20 @@ setAllData(validData);
             setActiveSource('mt5');
             setShowWelcome(false);
             if (prevVisibleRange) {
-                setCurrentIdx(data.length - 1);
+                // Keep the replay cursor pinned to the same market moment so
+                // drawings around it stay exactly where the user left them.
+                const mappedCursor = timeToNearestBarIndex(data, prevCursorTime) ?? data.length - 1;
+                setCurrentIdx(mappedCursor);
+                localStorage.setItem(getReplayIndexKey(activeSymbol, activeTF), String(mappedCursor));
                 window.setTimeout(() => {
                     chartRef.current?.timeScale().setVisibleRange?.({ from: prevVisibleRange.from, to: prevVisibleRange.to });
                 }, 0);
+            } else if (isTimeframeSwitch && prevCursorTime !== null) {
+                const mappedCursor = timeToNearestBarIndex(data, prevCursorTime);
+                if (mappedCursor !== null) {
+                    setCurrentIdx(mappedCursor);
+                    localStorage.setItem(getReplayIndexKey(activeSymbol, activeTF), String(mappedCursor));
+                }
             }
             addToast({ type: 'success', title: 'Data Synced', message: `Loaded ${data.length} bars for ${activeSymbol}` });
         } catch (err: any) {
@@ -701,8 +777,10 @@ setAllData(validData);
                 title: 'MT5 Sync Failed',
                 message: 'MT5 Bridge is offline. Start the JournalFX Bridge app, or switch to the cTrader source in the top bar to use historical candles instead.'
             });
+        } finally {
+            if (seq === activeFetchSeqRef.current) endChartLoading();
         }
-    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe, setActiveSource]);
+    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe, setActiveSource, allData, currentIndex, beginChartLoading, endChartLoading]);
 
     const handleFetchCtraderData = useCallback(async (
         overrideSymbol?: string, 
@@ -715,6 +793,7 @@ setAllData(validData);
         }
     ) => {
         setIsPlaying(false);
+        const seq = ++activeFetchSeqRef.current;
         const activeSymbol = overrideSymbol || symbol;
         const activeTF = overrideTimeframe || timeframe;
         setIsCtraderFetching(true);
@@ -722,16 +801,27 @@ setAllData(validData);
         const hasCustomFilter = Boolean(customOptions?.fromTimestamp || customOptions?.toTimestamp);
         // TradingView keeps the visible time range when switching timeframes:
         // capture it so the new timeframe loads the same window and drawings
-        // stay pinned on screen.
+        // stay pinned on screen. Also capture the replay cursor's bar time so
+        // the cursor lands on the same market moment instead of bar 50 / the
+        // last bar (which pushes drawings off-screen and reveals future bars).
         const isTimeframeSwitch = !hasCustomFilter && Boolean(overrideTimeframe) && overrideTimeframe !== timeframe && (!overrideSymbol || overrideSymbol === symbol);
         const prevVisibleRange = isTimeframeSwitch
             ? (chartRef.current?.timeScale().getVisibleRange?.() as { from: number; to: number } | null) ?? null
             : null;
-        // Check local cache first for instant switching if not querying a specific historical date
-        const cached = !hasCustomFilter ? loadFromLocalCache(activeSymbol, activeTF, { notify: false }) : null;
+        const prevCursorTime = isTimeframeSwitch ? allData[currentIndex]?.time ?? null : null;
+        // Check local history first: any stored series renders instantly so
+        // candles flip immediately, then the network below only tops up bars
+        // newer than the last saved one.
+        const cached = !hasCustomFilter ? loadFromLocalCache(activeSymbol, activeTF, { notify: false, cursorTime: prevCursorTime }) : null;
         if (cached) {
             setDataSource('ctrader');
             setShowWelcome(false);
+        } else if (!hasCustomFilter && !showWelcome) {
+            // No stored series: the chart would otherwise keep showing stale
+            // bars (or nothing) with zero feedback while cTrader responds.
+            // Arm the dimmed "Loading SYM · TF" overlay (delayed so quick
+            // responses never flash it).
+            beginChartLoading(`${activeSymbol} · ${activeTF}`);
         }
 
         try {
@@ -743,15 +833,15 @@ setAllData(validData);
                     setShowCtraderAuthModal(true);
                     addToast({
                         type: 'warning',
-                        title: 'cTrader Auth Required',
-                        message: 'Please connect your cTrader account first.'
-                    });
-                    setIsCtraderFetching(false);
-                    return;
+                    title: 'cTrader Auth Required',
+                    message: 'Please connect your cTrader account first.'
+                });
+                return;
                 }
             }
 
             const accounts = await getCtraderAccounts();
+            if (seq !== activeFetchSeqRef.current) return; // a newer pair/TF load superseded this one
             if (!accounts || accounts.length === 0) {
                 setShowCtraderAuthModal(true);
                 addToast({
@@ -759,27 +849,46 @@ setAllData(validData);
                     title: 'No cTrader Accounts',
                     message: 'No active cTrader accounts found for this profile.'
                 });
-                setIsCtraderFetching(false);
                 return;
             }
 
             const savedAccountId = getSelectedAccountId();
             const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
-            // When preserving the visible window, fetch enough bars to cover it
-            // (cTrader returns bars within the from/to range, capped by count).
-            const candleCount = customOptions?.count || (prevVisibleRange ? 5000 : 500);
-            const rangeFromMs = customOptions?.fromTimestamp ?? (prevVisibleRange ? prevVisibleRange.from * 1000 : undefined);
-            const rangeToMs = customOptions?.toTimestamp ?? (prevVisibleRange ? prevVisibleRange.to * 1000 : undefined);
-            const candles = await fetchCtraderCandles(
-                account.ctidTraderAccountId,
-                activeSymbol,
-                activeTF,
-                candleCount,
-                account.isDemo,
-                3,
-                rangeFromMs,
-                rangeToMs
-            );
+
+            // Incremental fast path: a stored series only receives bars newer
+            // than its last saved bar. Full fetches happen exclusively when
+            // nothing is stored (or the caller asked for a specific window).
+            let candles: Candle[] | null = null;
+            let incremental = false;
+            let addedCount = 0;
+            if (!hasCustomFilter) {
+                const topped = await topUpCtraderSeries(activeSymbol, activeTF);
+                if (seq !== activeFetchSeqRef.current) return;
+                if (topped && topped.added > 0) {
+                    candles = topped.merged;
+                    incremental = true;
+                    addedCount = topped.added;
+                }
+            }
+
+            if (!candles) {
+                // When preserving the visible window, fetch enough bars to cover it
+                // (cTrader returns bars within the from/to range, capped by count).
+                const candleCount = customOptions?.count || (prevVisibleRange ? 5000 : 500);
+                const rangeFromMs = customOptions?.fromTimestamp ?? (prevVisibleRange ? prevVisibleRange.from * 1000 : undefined);
+                const rangeToMs = customOptions?.toTimestamp ?? (prevVisibleRange ? prevVisibleRange.to * 1000 : undefined);
+                candles = await fetchCtraderCandles(
+                    account.ctidTraderAccountId,
+                    activeSymbol,
+                    activeTF,
+                    candleCount,
+                    account.isDemo,
+                    3,
+                    rangeFromMs,
+                    rangeToMs
+                );
+                if (seq !== activeFetchSeqRef.current) return;
+            }
 
             if (!candles || candles.length === 0) {
                 if (!cached) {
@@ -789,46 +898,72 @@ setAllData(validData);
                         message: `No trendbars returned for ${activeSymbol} ${activeTF} for the selected period.`
                     });
                 }
-                setIsCtraderFetching(false);
                 return;
             }
 
             setAllData(candles);
-            if (prevVisibleRange) {
-                // Show every fetched bar, then restore the same visible window
-                // so drawings stay exactly where the user left them.
-                setCurrentIdx(candles.length - 1);
-                window.setTimeout(() => {
-                    chartRef.current?.timeScale().setVisibleRange?.({ from: prevVisibleRange.from, to: prevVisibleRange.to });
-                }, 0);
-            } else if (customOptions?.startAtFirstBar) {
-                setCurrentIdx(Math.min(50, candles.length - 1));
-            } else if (!cached) {
-                setCurrentIdx(Math.min(candles.length - 1, 50));
+            if (incremental) {
+                // Tail append only: existing bar indices did not move, so the
+                // replay cursor, drawings and undo history stay exactly where
+                // the user left them.
+                setCurrentIdx(prev => Math.min(prev, candles!.length - 1));
+            } else {
+                // Keep the replay cursor pinned to the same market moment so the
+                // drawings around it stay exactly where the user left them.
+                const mappedCursor = isTimeframeSwitch ? timeToNearestBarIndex(candles, prevCursorTime) : null;
+                if (mappedCursor !== null) {
+                    setCurrentIdx(mappedCursor);
+                    localStorage.setItem(getReplayIndexKey(activeSymbol, activeTF), String(mappedCursor));
+                } else if (prevVisibleRange) {
+                    // Show every fetched bar, then restore the same visible window
+                    setCurrentIdx(candles.length - 1);
+                } else if (customOptions?.startAtFirstBar) {
+                    setCurrentIdx(Math.min(50, candles.length - 1));
+                } else if (!cached) {
+                    setCurrentIdx(Math.min(candles.length - 1, 50));
+                }
+                if (prevVisibleRange) {
+                    window.setTimeout(() => {
+                        chartRef.current?.timeScale().setVisibleRange?.({ from: prevVisibleRange.from, to: prevVisibleRange.to });
+                    }, 0);
+                }
+                setHistory([]);
+                setDrawings(prev => stripLogicalAnchors(prev));
+                historyStatesRef.current = [];
+                historyPointerRef.current = -1;
+                setHistoryStates([]);
+                setHistoryStep(-1);
+                resetDrawingInteractionState();
             }
-            setHistory([]);
-            setDrawings(prev => stripLogicalAnchors(prev));
-            historyStatesRef.current = [];
-            historyPointerRef.current = -1;
-            setHistoryStates([]);
-            setHistoryStep(-1);
-            resetDrawingInteractionState();
             saveToLocalCache(candles, activeSymbol, activeTF);
             setDataSource('ctrader');
             setActiveSource('ctrader');
             setShowWelcome(false);
+            // Backfill the other timeframes in the background so the next
+            // switch is instant.
+            if (!hasCustomFilter) {
+                window.setTimeout(() => backfillCtraderTimeframes(activeSymbol), 1200);
+            }
 
-            const firstDate = candles[0]?.time ? new Date(candles[0].time * 1000).toLocaleDateString() : '';
-            const lastDate = candles[candles.length - 1]?.time ? new Date(candles[candles.length - 1].time * 1000).toLocaleDateString() : '';
-            const rangeStr = firstDate && lastDate ? ` (${firstDate} – ${lastDate})` : '';
+            if (incremental) {
+                addToast({
+                    type: 'info',
+                    title: 'History Synced',
+                    message: `Added ${addedCount} new bar${addedCount === 1 ? '' : 's'} to ${activeSymbol} ${activeTF}.`
+                });
+            } else {
+                const firstDate = candles[0]?.time ? new Date(candles[0].time * 1000).toLocaleDateString() : '';
+                const lastDate = candles[candles.length - 1]?.time ? new Date(candles[candles.length - 1].time * 1000).toLocaleDateString() : '';
+                const rangeStr = firstDate && lastDate ? ` (${firstDate} – ${lastDate})` : '';
 
-            addToast({
-                type: 'success',
-                title: 'cTrader Data Loaded',
-                message: `Loaded ${candles.length} historical bars for ${activeSymbol} (${activeTF})${rangeStr}.`
-            });
+                addToast({
+                    type: 'success',
+                    title: 'cTrader Data Loaded',
+                    message: `Loaded ${candles.length} historical bars for ${activeSymbol} (${activeTF})${rangeStr}.`
+                });
+            }
         } catch (err: any) {
-            if (!cached) {
+            if (!cached && seq === activeFetchSeqRef.current) {
                 addToast({
                     type: 'error',
                     title: 'cTrader Fetch Failed',
@@ -836,9 +971,14 @@ setAllData(validData);
                 });
             }
         } finally {
-            setIsCtraderFetching(false);
+            // Only the newest request may clear the shared flags; an older
+            // abandoned response must not dismiss the newer one's feedback.
+            if (seq === activeFetchSeqRef.current) {
+                setIsCtraderFetching(false);
+                endChartLoading();
+            }
         }
-    }, [symbol, timeframe, setAllData, setCurrentIdx, saveToLocalCache, loadFromLocalCache, setDataSource, setActiveSource, setShowWelcome, resetDrawingInteractionState, addToast]);
+    }, [symbol, timeframe, allData, currentIndex, setAllData, setCurrentIdx, saveToLocalCache, loadFromLocalCache, setDataSource, setActiveSource, setShowWelcome, showWelcome, resetDrawingInteractionState, addToast, topUpCtraderSeries, backfillCtraderTimeframes, beginChartLoading, endChartLoading]);
 
     const handleApplyCtraderDatePreset = (daysAgo: number) => {
         const d = new Date();
@@ -885,6 +1025,56 @@ setAllData(validData);
         }
         return handleFetchMT5Data(overrideSymbol, overrideTimeframe);
     }, [activeSource, handleFetchCtraderData, handleFetchMT5Data]);
+
+    // ---- Start Screen wiring ------------------------------------------------
+    // Cached series snapshot for the "Continue where you left off" cards;
+    // re-read whenever the Start Screen becomes visible.
+    const [cachedSeries, setCachedSeries] = useState<CachedSeriesInfo[]>([]);
+    useEffect(() => {
+        if (showWelcome) setCachedSeries(listCachedSeries());
+    }, [showWelcome]);
+
+    const handleConnectCtrader = useCallback(async () => {
+        try {
+            const { getAuthorizeUrl } = await import('../services/ctraderService');
+            window.location.href = getAuthorizeUrl();
+        } catch (err: any) {
+            addToast({
+                type: 'error',
+                title: 'cTrader Not Configured',
+                message: err?.message || 'Failed to initiate cTrader connection.'
+            });
+            setIsSettingsOpen(true);
+        }
+    }, [addToast]);
+
+    // Resume a locally cached series instantly (no network), restoring the
+    // replay cursor saved for that symbol/timeframe.
+    const handleResumeFromCache = useCallback((resumeSymbol: string, resumeTf: string) => {
+        const ok = loadFromLocalCache(resumeSymbol, resumeTf, { notify: false });
+        if (!ok) return;
+        const saved = localStorage.getItem(getReplayIndexKey(resumeSymbol, resumeTf));
+        if (saved) {
+            const idx = parseInt(saved);
+            if (!isNaN(idx) && idx >= 0) setCurrentIdx(idx);
+        }
+        setSymbol(resumeSymbol);
+        setTimeframe(resumeTf);
+        setShowWelcome(false);
+        addToast({ type: 'info', title: 'Session Resumed', message: `Restored cached ${resumeSymbol} ${resumeTf}. Use refresh to top up latest bars.` });
+    }, [loadFromLocalCache, setCurrentIdx, setSymbol, setTimeframe, addToast]);
+
+    // One-click start from the Start Screen: explicit source choice so stale
+    // persisted activeSource values can never route the fetch incorrectly.
+    const handleStartFresh = useCallback((startSymbol: string, startTf: string, source: 'mt5' | 'ctrader') => {
+        setSymbol(startSymbol);
+        setTimeframe(startTf);
+        setActiveSource(source);
+        setShowWelcome(false);
+        if (source === 'ctrader') handleFetchCtraderData(startSymbol, startTf);
+        else handleFetchMT5Data(startSymbol, startTf);
+    }, [setSymbol, setTimeframe, setActiveSource, handleFetchCtraderData, handleFetchMT5Data]);
+    // --------------------------------------------------------------------------
 
     const handleUpdateData = useCallback(async () => {
         if (activeSource === 'ctrader') {
@@ -1451,45 +1641,12 @@ setAllData(validData);
         return () => clearInterval(interval);
     }, [isPlaying, currentIndex, playSpeed, allData]);
 
-    const handleExecuteTrade = useCallback((type: 'BUY' | 'SELL') => {
-        if (!allData || currentIndex < 0 || currentIndex >= allData.length) return;
-        const candle = allData[currentIndex];
-        const trade: BacktestTrade = {
-            type,
-            entry: candle.close,
-            exit: 0,
-            lots: 1, // Default to 1 lot for paper trading
-            pnl: 0,
-            time: candle.time
-        };
-        setHistory(prev => [...prev, trade]);
-        addToast({ type: 'success', title: 'Order Executed', message: `${type} at ${candle.close}` });
-    }, [allData, currentIndex, addToast]);
-
     const handleUndoTrade = useCallback(() => {
         if (history.length === 0) return;
         const lastTrade = history[history.length - 1];
         setHistory(prev => prev.slice(0, -1));
         addToast({ type: 'info', title: 'Trade Undone', message: `Removed ${lastTrade.type} at ${lastTrade.entry}` });
     }, [history, addToast]);
-
-    const handleAnalyze = async () => {
-        if (allData.length < 20) return;
-        setIsAnalyzing(true);
-        try {
-            // Suggestion: Link to the geminiService from Pro lab if needed
-
-            setTimeout(() => {
-                setAnalysisResult({
-                    trend: allData[currentIndex].close > allData[Math.max(0, currentIndex - 10)].close ? 'BULLISH' : 'BEARISH',
-                    summary: "Market structure shows localized momentum. Price is testing key levels."
-                });
-                setIsAnalyzing(false);
-            }, 1500);
-        } catch (e) {
-            setIsAnalyzing(false);
-        }
-    };
 
     const handleCoordinatesChange = useCallback((c: any, s: any) => {
         const isInitial = !chartRef.current || !candlestickSeriesRef.current;
@@ -1519,8 +1676,8 @@ setAllData(validData);
         handleFetchActiveSourceData(bareSymbol);
     }, [setSymbol, handleFetchActiveSourceData]);
 
-    const toggleStar = useCallback((fullSymbol: string, e: React.MouseEvent) => {
-        e.stopPropagation();
+    const toggleStar = useCallback((fullSymbol: string, e?: React.MouseEvent) => {
+        e?.stopPropagation();
         setStarredSymbols(prev =>
             prev.includes(fullSymbol)
                 ? prev.filter(s => s !== fullSymbol)
@@ -1648,6 +1805,7 @@ setAllData(validData);
                                 </div>
                             </div>
                             <span className={`text-xs font-black uppercase ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{symbol}</span>
+                            {(isCtraderFetching || isFetching) && <Loader2 size={11} className="animate-spin text-[#FF4F01] shrink-0" />}
                         </div>
                         <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`} />
                         <div className="relative group/tf">
@@ -1675,38 +1833,188 @@ setAllData(validData);
                         <button onClick={handleUpdateData} disabled={isFetching} title="Update to Latest" className={`p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-emerald-500' : 'hover:bg-emerald-50 text-emerald-600'}`}>
                             <RefreshCw size={18} className={isFetching ? 'animate-spin' : ''} />
                         </button>
+                        {/* Fetch history (cTrader): pull a specific date range.
+                            Relocated here from the old welcome card. */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsHistoryFetchOpen(o => !o)}
+                                disabled={isCtraderFetching}
+                                title="Fetch historical range from cTrader"
+                                className={`p-2 rounded-xl transition-all ${isHistoryFetchOpen ? 'bg-[#1689ff]/15 text-[#1689ff]' : isDarkMode ? 'hover:bg-white/5 text-zinc-400 hover:text-[#1689ff]' : 'hover:bg-slate-100 text-slate-500 hover:text-[#0061FF]'}`}
+                            >
+                                <Calendar size={16} />
+                            </button>
+                            {isHistoryFetchOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsHistoryFetchOpen(false)} />
+                                    <div className={`absolute top-full right-0 mt-2 w-64 border rounded-2xl shadow-2xl p-4 z-[100] space-y-3 ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
+                                        <div>
+                                            <p className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Fetch history</p>
+                                            <p className={`text-[8px] font-bold uppercase tracking-widest mt-0.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{ctraderConnected ? `cTrader · ${symbol} ${ctraderFetchTimeframe}` : 'cTrader connection required'}</p>
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500 mb-1">
+                                                <span>Jump to date</span>
+                                                <span className="text-[#60efff] font-mono">{ctraderFetchDate}</span>
+                                            </div>
+                                            <div className="grid grid-cols-4 gap-1">
+                                                {[
+                                                    { label: '7D', days: 7 },
+                                                    { label: '1M', days: 30 },
+                                                    { label: '3M', days: 90 },
+                                                    { label: '1Y', days: 365 },
+                                                ].map(p => (
+                                                    <button
+                                                        key={p.label}
+                                                        type="button"
+                                                        onClick={() => handleApplyCtraderDatePreset(p.days)}
+                                                        className={`py-1 rounded-lg text-[9px] font-black uppercase transition-all ${isDarkMode ? 'bg-black hover:bg-zinc-900 text-zinc-300 border border-zinc-800 hover:border-[#0061FF]/50' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'}`}
+                                                    >
+                                                        {p.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className={`text-[8px] font-black uppercase tracking-widest flex items-center gap-1 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+                                                <Calendar size={10} className="text-[#0061FF]" /> Select date
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={ctraderFetchDate}
+                                                onChange={(e) => setCtraderFetchDate(e.target.value)}
+                                                className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none border transition-all ${isDarkMode ? 'bg-black border-zinc-800 text-white focus:border-[#0061FF]' : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0061FF]'}`}
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1">
+                                                <span className={`text-[8px] font-black uppercase tracking-widest block ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>TF</span>
+                                                <select
+                                                    value={ctraderFetchTimeframe}
+                                                    onChange={(e) => setCtraderFetchTimeframe(e.target.value)}
+                                                    className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${isDarkMode ? 'bg-black border-zinc-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                                >
+                                                    {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
+                                                        <option key={tf} value={tf}>{tf}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <span className={`text-[8px] font-black uppercase tracking-widest block ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Bars</span>
+                                                <select
+                                                    value={ctraderFetchCount}
+                                                    onChange={(e) => setCtraderFetchCount(Number(e.target.value))}
+                                                    className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${isDarkMode ? 'bg-black border-zinc-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                                                >
+                                                    <option value={250}>250</option>
+                                                    <option value={500}>500</option>
+                                                    <option value={1000}>1000</option>
+                                                    <option value={2000}>2000</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!ctraderConnected) {
+                                                    setShowCtraderAuthModal(true);
+                                                    setIsHistoryFetchOpen(false);
+                                                    return;
+                                                }
+                                                handleExecuteCtraderDateFetch();
+                                                setIsHistoryFetchOpen(false);
+                                            }}
+                                            disabled={isCtraderFetching}
+                                            className={`w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                                                isCtraderFetching
+                                                    ? 'bg-black border border-zinc-800 text-zinc-500 cursor-wait'
+                                                    : ctraderConnected
+                                                        ? 'bg-[#1689ff]/20 border border-[#48c8ff]/40 text-cyan-100 hover:bg-[#1689ff]/30'
+                                                        : 'bg-[#0061FF] text-white shadow-lg shadow-[#0061FF]/25 hover:bg-[#0052d4]'
+                                            }`}
+                                        >
+                                            {isCtraderFetching
+                                                ? <><RefreshCw size={12} className="animate-spin" /> Pulling Data…</>
+                                                : ctraderConnected
+                                                    ? <><Calendar size={12} /> Pull from Date</>
+                                                    : <><Zap size={12} /> Connect cTrader</>}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
 
-                    {/* Data source selector: MT5 ⇄ cTrader */}
-                    <div className={`flex items-center p-1 rounded-xl border gap-0.5 ${isDarkMode ? 'bg-black/60 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
+                    {/* Data source status chip: explicit, visible state. Click for
+                        the source menu (switch / connect) instead of a hidden
+                        persisted toggle. */}
+                    <div className="relative">
                         <button
-                            onClick={() => handleSourceSelect('mt5')}
-                            disabled={isFetching}
-                            title="Sync live bars from your MT5 terminal via the JournalFX Bridge"
-                            className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-all active:scale-95 ${
-                                activeSource === 'mt5'
-                                    ? 'bg-[#FF4F01] text-white shadow-lg shadow-[#FF4F01]/25'
-                                    : isDarkMode ? 'text-zinc-400 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-                            }`}
-                        >
-                            <RefreshCw size={12} className={isFetching && activeSource === 'mt5' ? 'animate-spin' : ''} />
-                            MT5
-                            <span className={`w-1.5 h-1.5 rounded-full ${bridgeStatus === 'online' ? 'bg-emerald-400' : bridgeStatus === 'checking' ? 'bg-amber-400' : 'bg-rose-500'}`} />
-                        </button>
-                        <button
-                            onClick={() => handleSourceSelect('ctrader')}
-                            disabled={isCtraderFetching}
-                            title="Fetch historical candles from the cTrader Open API"
-                            className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-all active:scale-95 ${
+                            onClick={() => setIsSourceMenuOpen(o => !o)}
+                            disabled={isFetching || isCtraderFetching}
+                            title="Data source — click to switch or connect"
+                            className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 border transition-all active:scale-95 ${
                                 activeSource === 'ctrader'
-                                    ? 'bg-[#1689ff] text-white shadow-lg shadow-[#1689ff]/25'
-                                    : isDarkMode ? 'text-zinc-400 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                                    ? 'bg-[#1689ff]/15 border-[#1689ff]/40 text-[#1689ff]'
+                                    : isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-600'
                             }`}
                         >
-                            <Calendar size={12} />
-                            cTrader
-                            <span className={`w-1.5 h-1.5 rounded-full ${ctraderConnected ? 'bg-emerald-400' : 'bg-rose-500'}`} />
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                                activeSource === 'ctrader'
+                                    ? (ctraderConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500')
+                                    : (bridgeStatus === 'online' ? 'bg-emerald-400 animate-pulse' : bridgeStatus === 'checking' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500')
+                            }`} />
+                            {activeSource === 'ctrader' ? 'cTrader' : 'MT5'}
+                            <ChevronDown size={11} className={`transition-transform ${isSourceMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
+                        {isSourceMenuOpen && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setIsSourceMenuOpen(false)} />
+                                <div className={`absolute top-full right-0 mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-[100] ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
+                                    <p className={`px-2 py-1.5 text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Data Source</p>
+                                    <button
+                                        onClick={() => { setIsSourceMenuOpen(false); handleSourceSelect('ctrader'); }}
+                                        disabled={!ctraderConnected}
+                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all ${activeSource === 'ctrader' ? 'bg-[#1689ff]/10' : ''} ${ctraderConnected ? (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50') : 'opacity-40 cursor-not-allowed'}`}
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <Zap size={13} className="text-[#1689ff]" />
+                                            <span className={`text-xs font-black ${isDarkMode ? 'text-zinc-200' : 'text-slate-800'}`}>cTrader</span>
+                                            <span className={`w-1.5 h-1.5 rounded-full ${ctraderConnected ? 'bg-emerald-400' : 'bg-rose-500'}`} />
+                                        </span>
+                                        {activeSource === 'ctrader'
+                                            ? <Check size={13} className="text-[#1689ff]" />
+                                            : ctraderConnected
+                                                ? <span className={`text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Switch</span>
+                                                : null}
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsSourceMenuOpen(false); handleSourceSelect('mt5'); }}
+                                        disabled={bridgeStatus !== 'online'}
+                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all ${activeSource === 'mt5' ? 'bg-emerald-500/10' : ''} ${bridgeStatus === 'online' ? (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50') : 'opacity-40 cursor-not-allowed'}`}
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <Monitor size={13} className="text-emerald-500" />
+                                            <span className={`text-xs font-black ${isDarkMode ? 'text-zinc-200' : 'text-slate-800'}`}>MT5 Bridge</span>
+                                            <span className={`w-1.5 h-1.5 rounded-full ${bridgeStatus === 'online' ? 'bg-emerald-400' : bridgeStatus === 'checking' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'}`} />
+                                        </span>
+                                        {activeSource === 'mt5'
+                                            ? <Check size={13} className="text-emerald-500" />
+                                            : bridgeStatus === 'online'
+                                                ? <span className={`text-[8px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Switch</span>
+                                                : null}
+                                    </button>
+                                    {!ctraderConnected && (
+                                        <button
+                                            onClick={() => { setIsSourceMenuOpen(false); setShowCtraderAuthModal(true); }}
+                                            className={`w-full mt-1 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest text-left flex items-center gap-1.5 ${isDarkMode ? 'text-[#1689ff] hover:bg-white/5' : 'text-[#0061FF] hover:bg-slate-50'}`}
+                                        >
+                                            <Zap size={11} /> Connect cTrader…
+                                        </button>
+                                    )}
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -1751,7 +2059,6 @@ setAllData(validData);
             </div>
 
             <div className={`flex-1 flex relative overflow-hidden min-h-0 group ${isDarkMode ? 'bg-black' : 'bg-slate-50'}`}>
-                {activeLabTab === 'chart' ? (
                 <>
                 <DrawingToolbar
                     activeTool={activeTool}
@@ -1806,276 +2113,61 @@ setAllData(validData);
                         </CustomChart>
                     </ChartErrorBoundary>
 
+                    {/* Pair/TF loading feedback: dims the previous chart under a
+                        status card so switching pairs never looks like a freeze.
+                        Delayed by beginChartLoading, so cache hits never flash it. */}
                     <AnimatePresence>
-                        {showWelcome && allData.length === 0 && (
-                            <div className="absolute inset-0 flex items-center justify-center z-[60] p-8 bg-black/40">
-                                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6 w-full max-w-7xl">
-                                    {/* Option 1: Live Sync */}
-                                    <div
-                                        onClick={() => handleFetchMT5Data()}
-                                        className={`p-8 rounded-3xl border-2 border-dashed flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] group ${isDarkMode ? 'bg-black/80 border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5' : 'bg-white border-slate-200 hover:border-emerald-500/50'}`}
-                                    >
-                                        <div className={`p-6 rounded-2xl border-2 border-dashed transition-all group-hover:rotate-12 ${isDarkMode ? 'bg-black border-zinc-800 group-hover:border-emerald-500 group-hover:text-emerald-500 text-zinc-600' : 'bg-slate-50 border-slate-200 group-hover:border-emerald-500 group-hover:text-emerald-500 text-slate-400'}`}>
-                                            <RefreshCw size={48} className={isFetching ? 'animate-spin' : ''} />
-                                        </div>
-                                        <div className="text-center space-y-2">
-                                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>Live Source</p>
-                                            <h3 className={`text-xl font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Live MT5 Sync</h3>
-                                            <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Requires JournalFX Bridge to be running<br />Connects directly to your MT5 Terminal</p>
-                                        </div>
-                                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-widest ${bridgeStatus === 'online' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : bridgeStatus === 'checking' ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' : 'border-rose-500/30 bg-rose-500/10 text-rose-400'}`}>
-                                            <span className={`w-1.5 h-1.5 rounded-full ${bridgeStatus === 'online' ? 'bg-emerald-400 animate-pulse' : bridgeStatus === 'checking' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'}`} />
-                                            {bridgeStatus === 'online' ? 'Bridge Online' : bridgeStatus === 'checking' ? 'Checking Bridge...' : bridgeError || 'Bridge Offline'}
-                                        </div>
-                                        <div className={`px-6 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'bg-black border-zinc-700 text-zinc-400 group-hover:text-emerald-400' : 'bg-white border-slate-200 text-slate-500 group-hover:text-emerald-600'}`}>
-                                            {isFetching ? 'Connecting...' : 'Start Sync'}
-                                        </div>
-                                    </div>
-
-                                    {/* Option 2: Manual Upload */}
-                                    <label htmlFor="backtest-file-upload" className={`p-8 rounded-3xl border-2 border-dashed flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] group ${isDarkMode ? 'bg-black/80 border-zinc-800 hover:border-[#FF4F01]/50 hover:bg-[#FF4F01]/5' : 'bg-white border-slate-200 hover:border-[#FF4F01]/50'}`}>
-                                        <input
-                                            id="backtest-file-upload"
-                                            name="backtest-data-file"
-                                            type="file"
-                                            accept=".json"
-                                            onChange={handleFileUpload}
-                                            className="hidden"
-                                        />
-                                        <div className={`p-6 rounded-2xl border-2 border-dashed transition-all group-hover:-rotate-12 ${isDarkMode ? 'bg-black border-zinc-800 group-hover:border-[#FF4F01] group-hover:text-[#FF4F01] text-zinc-600' : 'bg-slate-50 border-slate-200 group-hover:border-[#FF4F01] group-hover:text-[#FF4F01] text-slate-400'}`}>
-                                            <FileUp size={48} />
-                                        </div>
-                                        <div className="text-center space-y-2">
-                                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-[#FF4F01]' : 'text-[#FF4F01]'}`}>Cache File</p>
-                                            <h3 className={`text-xl font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Import JSON File</h3>
-                                            <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Upload an MT5 Export JSON<br />Array of OHLC objects</p>
-                                        </div>
-                                        <div className={`px-6 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'bg-black border-zinc-700 text-zinc-400 group-hover:text-[#FF4F01]' : 'bg-white border-slate-200 text-slate-500 group-hover:text-[#FF4F01]'}`}>
-                                            Browse Files
-                                        </div>
-                                    </label>
-
-                                    {/* Option 3: Recent Sessions */}
-                                    <div
-                                        className={`p-8 rounded-3xl border-2 border-dashed flex flex-col items-center justify-start gap-6 transition-all group overflow-hidden ${isDarkMode ? 'bg-black/80 border-zinc-800 hover:border-purple-500/50 hover:bg-purple-500/5' : 'bg-white border-slate-200 hover:border-purple-500/50'}`}
-                                    >
-                                        <div className="flex flex-col items-center gap-4 w-full h-full">
-                                            <div className={`p-6 rounded-2xl border-2 border-dashed transition-all group-hover:scale-110 ${isDarkMode ? 'bg-black border-zinc-800 group-hover:border-purple-500 group-hover:text-purple-500 text-zinc-600' : 'bg-slate-50 border-slate-200 group-hover:border-purple-500 group-hover:text-purple-500 text-slate-400'}`}>
-                                                <Database size={48} />
-                                            </div>
-                                            <div className="text-center space-y-2">
-                                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>Saved Sessions</p>
-                                                <h3 className={`text-xl font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Recent Sessions</h3>
-                                                <p className={`text-xs font-bold uppercase tracking-widest leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Continue where you left off<br />Saved to your JFX Cloud</p>
-                                            </div>
-
-                                            <div className="flex-1 w-full space-y-2 mt-2 overflow-y-auto max-h-[220px] pr-2 custom-scrollbar">
-                                                {isLoadingSessions ? (
-                                                    <div className="flex items-center justify-center py-10">
-                                                        <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                                                    </div>
-                                                ) : savedSessions.length === 0 ? (
-                                                    <div className="flex flex-col items-center justify-center py-10 opacity-30 text-center">
-                                                        <Database size={24} className="mb-2" />
-                                                        <p className="text-[10px] font-black uppercase tracking-widest">No Cloud Data</p>
-                                                    </div>
-                                                ) : (
-                                                    savedSessions.slice(0, 1).map((sess) => (
-                                                        <button
-                                                            key={sess.id}
-                                                            onClick={() => handleLoadSession(sess)}
-                                                            className={`w-full flex items-center justify-between p-4 rounded-xl border text-left transition-all group/item ${isDarkMode ? 'bg-black/40 border-zinc-800 hover:border-emerald-500/30 hover:bg-emerald-500/5' : 'bg-white border-slate-200 hover:border-emerald-500/30 hover:bg-emerald-50/50'}`}
-                                                        >
-                                                            <div className="flex flex-col gap-1">
-                                                                <span className={`text-sm font-black tracking-tight ${isDarkMode ? 'text-zinc-100' : 'text-slate-900'}`}>{sess.symbol}</span>
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="px-1.5 py-0.5 rounded bg-zinc-500/10 text-[8px] font-bold text-zinc-500 uppercase">{sess.timeframe}</span>
-                                                                    <span className="text-[8px] font-bold text-zinc-500 uppercase">{new Date(sess.updated_at).toLocaleDateString()}</span>
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex items-center gap-3">
-                                                                <span className="text-[8px] font-black uppercase tracking-widest opacity-0 group-hover/item:opacity-40 transition-opacity">Quick Load</span>
-                                                                <ChevronRight size={16} className="text-zinc-600 group-hover/item:translate-x-1 transition-transform" />
-                                                            </div>
-                                                        </button>
-                                                    ))
-                                                )}
-
-                                            </div>
-
-                                            {savedSessions.length > 0 && (
-                                                <button
-                                                    onClick={() => setIsSettingsOpen(true)}
-                                                    className={`w-full py-3 rounded-xl border border-dashed text-[9px] font-black uppercase tracking-[0.2em] transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10 hover:text-white' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-white hover:text-slate-900'
-                                                        }`}
-                                                >
-                                                    View All ({savedSessions.length})
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Option 4: cTrader Historical Card */}
-                                    <div
-                                        className={`p-6 rounded-3xl border-2 border-dashed flex flex-col justify-between gap-4 transition-all group overflow-hidden ${
-                                            isDarkMode
-                                                ? 'bg-black/80 border-zinc-800 hover:border-[#0061FF]/50 hover:bg-[#0061FF]/5'
-                                                : 'bg-white border-slate-200 hover:border-[#0061FF]/50'
-                                        }`}
-                                    >
-                                        <div className="flex flex-col items-center gap-3 w-full">
-                                            <div className={`p-4 rounded-2xl border-2 border-dashed transition-all group-hover:scale-105 ${
-                                                isDarkMode
-                                                    ? 'bg-black border-zinc-800 group-hover:border-[#0061FF] group-hover:text-[#60efff] text-zinc-600'
-                                                    : 'bg-slate-50 border-slate-200 group-hover:border-[#0061FF] group-hover:text-[#0061FF] text-slate-400'
-                                            }`}>
-                                                <Zap size={36} />
-                                            </div>
-                                            <div className="text-center space-y-1">
-                                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${
-                                                    isDarkMode ? 'text-[#60efff]' : 'text-[#0061FF]'
-                                                }`}>Historical Data</p>
-                                                <h3 className={`text-xl font-black uppercase tracking-tight ${
-                                                    isDarkMode ? 'text-white' : 'text-slate-900'
-                                                }`}>cTrader API</h3>
-                                            </div>
-                                        </div>
-
-                                        {/* Connection status */}
-                                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-widest ${ctraderConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-rose-500/30 bg-rose-500/10 text-rose-400'}`}>
-                                            <span className={`w-1.5 h-1.5 rounded-full ${ctraderConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-                                            {ctraderConnected ? 'Connected' : 'Not Connected'}
-                                        </div>
-
-                                        {/* In-Card Date Selection Controls */}
-                                        <div className="w-full space-y-2.5 bg-black/20 p-3 rounded-2xl border border-zinc-800/60">
-                                            {/* Quick Date Presets */}
-                                            <div>
-                                                <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500 mb-1">
-                                                    <span>Jump to Date</span>
-                                                    <span className="text-[#60efff] font-mono">{ctraderFetchDate}</span>
-                                                </div>
-                                                <div className="grid grid-cols-4 gap-1">
-                                                    {[
-                                                        { label: '7D', days: 7 },
-                                                        { label: '1M', days: 30 },
-                                                        { label: '3M', days: 90 },
-                                                        { label: '1Y', days: 365 },
-                                                    ].map(p => (
-                                                        <button
-                                                            key={p.label}
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleApplyCtraderDatePreset(p.days);
-                                                            }}
-                                                            className={`py-1 rounded-lg text-[9px] font-black uppercase transition-all ${
-                                                                isDarkMode
-                                                                    ? 'bg-[#000000] hover:bg-[#111111] text-zinc-300 border border-zinc-800 hover:border-[#0061FF]/50'
-                                                                    : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-                                                            }`}
-                                                        >
-                                                            {p.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            {/* Date Picker Input */}
-                                            <div className="space-y-1">
-                                                <label className="text-[8px] font-black uppercase tracking-widest text-zinc-500 flex items-center gap-1">
-                                                    <Calendar size={10} className="text-[#0061FF]" /> Select Date
-                                                </label>
-                                                <input
-                                                    type="date"
-                                                    value={ctraderFetchDate}
-                                                    onChange={(e) => setCtraderFetchDate(e.target.value)}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none border transition-all ${
-                                                        isDarkMode
-                                                            ? 'bg-black border-zinc-800 text-white focus:border-[#0061FF]'
-                                                            : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0061FF]'
-                                                    }`}
-                                                />
-                                            </div>
-
-                                            {/* Timeframe & Candle Count */}
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div className="space-y-1">
-                                                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 block">TF</span>
-                                                    <select
-                                                        value={ctraderFetchTimeframe}
-                                                        onChange={(e) => {
-                                                            e.stopPropagation();
-                                                            setCtraderFetchTimeframe(e.target.value);
-                                                        }}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${
-                                                            isDarkMode
-                                                                ? 'bg-black border-zinc-800 text-white'
-                                                                : 'bg-slate-50 border-slate-200 text-slate-800'
-                                                        }`}
-                                                    >
-                                                        {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
-                                                            <option key={tf} value={tf}>{tf}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 block">Bars</span>
-                                                    <select
-                                                        value={ctraderFetchCount}
-                                                        onChange={(e) => {
-                                                            e.stopPropagation();
-                                                            setCtraderFetchCount(Number(e.target.value));
-                                                        }}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        className={`w-full px-2 py-1.5 rounded-lg text-[10px] font-black uppercase outline-none border ${
-                                                            isDarkMode
-                                                                ? 'bg-black border-zinc-800 text-white'
-                                                                : 'bg-slate-50 border-slate-200 text-slate-800'
-                                                        }`}
-                                                    >
-                                                        <option value={250}>250</option>
-                                                        <option value={500}>500</option>
-                                                        <option value={1000}>1000</option>
-                                                        <option value={2000}>2000</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* In-Card Pull Action Button */}
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (!ctraderConnected) {
-                                                    setShowCtraderAuthModal(true);
-                                                    return;
-                                                }
-                                                handleExecuteCtraderDateFetch();
-                                            }}
-                                            disabled={isCtraderFetching}
-                                            className={`w-full py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md ${
-                                                isCtraderFetching
-                                                    ? 'bg-black border-zinc-800 text-zinc-500 cursor-wait'
-                                                    : ctraderConnected
-                                                        ? 'bg-[#1689ff]/20 border-[#48c8ff]/40 text-cyan-100 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_6px_18px_rgba(22,137,255,0.14)] hover:bg-[#1689ff]/30 hover:border-[#48c8ff]/60'
-                                                        : 'bg-[#0061FF] border-[#0061FF] text-white shadow-lg shadow-[#0061FF]/25 hover:bg-[#0052d4]'
-                                            }`}
-                                        >
-                                            {isCtraderFetching ? (
-                                                <><RefreshCw size={12} className="animate-spin" /> Pulling Data...</>
-                                            ) : ctraderConnected ? (
-                                                <><Calendar size={12} /> Pull from Date</>
-                                            ) : (
-                                                <><Zap size={12} /> Connect cTrader</>
-                                            )}
-                                        </button>
+                        {chartLoadingLabel && !showWelcome && (
+                            <motion.div
+                                key="chart-loading-overlay"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className={`absolute inset-0 z-[55] flex items-center justify-center ${isDarkMode ? 'bg-black/50' : 'bg-white/60'} backdrop-blur-[2px]`}
+                            >
+                                <div className={`flex items-center gap-4 px-6 py-4 rounded-2xl border shadow-2xl ${isDarkMode ? 'bg-black/90 border-zinc-700' : 'bg-white/95 border-slate-200'}`}>
+                                    <Loader2 size={22} className="animate-spin text-[#FF4F01] shrink-0" />
+                                    <div>
+                                        <p className={`text-sm font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Loading {chartLoadingLabel}</p>
+                                        <p className={`text-[9px] font-bold uppercase tracking-widest mt-0.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Fetching history — first load can take a few seconds</p>
                                     </div>
                                 </div>
-                            </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Start Screen: single guided entry point (resume / start
+                        fresh / connect) replacing the old 4-card grid. */}
+                    <AnimatePresence>
+                        {showWelcome && (
+                            <motion.div
+                                key="start-screen"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="absolute inset-0 z-[60]"
+                            >
+                                <StartScreen
+                                    isDarkMode={isDarkMode}
+                                    bridgeStatus={bridgeStatus}
+                                    bridgeError={bridgeError}
+                                    ctraderConnected={ctraderConnected}
+                                    cloudSessions={savedSessions}
+                                    isLoadingSessions={isLoadingSessions}
+                                    cachedSeries={cachedSeries}
+                                    starredSymbols={starredSymbols}
+                                    onToggleStar={toggleStar}
+                                    onResumeCache={handleResumeFromCache}
+                                    onResumeSession={handleLoadSession}
+                                    onStart={handleStartFresh}
+                                    onConnectCtrader={handleConnectCtrader}
+                                    onImportJson={handleImportFile}
+                                    defaultSymbol={symbol}
+                                    defaultTimeframe={timeframe}
+                                />
+                            </motion.div>
                         )}
                     </AnimatePresence>
 
@@ -2122,51 +2214,11 @@ setAllData(validData);
                         onClose={() => setShowCtraderAuthModal(false)}
                         onConnect={async () => {
                             setShowCtraderAuthModal(false);
-                            try {
-                                const { getAuthorizeUrl } = await import('../services/ctraderService');
-                                window.location.href = getAuthorizeUrl();
-                            } catch (err: any) {
-                                addToast({
-                                    type: 'error',
-                                    title: 'cTrader Not Configured',
-                                    message: err?.message || 'Failed to initiate cTrader connection.'
-                                });
-                                setIsSettingsOpen(true);
-                            }
+                            await handleConnectCtrader();
                         }}
                     />
-
-                    {analysisResult && (
-                        <div className={`absolute top-4 right-4 w-64 p-4 rounded-xl border backdrop-blur-md shadow-2xl z-20 ${isDarkMode ? 'bg-black/90 border-zinc-800' : 'bg-white/90 border-slate-200'}`}>
-                            <div className="flex items-center justify-between mb-3">
-                                <div className="flex items-center gap-2">
-                                    <Brain size={14} className="text-purple-500" />
-                                    <span className="text-[10px] font-black uppercase tracking-widest">AI Analysis</span>
-                                </div>
-                                <button onClick={() => setAnalysisResult(null)} className="text-zinc-500 hover:text-white"><X size={12} /></button>
-                            </div>
-                            <div className={`text-[10px] font-bold px-2 py-1 rounded mb-2 inline-block ${analysisResult.trend === 'BULLISH' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{analysisResult.trend}</div>
-                            <p className="text-[11px] leading-relaxed opacity-80 italic">"{analysisResult.summary}"</p>
-                        </div>
-                    )}
                 </div>
                 </>
-                ) : (
-                    <div className="flex-1 w-full h-full p-8 flex flex-col items-center justify-center gap-8 overflow-y-auto custom-scrollbar relative z-10">
-                        <div className="text-center space-y-4">
-                            <div className="w-20 h-20 bg-black rounded-[32px] border border-zinc-800 flex items-center justify-center mx-auto mb-6">
-                                <Zap size={32} className="text-[#FF4F01]" />
-                            </div>
-                            <h2 className="text-2xl font-black uppercase tracking-tight text-white">Advanced Optimizer</h2>
-                            <p className="text-sm text-zinc-500 max-w-2xl mx-auto whitespace-normal break-normal">
-                                Upload your backtest data to begin the neural parameter optimization process.
-                            </p>
-                            <button className="px-8 py-4 bg-[#FF4F01] text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-[#e64601] transition-all active:scale-95 shadow-lg shadow-[#FF4F01]/20">
-                                Initialize Optimizer
-                            </button>
-                        </div>
-                    </div>
-                )}
 
                 {/* TradingView-style Watchlist Sidebar (matches ChartGrid) */}
                 <div className={`${isWatchlistOpen ? 'w-72 translate-x-0' : 'w-0 translate-x-full'} shrink-0 border-l flex flex-col overflow-hidden transition-all duration-300 ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200'}`}>
@@ -2197,8 +2249,7 @@ setAllData(validData);
                 </div>
             </div>
 
-            {activeLabTab === 'chart' && (
-                <div className={`h-16 shrink-0 border-t flex items-center px-8 justify-between relative z-20 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white'}`}>
+            <div className={`h-16 shrink-0 border-t flex items-center px-8 justify-between relative z-20 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white'}`}>
                     <div className="flex items-center gap-3">
                     </div>
                     <div className={`absolute left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 rounded-2xl border backdrop-blur shadow-2xl ${isDarkMode ? 'bg-black/80 border-zinc-800' : 'bg-slate-50/80 border-slate-200'}`}>
@@ -2258,7 +2309,6 @@ setAllData(validData);
                         )}
                     </div>
                 </div>
-            )}
             {isSettingsOpen && (
                 <div className="fixed inset-0 flex justify-end pointer-events-auto" style={{ zIndex: 9999 }}>
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setIsSettingsOpen(false)} />

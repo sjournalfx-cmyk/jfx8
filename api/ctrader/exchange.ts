@@ -112,7 +112,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!tokenRes.ok) {
       const errMsg = body?.description || body?.error_description || body?.error || rawText;
-      console.error('cTrader exchange HTTP error:', tokenRes.status, errMsg);
+      // Log the status code only — upstream response bodies can contain
+      // sensitive fragments and must not end up in server logs.
+      console.error('cTrader exchange HTTP error:', tokenRes.status);
       res.status(502).json({
         error: errMsg || 'Token exchange failed',
         status: tokenRes.status,

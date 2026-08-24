@@ -7,13 +7,13 @@ import { useToast } from '../components/ui/Toast';
 import { getSASTDateTime } from '../lib/timeUtils';
 
 import { useLocalStorage } from './useLocalStorage';
+import { repairCtraderTradeDirections } from '../lib/tradeDirectionRepair';
 
 export const useData = (userId: string | null, userProfile: UserProfile | null) => {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [dailyBias, setDailyBias] = useState<DailyBias[]>([]);
   const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>([]);
-  const [cashTransactionsAvailable, setCashTransactionsAvailable] = useLocalStorage<boolean>('jfx_cash_transactions_available', true);
   const [eaSession, setEASession] = useLocalStorage<EASession | null>(`jfx_ea_session_${userId}`, null);
   const [lastKnownBridgeBalance, setLastKnownBridgeBalance] = useLocalStorage<number | null>(`jfx_last_bridge_balance_${userId}`, null);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
@@ -88,22 +88,38 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
         dataService.getDailyBias(currentUserId)
       ]);
 
-      // Cash transactions table may not exist yet - fetch separately with try/catch
-      let fetchedCashTransactions: CashTransaction[] = [];
-      if (cashTransactionsAvailable) {
-        try {
-          fetchedCashTransactions = await dataService.getCashTransactions(currentUserId);
-          setCashTransactionsAvailable(true);
-        } catch (cashError) {
-          // Table likely doesn't exist yet, ignore further attempts until it is created.
-          setCashTransactionsAvailable(false);
-        }
+      // Cash transactions load independently and NEVER blank out existing
+      // state on failure — a flaky request must not wipe visible rows.
+      // (dataService already serves cache + unsynced queue when offline.)
+      let fetchedCashTransactions: CashTransaction[] | null = null;
+      try {
+        fetchedCashTransactions = await dataService.getCashTransactions(currentUserId);
+      } catch (cashError) {
+        console.warn('Cash transactions fetch failed; keeping current state:', cashError);
       }
 
-      setTrades(fetchedTrades);
+      const { trades: repairedTrades, changed: directionFixes } = repairCtraderTradeDirections(fetchedTrades);
+      setTrades(repairedTrades);
+
+      if (directionFixes.length > 0) {
+        Promise.all(directionFixes.map(trade => dataService.updateTrade(trade)))
+          .then(() => {
+            addToast({
+              type: 'info',
+              title: 'Trade Directions Corrected',
+              message: `${directionFixes.length} cTrader trade(s) were synced with an inverted direction and have been fixed.`,
+              duration: 8000
+            });
+          })
+          .catch((error) => {
+            console.error("Failed to persist cTrader direction repairs:", error);
+          });
+      }
       setNotes(fetchedNotes);
       setDailyBias(fetchedBias);
-      setCashTransactions(fetchedCashTransactions);
+      if (fetchedCashTransactions !== null) {
+        setCashTransactions(fetchedCashTransactions);
+      }
       
       if (currentUserProfile && currentUserProfile.eaConnected && currentUserProfile.syncKey) {
         const session = await dataService.getEASession(currentUserProfile.syncKey);
@@ -140,7 +156,7 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
     if (userId) {
       loadInitialData(userId, userProfile);
     }
-  }, [userId, userProfile, cashTransactionsAvailable]);
+  }, [userId, userProfile]);
 
   useEffect(() => {
     if (!userId) return;
@@ -161,11 +177,12 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
   }, [userId]);
 
   useEffect(() => {
+    // dataService still broadcasts availability; we only use it to clear any
+    // stale persisted flag from older versions. Fetching is no longer gated.
     const handleCashTransactionsAvailability = (event: Event) => {
-      const detail = (event as CustomEvent<{ available?: boolean }>).detail;
-      if (typeof detail?.available === 'boolean') {
-        setCashTransactionsAvailable(detail.available);
-      }
+      try {
+        window.localStorage.setItem('jfx_cash_transactions_available', 'true');
+      } catch { /* blocked */ }
     };
 
     window.addEventListener('jfx-cash-transactions-availability', handleCashTransactionsAvailability as EventListener);

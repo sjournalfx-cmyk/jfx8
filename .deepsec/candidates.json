@@ -168,6 +168,42 @@
   "snip": "const CLIENT_ID = process.env.CTRADER_CLIENT_ID || ''; const CLIENT_SECRET = process.env.CTRADER_CLIENT_SECRET || '';"
  },
  {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "auth-bypass",
+  "lines": "139",
+  "snip": "} const authHeader = req.headers['authorization'] || ''; const accessToken = authHeader.replace(/^Bearer\\s+/i, '').trim();"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "missing-auth",
+  "lines": "127",
+  "snip": "} export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Content-Type', 'application/json'); // This is called by the s"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "secret-in-fallback",
+  "lines": "10",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "env-var-as-bool",
+  "lines": "10",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "process-env-access",
+  "lines": "9",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/accounts.ts",
+  "slug": "process-env-access",
+  "lines": "10",
+  "snip": "clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER"
+ },
+ {
   "file": "api/ctrader/callback.ts",
   "slug": "missing-auth",
   "lines": "10",
@@ -258,6 +294,78 @@
   "snip": "if (body.refreshToken) { res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=${encodeURIComponent(String(body.refreshToken))}; HttpOnly; Secure; SameSite=Lax; Path"
  },
  {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "missing-auth",
+  "lines": "51",
+  "snip": "} export default async function handler(req: VercelRequest, res: VercelResponse) { // This endpoint is only called by the same-origin SPA. Keeping it // depende"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "insecure-crypto",
+  "lines": "21,114,126,127",
+  "snip": "// Exact-match allowlist for redirect_uri hosts (port stripped). Suffix matching // (e.g. \"endsWith('.vercel.app')\") and trusting the Host / x-forwarded-host //"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "jwt-handling",
+  "lines": "140,142",
+  "snip": "// readable by JavaScript (mitigates XSS token theft). The access token is // returned to the client and kept in memory only. if (body.refreshToken) { res.setHe"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "secret-in-fallback",
+  "lines": "15",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "secret-in-log",
+  "lines": "133",
+  "snip": "if (!body.accessToken) { res.status(502).json({ error: 'cTrader exchange returned no access token' }); return;"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "oauth-flow",
+  "lines": "19,69,72,77,78,101",
+  "snip": "} // Exact-match allowlist for redirect_uri hosts (port stripped). Suffix matching // (e.g. \"endsWith('.vercel.app')\") and trusting the Host / x-forwarded-host "
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "oauth-flow",
+  "lines": "99",
+  "snip": "try { const tokenUrl = new URL(CTRADER_TOKEN_URL); tokenUrl.searchParams.set('grant_type', 'authorization_code'); tokenUrl.searchParams.set('code', code); token"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "env-var-as-bool",
+  "lines": "15",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "process-env-access",
+  "lines": "14",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "process-env-access",
+  "lines": "15",
+  "snip": "clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "process-env-access",
+  "lines": "30",
+  "snip": "function getAllowedRedirectHosts(): Set<string> { const fromEnv = (process.env.CTRADER_ALLOWED_REDIRECT_HOSTS || '') .split(',')"
+ },
+ {
+  "file": "api/ctrader/exchange.ts",
+  "slug": "session-cookie-config",
+  "lines": "141",
+  "snip": "if (body.refreshToken) { res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=${encodeURIComponent(String(body.refreshToken))}; HttpOnly; Secure; SameSite=Lax; Path"
+ },
+ {
   "file": "api/ctrader/logout.ts",
   "slug": "missing-auth",
   "lines": "5",
@@ -273,6 +381,12 @@
   "file": "api/ctrader/logout.ts",
   "slug": "session-cookie-config",
   "lines": "20",
+  "snip": "res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`, ]); res.status(200).json({ ok: true }); }"
+ },
+ {
+  "file": "api/ctrader/logout.ts",
+  "slug": "session-cookie-config",
+  "lines": "21",
   "snip": "res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`, ]); res.status(200).json({ ok: true }); }"
  },
  {
@@ -330,6 +444,54 @@
   "snip": "if (tokens.refresh_token) { res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=${encodeURIComponent(String(tokens.refresh_token))}; HttpOnly; Secure; SameSite=Lax"
  },
  {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "missing-auth",
+  "lines": "13",
+  "snip": "} export default async function handler(req: VercelRequest, res: VercelResponse) { // Same-origin endpoint; do not depend on the shared CORS helper at function "
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "jwt-handling",
+  "lines": "31,32,46",
+  "snip": "// The refresh token is only ever read from the httpOnly cookie set during the // exchange — never from the request body, which a script attacker could supply. "
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "secret-in-fallback",
+  "lines": "9",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "oauth-flow",
+  "lines": "45",
+  "snip": "try { const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId,"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "env-var-as-bool",
+  "lines": "9",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "process-env-access",
+  "lines": "8",
+  "snip": "return { clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VIT"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "process-env-access",
+  "lines": "9",
+  "snip": "clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '', clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER"
+ },
+ {
+  "file": "api/ctrader/refresh.ts",
+  "slug": "session-cookie-config",
+  "lines": "71",
+  "snip": "if (tokens.refresh_token) { res.setHeader('Set-Cookie', [ `${REFRESH_COOKIE}=${encodeURIComponent(String(tokens.refresh_token))}; HttpOnly; Secure; SameSite=Lax"
+ },
+ {
   "file": "api/economic-calendar.ts",
   "slug": "missing-auth",
   "lines": "16",
@@ -340,6 +502,12 @@
   "slug": "cors-wildcard",
   "lines": "17",
   "snip": "export default async function handler(req: VercelRequest, res: VercelResponse) { res.setHeader('Access-Control-Allow-Origin', '*'); res.setHeader('Access-Contro"
+ },
+ {
+  "file": "api/economic-calendar.ts",
+  "slug": "missing-auth",
+  "lines": "17",
+  "snip": "Array.isArray(value) ? value[0] : value; export default async function handler(req: VercelRequest, res: VercelResponse) { applyCorsHeaders(res, req.headers); re"
  },
  {
   "file": "api/finnhub/[[route]].ts",
@@ -384,6 +552,42 @@
   "snip": "const apiKey = process.env.FINNHUB_API_KEY; if (!apiKey) {"
  },
  {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "missing-auth",
+  "lines": "31",
+  "snip": "}; export default async function handler(req: VercelRequest, res: VercelResponse) { applyCorsHeaders(res, req.headers); res.setHeader('Access-Control-Allow-Meth"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "ssrf",
+  "lines": "78",
+  "snip": "try { const upstream = await fetch(`${FINNHUB_BASE}${endpoint}?${params.toString()}`); const payload = await upstream.json().catch(() => null);"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "insecure-crypto",
+  "lines": "60",
+  "snip": "} if (SYMBOL_REQUIRED.includes(suffix)) { const symbol = getSingle(req.query?.symbol); if (!symbol) {"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "secret-in-log",
+  "lines": "68",
+  "snip": "const params = new URLSearchParams({ token: apiKey }); if (req.query) {"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "env-var-as-bool",
+  "lines": "46",
+  "snip": "} const apiKey = process.env.FINNHUB_API_KEY; if (!apiKey) { res.status(500).json({ error: 'Missing FINNHUB_API_KEY environment variable' });"
+ },
+ {
+  "file": "api/finnhub/[[route]].ts",
+  "slug": "process-env-access",
+  "lines": "46",
+  "snip": "const apiKey = process.env.FINNHUB_API_KEY; if (!apiKey) {"
+ },
+ {
   "file": "api/fmp/[[route]].ts",
   "slug": "missing-auth",
   "lines": "44",
@@ -417,6 +621,36 @@
   "file": "api/fmp/[[route]].ts",
   "slug": "process-env-access",
   "lines": "59",
+  "snip": "const apiKey = process.env.FMP_API_KEY; if (!apiKey) {"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "missing-auth",
+  "lines": "45",
+  "snip": "}; export default async function handler(req: VercelRequest, res: VercelResponse) { applyCorsHeaders(res, req.headers); res.setHeader('Access-Control-Allow-Meth"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "ssrf",
+  "lines": "93",
+  "snip": "try { const upstream = await fetch(`${FMP_BASE}${endpoint}?${params.toString()}`); const payload = await upstream.json().catch(() => null);"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "insecure-crypto",
+  "lines": "32,74",
+  "snip": "} if (status === 403 || status === 404) { return 'This endpoint requires a paid FMP plan. The free plan provides Quote, Profile, Treasury Rates, and Earnings Ca"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "env-var-as-bool",
+  "lines": "60",
+  "snip": "} const apiKey = process.env.FMP_API_KEY; if (!apiKey) { res.status(500).json({ error: 'Missing FMP_API_KEY environment variable' });"
+ },
+ {
+  "file": "api/fmp/[[route]].ts",
+  "slug": "process-env-access",
+  "lines": "60",
   "snip": "const apiKey = process.env.FMP_API_KEY; if (!apiKey) {"
  },
  {
@@ -462,6 +696,42 @@
   "snip": "const apiKey = process.env.MODAL_RESEARCH_API_KEY; if (!apiKey) {"
  },
  {
+  "file": "api/modal-research.ts",
+  "slug": "missing-auth",
+  "lines": "24",
+  "snip": "const MODAL_CHAT_URL = 'https://api.us-west-2.modal.direct/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelResponse) "
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "insecure-crypto",
+  "lines": "85",
+  "snip": "upstream.headers.forEach((value, key) => { const lower = key.toLowerCase(); if (['content-length', 'connection', 'transfer-encoding', 'content-encoding'].includ"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "secret-in-log",
+  "lines": "77",
+  "snip": "'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, },"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "env-var-as-bool",
+  "lines": "54",
+  "snip": "} const apiKey = process.env.MODAL_RESEARCH_API_KEY; if (!apiKey) { res.status(500).json({ error: 'Modal API key is not configured on the server' });"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "expensive-api-abuse",
+  "lines": "22",
+  "snip": "}; const MODAL_CHAT_URL = 'https://api.us-west-2.modal.direct/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelRespons"
+ },
+ {
+  "file": "api/modal-research.ts",
+  "slug": "process-env-access",
+  "lines": "54",
+  "snip": "const apiKey = process.env.MODAL_RESEARCH_API_KEY; if (!apiKey) {"
+ },
+ {
   "file": "api/nvidia.ts",
   "slug": "missing-auth",
   "lines": "22",
@@ -504,6 +774,42 @@
   "snip": "// get inlined into the client bundle. const apiKey = process.env.NVIDIA_API_KEY; if (!apiKey) {"
  },
  {
+  "file": "api/nvidia.ts",
+  "slug": "missing-auth",
+  "lines": "24",
+  "snip": "const NVIDIA_CHAT_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelResponse) {"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "insecure-crypto",
+  "lines": "87",
+  "snip": "upstream.headers.forEach((value, key) => { const lower = key.toLowerCase(); if (['content-length', 'connection', 'transfer-encoding', 'content-encoding'].includ"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "secret-in-log",
+  "lines": "79",
+  "snip": "'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, },"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "env-var-as-bool",
+  "lines": "56",
+  "snip": "// Server-only key. Never fall back to a hardcoded or VITE_* value — VITE_* vars // get inlined into the client bundle. const apiKey = process.env.NVIDIA_API_KE"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "expensive-api-abuse",
+  "lines": "22",
+  "snip": "}; const NVIDIA_CHAT_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'; export default async function handler(req: VercelRequest, res: VercelResponse"
+ },
+ {
+  "file": "api/nvidia.ts",
+  "slug": "process-env-access",
+  "lines": "56",
+  "snip": "// get inlined into the client bundle. const apiKey = process.env.NVIDIA_API_KEY; if (!apiKey) {"
+ },
+ {
   "file": "api/transcribe.ts",
   "slug": "missing-auth",
   "lines": "12",
@@ -534,6 +840,30 @@
   "snip": "const apiKey = process.env.OPENAI_API_KEY; if (!apiKey) {"
  },
  {
+  "file": "api/transcribe.ts",
+  "slug": "missing-auth",
+  "lines": "14",
+  "snip": "const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB export default async function handler(req: VercelRequest, res: VercelResponse) { applyCorsHeaders(res, req.he"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "secret-in-log",
+  "lines": "60",
+  "snip": "headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': req.headers['content-type'] || 'multipart/form-data',"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "env-var-as-bool",
+  "lines": "50",
+  "snip": "} const apiKey = process.env.OPENAI_API_KEY; if (!apiKey) { res.status(500).json({ error: 'OpenAI API key not configured on server' });"
+ },
+ {
+  "file": "api/transcribe.ts",
+  "slug": "process-env-access",
+  "lines": "50",
+  "snip": "const apiKey = process.env.OPENAI_API_KEY; if (!apiKey) {"
+ },
+ {
   "file": "api/_lib/auth.ts",
   "slug": "secret-in-fallback",
   "lines": "4",
@@ -558,6 +888,24 @@
   "snip": "const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''; const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VIT"
  },
  {
+  "file": "api/_lib/cors.ts",
+  "slug": "cors-wildcard",
+  "lines": "4,29",
+  "snip": "* CORS origin allowlist shared by the serverless API routes. * * Replaces the previous `Access-Control-Allow-Origin: *` on every endpoint: * the header is now o"
+ },
+ {
+  "file": "api/_lib/cors.ts",
+  "slug": "cors-wildcard",
+  "lines": "29,36",
+  "snip": "} /** Sets Access-Control-Allow-Origin (only for allowlisted origins) + Vary: Origin. */ export function applyCorsHeaders( res: { setHeader: (name: string, valu"
+ },
+ {
+  "file": "api/_lib/rateLimit.ts",
+  "slug": "insecure-crypto",
+  "lines": "41,42",
+  "snip": "if (bucket.timestamps.length >= limit) { buckets.set(key, bucket); const oldest = bucket.timestamps[0]; return { allowed: false, retryAfterMs: windowMs - (now -"
+ },
+ {
   "file": "App.tsx",
   "slug": "xss",
   "lines": "982",
@@ -567,6 +915,18 @@
   "file": "App.tsx",
   "slug": "insecure-crypto",
   "lines": "33,54,152,161,171,205,206,225,267,281,308,346,368,371,374,395,404,416,425,426,428,432,446,453,455,463,474,492,494,498,502,507,511,522,525,529,534,536,539,540,541,543,546,547,548,552,558,560,565,566,571,573,577,584,588,595,602,606,615,619,720,780,810,816,911,919,935,941,975,993,1007,1020,1036,1052,1059,1070,1072,1073,1083,1140,1144,1145,1156,1159,1180",
+  "snip": "import { getSafePnL } from './lib/trade-normalization'; import { normalizeThemePreference } from './lib/theme'; import { demoDailyBias, demoEASession, demoNotes"
+ },
+ {
+  "file": "App.tsx",
+  "slug": "xss",
+  "lines": "1008",
+  "snip": "</div> )} <div className={`compact-scale flex h-screen w-full transition-colors duration-300 ${isDemoMode ? 'pt-16' : ''} ${isDarkMode ? 'text-zinc-100' : 'bg-s"
+ },
+ {
+  "file": "App.tsx",
+  "slug": "insecure-crypto",
+  "lines": "34,55,153,162,172,206,207,231,284,298,338,378,402,405,408,429,438,450,459,460,462,466,480,487,489,497,508,510,514,518,523,527,538,545,551,555,560,562,565,566,567,569,572,573,574,578,584,586,591,592,597,599,603,610,614,621,628,632,641,645,746,806,836,842,937,945,961,967,1001,1019,1032,1045,1061,1077,1084,1095,1097,1098,1109,1167,1171,1172,1183,1186,1207",
   "snip": "import { getSafePnL } from './lib/trade-normalization'; import { normalizeThemePreference } from './lib/theme'; import { demoDailyBias, demoEASession, demoNotes"
  },
  {
@@ -606,6 +966,12 @@
   "snip": "} if (containerRef.current && isMounted) { containerRef.current.innerHTML = svg; const svgElement = containerRef.current.querySelector('svg'); if (svgElement) {"
  },
  {
+  "file": "components/ai/AIWidgets.tsx",
+  "slug": "xss",
+  "lines": "74,78,82,85,91,96,102,112,137,154,160",
+  "snip": "> {/* Header */} <div className={`px-4 py-3 border-b flex items-center justify-between ${ isDarkMode ? 'border-white/8 bg-white/[0.03]' : 'border-slate-200 bg-s"
+ },
+ {
   "file": "components/ai/TradingPlanBento.tsx",
   "slug": "xss",
   "lines": "224,228,261,262,295,312,330,331,337,354,373,391,413,444,449,464,483,489,517,522,591",
@@ -615,6 +981,18 @@
   "file": "components/ai/TradingPlanBento.tsx",
   "slug": "insecure-crypto",
   "lines": "150,337,346",
+  "snip": "filtered = filtered.filter(([key, cfg]) => { const content = sections[key]?.toLowerCase() || ''; return cfg.label.toLowerCase().includes(query) || content.inclu"
+ },
+ {
+  "file": "components/ai/TradingPlanBento.tsx",
+  "slug": "xss",
+  "lines": "221,225,258,259,292,309,327,328,334,351,370,388,410,441,447,475,480,549",
+  "snip": "> <div className=\"flex items-center gap-3\"> <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-black/40' : 'bg-white shadow-sm border border-slate-200'} ${confi"
+ },
+ {
+  "file": "components/ai/TradingPlanBento.tsx",
+  "slug": "insecure-crypto",
+  "lines": "147,334,343",
   "snip": "filtered = filtered.filter(([key, cfg]) => { const content = sections[key]?.toLowerCase() || ''; return cfg.label.toLowerCase().includes(query) || content.inclu"
  },
  {
@@ -696,6 +1074,66 @@
   "snip": "const url = paramStr ? `${baseUrl}?${paramStr}` : baseUrl; const response = await fetch(url); const payload = await response.json().catch(() => ({}));"
  },
  {
+  "file": "components/AIChat.tsx",
+  "slug": "xss",
+  "lines": "454,456,469,472,610,611,627,629,634,728,733,864,865,890,894,895,2478,2487,2516,2517,2528,2567,2569,2573,2587,2588,2589,2597,2600,2613,2614,2615,2623,2626,2637,2638,2639,2660,2666,2680,2682,2686,2694,2756,2766,2784,2785,2790,2802,2809,2841,2842,2847,2858,2878,2879,2884,2903,2923,2935,2966,2967,2972,2989,2996,3008,3023,3024,3030,3042,3056,3088,3089,3094,3106,3113,3125,3140,3141,3144,3152,3154,3158,3160,3223,3224,3243,3245,3290,3328,3343,3365,3367,3381,3383,3410,3427,3433,3435,3439,3450,3459,3462,3463,3521,3527,3537,3662,3669,3678,3681",
+  "snip": "return ( <div className={`rounded-xl border px-2 py-1.5 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white/80'}`}> <audio ref={audioRef} p"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "1809",
+  "snip": "const from = new Date().toISOString().split('T')[0]; const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]; const calRes = await fetch(`/ap"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2025",
+  "snip": "const [incRes, balRes, cfRes] = await Promise.all([ fetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() "
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2026",
+  "snip": "fetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))), fetch(`/api/fmp/balance-sheet?symbol=${en"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2031",
+  "snip": "} else if (kind === 'ratios' && symbol) { const [ratRes, groRes] = await Promise.all([ fetch(`/api/fmp/ratios?symbol=${encodeURIComponent(symbol)}`).then(r => r"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2032",
+  "snip": "const [ratRes, groRes] = await Promise.all([ fetch(`/api/fmp/ratios?symbol=${encodeURIComponent(symbol)}`).then(r => r.json().catch(() => ({}))), fetch(`/api/fm"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "ssrf",
+  "lines": "2114",
+  "snip": "const from = new Date().toISOString().split('T')[0]; const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]; const response = await fetch(`/"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "insecure-crypto",
+  "lines": "94,96,204,205,206,207,208,209,210,211,215,216,219,221,222,223,226,227,228,233,234,235,238,254,255,256,261,302,303,305,497,839,855,870,895,906,907,908,909,915,916,920,921,1018,1023,1024,1025,1026,1027,1028,1029,1030,1031,1033,1034,1035,1036,1037,1038,1039,1040,1041,1042,1045,1052,1053,1054,1055,1056,1057,1073,1078,1080,1082,1083,1086,1088,1160,1167,1276,1598,1759,1760,1768,1780,1834,1849,1851,1853,1855,1872,1874,1876,1878,1884,1885,1886,1887,1889,1892,1903,2241,2258,2336,2370,2389,2405,2423,2583,2588,2614,2632,2633,2635,2638,2815,2821,2905,2978,2984,3062,3068,3089,3153,3159,3245,3367,3411,3489,3521,3711,3723,3739,3758",
+  "snip": "}; const rawLines = normalized.includes('\\n') ? normalized.split('\\n') : normalized.includes('|')"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "untrusted-redirect-following",
+  "lines": "2038",
+  "snip": "const url = symbol ? `${baseUrl}?symbol=${encodeURIComponent(symbol)}` : baseUrl; const response = await fetch(url); const payload = await response.json().catch"
+ },
+ {
+  "file": "components/AIChat.tsx",
+  "slug": "untrusted-redirect-following",
+  "lines": "2082",
+  "snip": "const url = paramStr ? `${baseUrl}?${paramStr}` : baseUrl; const response = await fetch(url); const payload = await response.json().catch(() => ({}));"
+ },
+ {
   "file": "components/analytics/CashTransactionsView.tsx",
   "slug": "insecure-crypto",
   "lines": "43,60,97,111,132,141,165,269,303,352,442,445,446,453,464,476,521,584,604,617,644,667,750,765",
@@ -708,6 +1146,18 @@
   "snip": "const saved = { ...transactionToSave, id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }; setLocalTransactions(prev => [saved, ...prev.filter"
  },
  {
+  "file": "components/analytics/CashTransactionsView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "45,62,99,113,134,143,167,271,305,354,444,447,448,455,466,478,523,586,606,619,646,669,752,767",
+  "snip": "type: CashTransactionType; date: string; description?: string; };"
+ },
+ {
+  "file": "components/analytics/CashTransactionsView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "104",
+  "snip": "const saved = { ...transactionToSave, id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }; setLocalTransactions(prev => [saved, ...prev.filter"
+ },
+ {
   "file": "components/analytics/ComparisonView.tsx",
   "slug": "xss",
   "lines": "257,340,343,359,363,401,406,414,423,424,425,427,428,429",
@@ -717,6 +1167,18 @@
   "file": "components/analytics/ComparisonView.tsx",
   "slug": "insecure-crypto",
   "lines": "14,19,22,24,25,26,27,39,41,44,47,104,140,141,143,144,148,150,151,153,154,158,160,161,163,164,167,168,170,171,173,174,177,178,181,182,187,191,192,193,194,227,230,238,239,262,348,354,371,378,387,388,425,429",
+  "snip": "interface ComparisonViewProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/ComparisonView.tsx",
+  "slug": "xss",
+  "lines": "258,341,344,360,364,402,407,415,424,425,426,428,429,430",
+  "snip": "return ( <div className=\"space-y-8 pb-20\"> {/* Comparison Mode Switcher */} <div className={`p-1.5 rounded-2xl border flex items-center w-fit gap-1 mx-auto ${is"
+ },
+ {
+  "file": "components/analytics/ComparisonView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "14,20,23,25,26,27,28,40,42,45,48,105,141,142,144,145,149,151,152,154,155,159,161,162,164,165,168,169,171,172,174,175,178,179,182,183,188,192,193,194,195,228,231,239,240,263,349,355,372,379,388,389,426,430",
   "snip": "interface ComparisonViewProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
  },
  {
@@ -771,6 +1233,24 @@
   "file": "components/analytics/EquityCurveWidget.tsx",
   "slug": "insecure-crypto",
   "lines": "34",
+  "snip": "<div className=\"h-[200px] flex items-end gap-1 px-2\"> {[...Array(24)].map((_, i) => ( <div key={i} className=\"flex-1 bg-black rounded-t\" style={{ height: `${15 "
+ },
+ {
+  "file": "components/analytics/EquityCurveWidget.tsx",
+  "slug": "xss",
+  "lines": "35,105,119,130,141,150,156,264,270,277,279,284,308,312,313,321",
+  "snip": "<div className=\"h-[200px] flex items-end gap-1 px-2\"> {[...Array(24)].map((_, i) => ( <div key={i} className=\"flex-1 bg-black rounded-t\" style={{ height: `${15 "
+ },
+ {
+  "file": "components/analytics/EquityCurveWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,17,265,314",
+  "snip": "interface EquityCurveWidgetProps { trades: Trade[]; equityData: number[]; isDarkMode: boolean;"
+ },
+ {
+  "file": "components/analytics/EquityCurveWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "35",
   "snip": "<div className=\"h-[200px] flex items-end gap-1 px-2\"> {[...Array(24)].map((_, i) => ( <div key={i} className=\"flex-1 bg-black rounded-t\" style={{ height: `${15 "
  },
  {
@@ -843,6 +1323,12 @@
   "file": "components/analytics/PerformanceBySession.tsx",
   "slug": "insecure-crypto",
   "lines": "6,11,20,29,38",
+  "snip": "interface PerformanceBySessionProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/PerformanceBySession.tsx",
+  "slug": "insecure-crypto",
+  "lines": "6,14,23,33,43",
   "snip": "interface PerformanceBySessionProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
  },
  {
@@ -948,6 +1434,24 @@
   "snip": "interface WidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
  },
  {
+  "file": "components/analytics/SessionWidgets.tsx",
+  "slug": "auth-bypass",
+  "lines": "49",
+  "snip": "const getTradeSession = (trade: Trade) => { const session = (trade.session && trade.session !== 'Session' ? trade.session : '') || ''; if (session) return sessi"
+ },
+ {
+  "file": "components/analytics/SessionWidgets.tsx",
+  "slug": "xss",
+  "lines": "172,321,364",
+  "snip": "<Bar dataKey=\"pnl\" radius={[4, 4, 0, 0]}> {data.map((entry, index) => ( <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#10B981' : '#EF4444'} /> ))} </Bar>"
+ },
+ {
+  "file": "components/analytics/SessionWidgets.tsx",
+  "slug": "insecure-crypto",
+  "lines": "31,47,99,108,109,127,144,193,202,209,230,238,265,285,313,359,365,366,376,383,396,403,416,417,444,458,464,470,472,497,526,535,550",
+  "snip": "interface WidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
   "file": "components/analytics/StrategyPerformancePieChart.tsx",
   "slug": "xss",
   "lines": "163,170,174,175,181",
@@ -969,6 +1473,18 @@
   "file": "components/analytics/SymbolPerformanceWidget.tsx",
   "slug": "insecure-crypto",
   "lines": "7,13,15,17,37,70,71",
+  "snip": "interface SymbolPerformanceWidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
+ },
+ {
+  "file": "components/analytics/SymbolPerformanceWidget.tsx",
+  "slug": "xss",
+  "lines": "46,48,57,62",
+  "snip": "return ( <div className={`py-4 px-0 sm:p-6 rounded-none sm:rounded-[24px] border h-full ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200 s"
+ },
+ {
+  "file": "components/analytics/SymbolPerformanceWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "6,12,14,16,36,62,63",
   "snip": "interface SymbolPerformanceWidgetProps { trades: Trade[]; isDarkMode: boolean; currencySymbol: string;"
  },
  {
@@ -1008,6 +1524,12 @@
   "snip": "interface TradeGradeDistributionProps { trades: Trade[]; isDarkMode: boolean; onInfoClick?: () => void;"
  },
  {
+  "file": "components/analytics/TradeGradeDistributionWidget.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,12,15,27,33,48",
+  "snip": "interface TradeGradeDistributionProps { trades: Trade[]; isDarkMode: boolean; onInfoClick?: () => void;"
+ },
+ {
   "file": "components/analytics/TradingMistakesBarChartWidget.tsx",
   "slug": "xss",
   "lines": "150,178,197,204,208,212,224",
@@ -1032,6 +1554,30 @@
   "snip": "import { useLocalStorage } from '../hooks/useLocalStorage'; import { calculateStats } from '../lib/statsUtils'; import { getCompletedTrades, sortTradesChronolog"
  },
  {
+  "file": "components/Analytics.tsx",
+  "slug": "xss",
+  "lines": "588,590,594,636,645,654,663,679,749,758,802,806,809",
+  "snip": "className={`relative overflow-hidden rounded-[8px] border px-4 py-3.5 ${toneClasses.shell} shadow-[0_1px_0_rgba(255,255,255,0.03)]`} > <div className={`absolute"
+ },
+ {
+  "file": "components/Analytics.tsx",
+  "slug": "insecure-crypto",
+  "lines": "73,263,276,277,278,279,281,311,312,316,322,325,329,355,366,388,390,402,405,406,413,418,422,423,424,438,451,456,466,627,628,637,639,646,655,657,664,666,671,672,673,674,675,676,677,687,688,689,720,731,750,752,759,770,814,827,830,833,844,847,851,884,896,911,920",
+  "snip": "import { useLocalStorage } from '../hooks/useLocalStorage'; import { calculateStats } from '../lib/statsUtils'; import { getCompletedTrades, sortTradesChronolog"
+ },
+ {
+  "file": "components/ApiKeysPanel.tsx",
+  "slug": "xss",
+  "lines": "106,114,115,117,122,123,127,133,135,137,140,141,142",
+  "snip": "}; return <section className={`rounded-3xl border p-5 ${cardClass}`}> <div className=\"flex flex-wrap items-start justify-between gap-4\"> <div>"
+ },
+ {
+  "file": "components/ApiKeysPanel.tsx",
+  "slug": "insecure-crypto",
+  "lines": "7,10,20,33,34,48,76,85,116,117,136",
+  "snip": "type ApiKey = { id: string; name: string; key_prefix: string; scopes: string[]; last_used_at: string | null; expires_at: string | null; created_at: string; stat"
+ },
+ {
   "file": "components/Auth.tsx",
   "slug": "xss",
   "lines": "68,102,115,118,177",
@@ -1050,9 +1596,21 @@
   "snip": "type={showPassword ? \"text\" : \"password\"} value={password} onChange={(e) => setPassword(e.target.value)}"
  },
  {
+  "file": "components/backtest/CtraderAuthModal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "80,98",
+  "snip": "aria-modal=\"true\" aria-labelledby=\"ctrader-modal-title\" aria-describedby=\"ctrader-modal-description\" > <div className=\"absolute inset-0 bg-black/80\" />"
+ },
+ {
   "file": "components/backtest/DrawingToolbar.tsx",
   "slug": "xss",
   "lines": "138,155,172,189,203,227,241,260,269,270,277,292,302,315",
+  "snip": "return ( <div className={`absolute z-30 drawing-toolbar-root transition-all duration-200 ease-out`} style={style}> <div className={`flex items-center gap-1 roun"
+ },
+ {
+  "file": "components/backtest/DrawingToolbar.tsx",
+  "slug": "xss",
+  "lines": "156,173,190,207,221,245,259,278,287,288,295,310,320,333",
   "snip": "return ( <div className={`absolute z-30 drawing-toolbar-root transition-all duration-200 ease-out`} style={style}> <div className={`flex items-center gap-1 roun"
  },
  {
@@ -1090,6 +1648,36 @@
   "slug": "insecure-crypto",
   "lines": "303,304,305,306",
   "snip": "paramXValue: x, paramYValue: y, equity: Math.max(20000, baseEquity + (Math.random() * 5000)), drawdown: Math.min(45, (dist / 2) + (Math.random() * 5)), winrate:"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "xss",
+  "lines": "1745,1746,1757,1762,1769,1770,1773,1778,1780,1789,1803,1809,1822,1836,1844,1850,1870,1881,1946,1950,1951,1952,1954,1955,1958,1973,1977,1978,1979,1981,1991,1995,1996,1997,2018,2055,2063,2066,2073,2074,2268,2276,2300,2307,2317,2329,2332,2334,2335,2336,2337,2338,2347,2348,2349,2350,2352,2366,2371,2373,2382,2394,2400,2413,2416,2418,2421,2435,2441,2444,2452,2460,2466,2470,2480,2491,2510,2524,2526,2530,2532,2534",
+  "snip": "return ( <div className={`w-full h-full flex flex-col overflow-hidden font-sans ${isDarkMode ? 'bg-black text-zinc-200' : 'bg-white text-slate-900'}`} onMouseUp"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "ssrf",
+  "lines": "228",
+  "snip": "try { // no-cors avoids CSP blocking localhost; opaque response = server is reachable await fetch(`${MT5_BRIDGE_URL}/ping`, { mode: 'no-cors' }); if (cancelled)"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "insecure-crypto",
+  "lines": "331,461,477,479,516,518,535,536,720,722,730,737,745,767,786,796,806,1010,1012,1014,1036,1635,1636,1653,1731,1774,1814,1828,1849,1920,1952,1954,1958,1979,1981,1997,2008,2025,2073,2082,2114,2133,2153,2188,2238,2272,2292,2312,2333,2343,2348,2357,2365,2381",
+  "snip": "const [toolbarOrientation, setToolbarOrientation] = useLocalStorage<'horizontal' | 'vertical'>('jfx_backtest_toolbar_orientation', 'horizontal'); // Replay Mode"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "insecure-crypto",
+  "lines": "379,380,381,382",
+  "snip": "paramXValue: x, paramYValue: y, equity: Math.max(20000, baseEquity + (Math.random() * 5000)), drawdown: Math.min(45, (dist / 2) + (Math.random() * 5)), winrate:"
+ },
+ {
+  "file": "components/BacktestLab.tsx",
+  "slug": "jwt-handling",
+  "lines": "22",
+  "snip": "import { loadSeries, saveSeries, mergeBars, peekMeta } from '../lib/candleStore'; import { dataService } from '../services/dataService'; import { fetchCtraderCa"
  },
  {
   "file": "components/BetaSplash.tsx",
@@ -1131,6 +1719,12 @@
   "file": "components/CustomChart.tsx",
   "slug": "insecure-crypto",
   "lines": "8,27,787",
+  "snip": "interface CustomChartProps { data: Candle[]; trades: Trade[]; drawings: Drawing[]; isDarkMode: boolean;"
+ },
+ {
+  "file": "components/CustomChart.tsx",
+  "slug": "insecure-crypto",
+  "lines": "8,75,653,736,738,1010,1220",
   "snip": "interface CustomChartProps { data: Candle[]; trades: Trade[]; drawings: Drawing[]; isDarkMode: boolean;"
  },
  {
@@ -1248,6 +1842,36 @@
   "snip": "useEffect(() => { import('../services/ctraderService').then(({ isAuthenticated, refreshToken, getCtidProfile, logout }) => { if (isAuthenticated()) { setAuthSta"
  },
  {
+  "file": "components/EASetup.tsx",
+  "slug": "xss",
+  "lines": "637,665,716,717,725,732,739,747,752,761,798,806,812,850,852,1013,1036,1046,1054,1068,1072,1073,1081,1083,1093,1095,1113,1114,1127,1137,1138,1146,1151,1170,1171,1175,1177,1189,1190,1805,1807,2019,2091,2099,2162",
+  "snip": "<> <span className=\"px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 text-[9px] font-black tracking-widest uppercase border border-indigo-500/20\">Headles"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "ssrf",
+  "lines": "403",
+  "snip": "const fetchFromSocketBridge = async (controller: AbortController) => { const [accountRes, positionsRes, historyRes] = await Promise.all([ fetch(`${EA_BRIDGE_URL"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "insecure-crypto",
+  "lines": "30,31,35,79,80,105,110,131,156,160,165,168,178,195,217,231,236,237,238,295,299,359,363,415,433,490,492,498,502,504,510,633,636,637,654,745,750,769,773,799,802,803,819,820,821,825,829,833,841,842,843,856,857,859,1009,1261,1264,1361,1658,1665,1790,1961,2088,2093",
+  "snip": "onEditTrade?: (trade: Trade) => void; onAddOffline?: (trade: Trade) => void; onImportTrades?: (trades: Trade[]) => Promise<void>; trades: Trade[]; userId: strin"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "insecure-crypto",
+  "lines": "964",
+  "snip": "useEffect(() => { if (!syncKey) { const newKey = `JFX-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`; s"
+ },
+ {
+  "file": "components/EASetup.tsx",
+  "slug": "jwt-handling",
+  "lines": "1599,1609",
+  "snip": "useEffect(() => { import('../services/ctraderService').then(({ isAuthenticated, refreshToken, getCtidProfile, logout }) => { if (isAuthenticated()) { setAuthSta"
+ },
+ {
   "file": "components/ErrorBoundary.tsx",
   "slug": "xss",
   "lines": "47,48,49,54,61",
@@ -1305,6 +1929,48 @@
   "file": "components/Journal.tsx",
   "slug": "crypto-usage",
   "lines": "87",
+  "snip": "const buildSetupId = () => { if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') { return `setup-${crypto.randomUUID()}`; }"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "xss",
+  "lines": "933,988",
+  "snip": "<div className=\"min-w-0 break-words text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none\" dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "xss",
+  "lines": "137,139,140,144,147,212,214,215,216,217,219,220,221,230,237,244,247,250,254,257,263,265,272,274,277,281,289,293,299,301,302,332,354,356,361,364,693,694,697,702,706,724,744,756,769,777,796,798,799,802,846,893,948,1002,1003,1008,1019,1034,1244,1247,1262,1292,1316,1324,1329,1377,1470,1475,1511,1522,1535,1555,1573,1581,1588,1629,1636,1652",
+  "snip": "return ( <div onClick={onClick} className={`p-5 rounded-2xl border cursor-pointer transition-all hover:scale-[1.02] hover:shadow-xl ${isDarkMode ? 'bg-[#000000]"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "18,20,21,34,42,43,74,75,84,111,117,123,124,126,140,154,168,172,173,174,175,176,179,185,186,187,188,189,190,191,199,202,241,244,281,334,335,336,339,346,359,365,377,386,456,458,459,461,462,466,468,471,473,476,482,483,485,487,488,491,492,493,502,504,509,513,519,526,535,544,552,553,556,560,568,573,575,577,583,588,590,591,598,608,609,616,623,631,706,707,745,753,770,779,787,799,805,816,895,918,924,941,950,973,979,1003,1022,1023,1287,1293,1317,1320,1463,1472,1478,1495,1498,1499,1500,1507,1509,1545,1548,1549,1550,1551,1563,1567,1570,1571,1573,1574,1577,1580,1585,1591,1597,1613,1634,1637,1641,1653,1658,1663",
+  "snip": "interface JournalProps { isDarkMode: boolean; trades: Trade[]; onUpdateTrade: (trade: Trade) => void; onBatchUpdateTrades: (trades: Trade[]) => Promise<boolean>"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "insecure-crypto",
+  "lines": "92",
+  "snip": "} return `setup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; };"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "dangerous-html",
+  "lines": "933",
+  "snip": ") : trade.notes ? ( <div className=\"min-w-0 break-words text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none\" dangerouslySetInnerHTML={{ __html: "
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "dangerous-html",
+  "lines": "988",
+  "snip": ") : trade.exitComment ? ( <div className=\"min-w-0 break-words text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none\" dangerouslySetInnerHTML={{ __"
+ },
+ {
+  "file": "components/Journal.tsx",
+  "slug": "crypto-usage",
+  "lines": "89",
   "snip": "const buildSetupId = () => { if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') { return `setup-${crypto.randomUUID()}`; }"
  },
  {
@@ -1434,6 +2100,18 @@
   "snip": "{step === 7 && ( <div className=\"flex gap-2\"> <span className=\"border border-[#FF4F01] text-[10px] font-bold px-2 py-1 rounded text-[#FF4F01] uppercase tracking"
  },
  {
+  "file": "components/Onboarding.tsx",
+  "slug": "xss",
+  "lines": "142,173,202,249,252,270,282,336,380,436,443",
+  "snip": "return ( <div className={`fixed inset-0 z-[200] flex flex-col items-center justify-start overflow-y-auto ${containerBg} ${textColor} font-sans`}> <div className"
+ },
+ {
+  "file": "components/Onboarding.tsx",
+  "slug": "insecure-crypto",
+  "lines": "159,162,253,265,297,314,323,331,337,353,361,364,423,439,443",
+  "snip": "{step === 6 && ( <div className=\"flex gap-2\"> <span className=\"border border-[#FF4F01] text-[10px] font-bold px-2 py-1 rounded text-[#FF4F01] uppercase tracking"
+ },
+ {
   "file": "components/OpenPositions.tsx",
   "slug": "xss",
   "lines": "40,41,45,46,85,94,106",
@@ -1506,6 +2184,18 @@
   "snip": "fontFamily: 'Inter', }); const { svg } = await mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, code.replace(/```mermaid/g, '').replace(/```"
  },
  {
+  "file": "components/RichTextEditor.tsx",
+  "slug": "xss",
+  "lines": "459",
+  "snip": "> {showToolbar && ( <div className={`flex flex-wrap items-center gap-0.5 p-1 border-b transition-colors rounded-t-xl ${isDarkMode ? 'border-[#27272a] bg-black/5"
+ },
+ {
+  "file": "components/RichTextEditor.tsx",
+  "slug": "insecure-crypto",
+  "lines": "271,277,281,282,1011",
+  "snip": "isOpen: boolean; title: string; description: string; onConfirm: () => void; variant?: 'danger' | 'warning' | 'info';"
+ },
+ {
   "file": "components/Rules.tsx",
   "slug": "xss",
   "lines": "75,78,86,93,106,131,137,184,185,205,213,239",
@@ -1566,6 +2256,24 @@
   "snip": "<button onClick={() => { const newKey = `JFX-${Math.floor(1000 + Math.random() * 9000)}-${Math.random() .toString(36) .substring(2, 6)"
  },
  {
+  "file": "components/Settings.tsx",
+  "slug": "xss",
+  "lines": "242,243,268,270,275,281,285,289,293,302,323,328,334,354,385,394,428,483,524,582,603,607,624,692,720,745,765,810,853,858,863,907,961,978,1049,1068,1086,1143,1207,1244,1246",
+  "snip": "const renderPlanProgress = (value: number, limit: number) => ( <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDarkMode ? 'bg-white/[0.08]' : 'bg"
+ },
+ {
+  "file": "components/Settings.tsx",
+  "slug": "insecure-crypto",
+  "lines": "71,74,81,82,83,84,85,86,87,88,97,98,99,103,116,119,290,291,328,386,490,672,775,776,799,854,855,856,878,879,883,884,888,889,912,1022,1040",
+  "snip": "onUpdateProfile: (profile: UserProfile) => Promise<void>; onLogout: () => void; tradesThisMonth?: number; totalNotes?: number; totalImages?: number;"
+ },
+ {
+  "file": "components/Settings.tsx",
+  "slug": "insecure-crypto",
+  "lines": "647",
+  "snip": "<button onClick={() => { const newKey = `JFX-${Math.floor(1000 + Math.random() * 9000)}-${Math.random() .toString(36) .substring(2, 6)"
+ },
+ {
   "file": "components/Sidebar.tsx",
   "slug": "xss",
   "lines": "221,244,283,311",
@@ -1576,6 +2284,30 @@
   "slug": "insecure-crypto",
   "lines": "44,59,74,127,128,140,142,143,144,145,146,147,161,174,223,224,229,270,311,332,351,365,373",
   "snip": "onLogout: () => void; userProfile?: UserProfile | null; trades?: Trade[]; eaSession?: EASession | null; offlineQueueCount?: number;"
+ },
+ {
+  "file": "components/Sidebar.tsx",
+  "slug": "xss",
+  "lines": "171,194,233",
+  "snip": "{showNotifications && ( <> <div className={`p-5 border-b flex items-center justify-between ${isDarkMode ? 'border-zinc-800 bg-black/50' : 'border-slate-100 bg-s"
+ },
+ {
+  "file": "components/Sidebar.tsx",
+  "slug": "insecure-crypto",
+  "lines": "44,58,94,95,96,108,110,111,112,113,114,128,141,173,174,179,220,262,281,295,303",
+  "snip": "onLogout: () => void; userProfile?: UserProfile | null; trades?: Trade[]; offlineQueueCount?: number; isDemoMode?: boolean;"
+ },
+ {
+  "file": "components/TradeChartView.tsx",
+  "slug": "xss",
+  "lines": "242,313,341,357,398",
+  "snip": "return ( <div className=\"absolute inset-0 flex flex-col items-center justify-center gap-4 z-10 bg-black/70 backdrop-blur-sm rounded-xl px-6\"> <div className={`p"
+ },
+ {
+  "file": "components/TradeChartView.tsx",
+  "slug": "insecure-crypto",
+  "lines": "34,204,217,232,246,256,270,284,289,313,317,384,421",
+  "snip": "/** * Pick a sensible default timeframe from the trade's open→close duration. * Shorter trades → smaller TF; longer trades → bigger TF. */ function autoTimefram"
  },
  {
   "file": "components/TradingViewWidget.tsx",
@@ -1770,6 +2502,12 @@
   "snip": "const [currentIndex, setCurrentIdx] = useState(0); const fetchData = async (overrideSymbol?: string, overrideTimeframe?: string) => { setIsFetching(true); const"
  },
  {
+  "file": "integrations/jfx-journal-agent/.env.example",
+  "slug": "env-exposure",
+  "lines": "2",
+  "snip": "JFX_KEY=jfx_pat_replace_me"
+ },
+ {
   "file": "lib/analyticsAiSnapshot.ts",
   "slug": "insecure-crypto",
   "lines": "35,41,49,56,57,59,60,64,85,87,88,99,100,103,104,105,106,116,121,135,147,149,162,163,169,170,171,220,232,245,257,264,273,281,282,285,291,337,352,369,395,415,418,423,478",
@@ -1792,6 +2530,12 @@
   "slug": "insecure-crypto",
   "lines": "27,28,29",
   "snip": "// LRU eviction if cache size exceeds maxEntries if (this.cache.size >= this.maxEntries && !this.cache.has(key)) { const oldestKey = this.cache.keys().next().va"
+ },
+ {
+  "file": "lib/candleStore.ts",
+  "slug": "insecure-crypto",
+  "lines": "128,154",
+  "snip": ".map(k => ({ k, at: readLastAccess(k) })) .sort((a, b) => a.at - b.at); // Evict the oldest quarter (or at least one entry). const count = Math.max(1, Math.floo"
  },
  {
   "file": "lib/constants.ts",
@@ -1878,6 +2622,12 @@
   "snip": "export const TRADING_QUOTES = [ { text: \"The goal of a successful trader is to make the best trades. Money is secondary.\", author: \"Alexander Elder\" }, { text: "
  },
  {
+  "file": "lib/safeLazy.ts",
+  "slug": "insecure-crypto",
+  "lines": "15",
+  "snip": "const isChunkLoadError = (error: unknown): boolean => { const message = error instanceof Error ? error.message : String(error); return CHUNK_ERROR_PATTERNS.some"
+ },
+ {
   "file": "lib/statsUtils.ts",
   "slug": "insecure-crypto",
   "lines": "3,15,16,17,18,19,21,22,23,28,29,30,42,70,73,82,98,99,149,150,152,154,171,174,189,210,212,224,225",
@@ -1887,6 +2637,12 @@
   "file": "lib/thinkingCleaner.ts",
   "slug": "insecure-crypto",
   "lines": "123",
+  "snip": "const contentLower = content.toLowerCase(); for (const starter of thinkingStarters) { if (contentLower.includes(starter)) { // This chunk contains thinking tag "
+ },
+ {
+  "file": "lib/thinkingCleaner.ts",
+  "slug": "insecure-crypto",
+  "lines": "147",
   "snip": "const contentLower = content.toLowerCase(); for (const starter of thinkingStarters) { if (contentLower.includes(starter)) { // This chunk contains thinking tag "
  },
  {
@@ -1908,6 +2664,12 @@
   "snip": "importedTrades.push({ id: `imported-${ticket || Date.now() + Math.random()}`, ticketId: ticket, pair: item.toUpperCase(),"
  },
  {
+  "file": "lib/trade-import.ts",
+  "slug": "insecure-crypto",
+  "lines": "73,112,113,114,115,133,134,135,141,167,198",
+  "snip": "if (!value) return 0; const cleaned = value.replace(/[\\s$€£R]/g, '').replace(/\\(([^)]+)\\)/, '-$1'); const commaDecimal = cleaned.includes(',') && !cleaned.inclu"
+ },
+ {
   "file": "lib/trade-normalization.ts",
   "slug": "insecure-crypto",
   "lines": "90,99,102,106",
@@ -1917,6 +2679,12 @@
   "file": "lib/widgetHelpData.ts",
   "slug": "insecure-crypto",
   "lines": "28,29,30,34,35,86,100,121,122,123,128,148,149,150,155,162,182,184,212,243,264,266,271,280,334,336,339,347,367,368,369,371,374,403,404,408,409,439,443,444,469,480,481,493,504,505,508,517,538",
+  "snip": "category: 'Overview', breadcrumb: 'Help Center / Overview / Win Rate', definition: 'The win rate is a core metric used to track trading performance over a speci"
+ },
+ {
+  "file": "lib/widgetHelpData.ts",
+  "slug": "insecure-crypto",
+  "lines": "28,29,30,34,35,86,100,121,122,123,128,148,149,150,155,162,182,184,212,243,264,266,271,280,332,333,334,336,339,361,362,363,364,365,366,367,368,369,370,374,383,385,388,396,416,417,418,420,423,452,453,457,458,488,492,493,518,529,530,542,553,554,557,566,576,580,581,584,596,597,600,604,612,616,625,651,652,653,675,676,677,679,681,690,694,713",
   "snip": "category: 'Overview', breadcrumb: 'Help Center / Overview / Win Rate', definition: 'The win rate is a core metric used to track trading performance over a speci"
  },
  {
@@ -1980,6 +2748,12 @@
   "snip": "socket.onmessage = async (event) => { try { let dataStr: string; if (typeof event.data === 'string') { dataStr = event.data;"
  },
  {
+  "file": "services/ctraderService.ts",
+  "slug": "insecure-crypto",
+  "lines": "63,81,549,620,660,679,697,735,748,766,953,957",
+  "snip": "symbol: string; symbolId?: number; tradeSide: 'buy' | 'sell'; volume: number; price: number;"
+ },
+ {
   "file": "services/dataService.ts",
   "slug": "insecure-crypto",
   "lines": "118,163,217,218,228,235,339,378,379,381,398,430,440,449,458,462,467,472,480,484,487,488,501,563,566,584,593,599,607,626,637,639,646,648,655,659,660,661,668,673,684,745,822,921,946,1010,1055,1070,1113,1254",
@@ -2019,6 +2793,48 @@
   "file": "services/dataService.ts",
   "slug": "crypto-usage",
   "lines": "65,156,1207,1223",
+  "snip": "...fallback, ...trade, id: toSafeString(trade.id, toSafeString(fallback.id, crypto.randomUUID())), }, fallback"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "insecure-crypto",
+  "lines": "39,40,166,211,265,266,276,283,382,419,420,422,438,470,479,489,497,510,514,518,523,531,535,539,546,558,567,631,659,670,676,696,707,712,720,725,733,737,738,745,750,760,889,987,1012,1075,1120,1135,1178,1319",
+  "snip": "code === 'PGRST200' || status === 400 || message.toLowerCase().includes('column') || message.toLowerCase().includes('schema cache');"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "663",
+  "snip": ".eq('user_id', user.id) .select('*') .single(); if (error) throw error; return mapTradeFromDB(data as DBTrade);"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "1000",
+  "snip": "}) .select() .single(); if (error) throw error; return mapGoalFromDB(data);"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "1152",
+  "snip": ".insert(dbDiagram) .select() .single(); if (error) throw error; return data; }"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "1184",
+  "snip": ".from('backtest_sessions') .select('id') .eq('user_id', user.id) .eq('symbol', session.symbol) .eq('timeframe', session.timeframe) .order('updated_at', { ascend"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "1222",
+  "snip": ".from('backtest_sessions') .select('*') .eq('user_id', user.id) .order('updated_at', { ascending: false }); if (error) throw error;"
+ },
+ {
+  "file": "services/dataService.ts",
+  "slug": "crypto-usage",
+  "lines": "111,204,1272,1288",
   "snip": "...fallback, ...trade, id: toSafeString(trade.id, toSafeString(fallback.id, crypto.randomUUID())), }, fallback"
  },
  {
@@ -2076,10 +2892,106 @@
   "snip": "\"Content-Type\": \"application/json\", ...(token ? { Authorization: `Bearer ${token}` } : {}), },"
  },
  {
+  "file": "services/nvidiaAiService.ts",
+  "slug": "insecure-crypto",
+  "lines": "24,33,50,56,86,116,121,127,129,133,141,143,144,148,160,171,176,185,206,242,243,244,245,246,247,248,249,251,253,255,260,261,262,263,264,267,269,280,283,307,317,350,521,539",
+  "snip": "id: NVIDIA_CHAT_MODEL_ID, name: \"NVIDIA Research\", description: \"GPT OSS on NVIDIA for research with no account-data access\", type: \"fast\" as const, assistantMo"
+ },
+ {
   "file": "services/openaiService.ts",
   "slug": "secret-in-log",
   "lines": "26",
   "snip": "method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: formData,"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "ssrf",
+  "lines": "49",
+  "snip": "const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } }) const rawToken = req.headers.get('x-api"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "ssrf",
+  "lines": "49",
+  "snip": "const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } }) const rawToken = req.headers.get('x-api"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "insecure-crypto",
+  "lines": "77,98,102,106,112,120,124,128,163,164,167,169,173,174,186",
+  "snip": "if (rateError || !allowed) return respond({ error: 'rate_limited' }, 429, { 'retry-after': '60' }) const requireScope = async (scope: string) => key!.scopes.inc"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "url-regex-validation",
+  "lines": "49",
+  "snip": "const rawToken = req.headers.get('x-api-key')?.trim() ?? '' const url = new URL(req.url) const routeIndex = url.pathname.indexOf('/v1/') const path = routeIndex"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "69",
+  "snip": "const keyHash = await fingerprint(rawToken) const { data: foundKey } = await admin.from('api_keys').select('id,user_id,scopes,expires_at').eq('key_hash', keyHas"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "112",
+  "snip": "const { page: pageNumber, limit } = page(url) let query = admin.from('trades').select('*', { count: 'exact' }).eq('user_id', key.user_id).is('deleted_at', null)"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "120",
+  "snip": "if (req.method === 'POST') { const { data, error } = await admin.from('trades').insert({ ...body, user_id: key.user_id }).select('*').single(); if (error) throw"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "124",
+  "snip": "if (req.method === 'PATCH' && id) { const { data, error } = await admin.from('trades').update(body).eq('id', id).eq('user_id', key.user_id).select('*').maybeSin"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "128",
+  "snip": "if (req.method === 'DELETE' && id) { const { data, error } = await admin.from('trades').update({ deleted_at: new Date().toISOString() }).eq('id', id).eq('user_i"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "140",
+  "snip": "if (id) { const { data, error } = await admin.from('notes').select('*').eq('id', id).eq('user_id', key.user_id).maybeSingle(); if (error) throw error if (!data)"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "144",
+  "snip": "const { page: pageNumber, limit } = page(url) const { data, count, error } = await admin.from('notes').select('*', { count: 'exact' }).eq('user_id', key.user_id"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "149",
+  "snip": "if (req.method === 'POST') { const { data, error } = await admin.from('notes').insert({ ...body, user_id: key.user_id }).select('*').single(); if (error) throw "
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "153",
+  "snip": "if (req.method === 'PATCH' && id) { const { data, error } = await admin.from('notes').update(body).eq('id', id).eq('user_id', key.user_id).select('*').maybeSing"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "non-atomic-read-delete",
+  "lines": "157",
+  "snip": "if (req.method === 'DELETE' && id) { const { data, error } = await admin.from('notes').delete().eq('id', id).eq('user_id', key.user_id).select('id').maybeSingle"
+ },
+ {
+  "file": "supabase/functions/jfx-api/index.ts",
+  "slug": "crypto-usage",
+  "lines": "24",
+  "snip": "const fingerprint = async (token: string) => { const bytes = new TextEncoder().encode(token) const digest = await crypto.subtle.digest('SHA-256', bytes) return "
  },
  {
   "file": "supabase/functions/sync-firehose/index.ts",
@@ -2106,6 +3018,30 @@
   "snip": "try { const response = await fetch(url.toString(), { headers: { 'Authorization': `Bearer ${apiKey}`,"
  },
  {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "insecure-crypto",
+  "lines": "253",
+  "snip": "url: parsed.url, source: parsed.source || parsed.domain, summary: parsed.summary || parsed.description, publishedAt: parsed.publish_time || parsed.published_at,"
+ },
+ {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "secret-in-log",
+  "lines": "214",
+  "snip": "headers: { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'text/event-stream',"
+ },
+ {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "cors-wildcard",
+  "lines": "19",
+  "snip": "} if (ALLOWED_ORIGINS.has(origin)) { headers['Access-Control-Allow-Origin'] = origin } return headers"
+ },
+ {
+  "file": "supabase/functions/sync-firehose/index.ts",
+  "slug": "untrusted-redirect-following",
+  "lines": "212",
+  "snip": "try { const response = await fetch(url.toString(), { headers: { 'Authorization': `Bearer ${apiKey}`,"
+ },
+ {
   "file": "supabase/functions/sync-trades/index.ts",
   "slug": "insecure-crypto",
   "lines": "123,141,162,164,167,168,173,174,176,227,231,232,234,235,240,249",
@@ -2118,9 +3054,27 @@
   "snip": "const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, sync-key, Sync-Ke"
  },
  {
+  "file": "supabase/functions/sync-trades/index.ts",
+  "slug": "insecure-crypto",
+  "lines": "139,157,178,180,183,184,189,190,192,243,247,248,250,251,256,265",
+  "snip": ") const { trades, account, openPositions, isHeartbeat, isReconciliation } = body; // Check if the user has disconnected the bridge via the UI"
+ },
+ {
+  "file": "supabase/functions/sync-trades/index.ts",
+  "slug": "cors-wildcard",
+  "lines": "20",
+  "snip": "} if (ALLOWED_ORIGINS.has(origin)) { headers['Access-Control-Allow-Origin'] = origin } return headers"
+ },
+ {
   "file": "types.ts",
   "slug": "insecure-crypto",
   "lines": "184,218,228,239,264,316,368,398,424,433",
+  "snip": "id: string; title: string; description?: string; type: GoalType; metric: MetricType;"
+ },
+ {
+  "file": "types.ts",
+  "slug": "insecure-crypto",
+  "lines": "186,220,230,241,266,318,372,402,428,437",
   "snip": "id: string; title: string; description?: string; type: GoalType; metric: MetricType;"
  },
  {

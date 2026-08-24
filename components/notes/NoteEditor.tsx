@@ -1,39 +1,16 @@
-
-import React, { useEffect, useState, useRef } from 'react';
-import { Pin, Archive, Trash2, Sparkles, Loader2, X, CheckSquare, Plus, Minus, Square, CheckSquare as CheckSquareIcon, GripVertical, Bell, Image as ImageIcon, MoreVertical, Palette, RotateCcw, RotateCw, Copy, Tag, Check, Table as TableIcon, PlusSquare, MinusSquare } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Pin, Archive, Trash2, X, CheckSquare, Plus, Minus, Image as ImageIcon, MoreVertical, Palette, RotateCcw, RotateCw, Copy, Tag, Check, Table as TableIcon } from 'lucide-react';
 import { Note, NoteColor, ColorStyles, ListItem, TableData } from './types';
-import {
-  NOTEBOOK_PROMPT_PRESETS,
-  generateNotebookDraft,
-  insertTextAtSelection,
-  splitNotebookLines,
-  NotebookPromptPreset,
-  shouldReplaceNotebookContent,
-} from '../../services/notesAiService';
-import { useToast } from '../ui/Toast';
-
-const generateNoteContent = (prompt: string, currentContent = '') => generateNotebookDraft({ content: prompt, currentContent });
-import {
-  DndContext, 
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import ListEditor from './shared/ListEditor';
+import TableEditor from './shared/TableEditor';
+import { genId, COLUMN_WIDTH_INC, CANVAS_MIN_WIDTH, CANVAS_MAX_WIDTH, AUTOSAVE_DELAY_MS } from './shared/constants';
+import { createEmptyTable } from './shared/tableOps';
+import { usePopoverDismiss } from './shared/usePopoverDismiss';
+import { useAutosave } from './shared/useAutosave';
 
 interface NoteEditorProps {
   note: Note;
-  onClose: () => void;
+  onClose: (info?: { saved?: boolean }) => void;
   onUpdate: (updatedNote: Note) => void;
   onDelete: (id: string) => void;
   onRestore?: (id: string) => void;
@@ -42,65 +19,59 @@ interface NoteEditorProps {
   setCanvasWidth?: React.Dispatch<React.SetStateAction<number>>;
 }
 
-const genId = () => Math.random().toString(36).slice(2, 9);
-const COLUMN_WIDTH_INC = 96;
+interface EditorSnapshot {
+  title: string;
+  content: string;
+  isList: boolean;
+  listItems: ListItem[];
+  image: string | undefined;
+  color: NoteColor;
+  labels: string[];
+  tableData: TableData | undefined;
+}
 
-const SortableListItem = ({ item, isTrashed, onToggle, onChange, onBlur, onRemove }: { 
-    item: ListItem, 
-    isTrashed: boolean, 
-    onToggle: () => void, 
-    onChange: (val: string) => void,
-    onBlur: () => void,
-    onRemove: () => void
-}) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ id: item.id });
+const HISTORY_LIMIT = 50;
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : undefined,
-    position: 'relative' as const,
-    marginLeft: `${(item.indentLevel || 0) * 1.5}rem`
-  };
+const migrateTableData = (tableData?: TableData): TableData | undefined =>
+  tableData
+    ? { rows: tableData.rows.map(row => row.map(cell => (typeof cell === 'string' ? { text: cell } : cell))) }
+    : undefined;
 
+const snapshotFromNote = (note: Note): EditorSnapshot => ({
+  title: note.title,
+  content: note.content,
+  isList: note.isList || false,
+  listItems: note.listItems || [],
+  image: note.image,
+  color: note.color,
+  labels: note.labels || [],
+  tableData: migrateTableData(note.tableData),
+});
+
+const snapshotsEqual = (a?: EditorSnapshot, b?: EditorSnapshot): boolean => {
+  if (!a || !b) return false;
   return (
-    <div ref={setNodeRef} style={style} className={`flex items-center group py-1 ${isDragging ? 'opacity-50' : ''}`}>
-        {!isTrashed && (
-            <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-1">
-                <GripVertical className="w-4 h-4 text-[var(--notebook-placeholder)] opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-        )}
-        <button 
-            disabled={isTrashed}
-            onClick={onToggle} 
-            className="text-[var(--notebook-muted)] mr-2"
-        >
-            {item.checked ? <CheckSquareIcon className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-        </button>
-        <input 
-            id={`edit-note-list-item-${item.id}`}
-            name={`list-item-${item.id}`}
-            aria-label="List item"
-            type="text" value={item.text}
-            readOnly={isTrashed}
-            onChange={(e) => onChange(e.target.value)}
-            onBlur={onBlur}
-            className={`bg-transparent outline-none flex-1 text-base ${item.checked ? 'text-[var(--notebook-muted)] line-through' : 'text-[var(--notebook-text)]'}`}
-        />
-        {!isTrashed && (
-            <button onClick={onRemove} className="p-2 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] opacity-0 group-hover:opacity-100 transition-opacity">
-                <X className="w-3 h-3" />
-            </button>
-        )}
-    </div>
+    a.title === b.title &&
+    a.content === b.content &&
+    a.isList === b.isList &&
+    a.image === b.image &&
+    a.color === b.color &&
+    JSON.stringify(a.labels) === JSON.stringify(b.labels) &&
+    JSON.stringify(a.listItems) === JSON.stringify(b.listItems) &&
+    JSON.stringify(a.tableData) === JSON.stringify(b.tableData)
   );
+};
+
+const formatRelativeTime = (timestamp: number): string => {
+  if (!timestamp) return '';
+  const minutes = Math.floor((Date.now() - timestamp) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString();
 };
 
 const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDelete, onRestore, onDuplicate, canvasWidth, setCanvasWidth }) => {
@@ -111,99 +82,201 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   const [isList, setIsList] = useState(note.isList || false);
   const [listItems, setListItems] = useState<ListItem[]>(note.listItems || []);
   const [image, setImage] = useState<string | undefined>(note.image);
-  const [tableData, setTableData] = useState<TableData | undefined>(() => {
-    if (!note.tableData) return undefined;
-    // Migrate old data if necessary
-    const rows = note.tableData.rows.map(row => 
-      row.map(cell => typeof cell === 'string' ? { text: cell } : cell)
-    );
-    return { rows };
-  });
+  const [tableData, setTableData] = useState<TableData | undefined>(() => migrateTableData(note.tableData));
   const [isPinned, setIsPinned] = useState(note.isPinned);
   const [color, setColor] = useState(note.color);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<NotebookPromptPreset>('rewrite');
-  const [showComposeMenu, setShowComposeMenu] = useState(false);
+
+  const [version, setVersion] = useState(0);
+  const [history, setHistory] = useState<{ entries: EditorSnapshot[]; index: number }>(() => ({
+    entries: [snapshotFromNote(note)],
+    index: 0,
+  }));
+
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showColorOptions, setShowColorOptions] = useState(false);
   const [showLabelEditor, setShowLabelEditor] = useState(false);
-  const [focusedCell, setFocusedCell] = useState<{ rIdx: number, cIdx: number } | null>(null);
-  const [showCellColorOptions, setShowCellColorOptions] = useState(false);
-  
-  const [history, setHistory] = useState<any[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const isInternalUpdate = useRef(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const colorPickerRef = useRef<HTMLDivElement>(null);
-  const cellColorPickerRef = useRef<HTMLDivElement>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
-  const composeMenuRef = useRef<HTMLDivElement>(null);
-  const { addToast } = useToast();
+  const colorPickerRef = useRef<HTMLDivElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const dirtyRef = useRef(false);
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+  const stateRef = useRef({ note, title, content, isList, listItems, image, color, labels, tableData, isPinned });
+  stateRef.current = { note, title, content, isList, listItems, image, color, labels, tableData, isPinned };
+
+  usePopoverDismiss([colorPickerRef], () => setShowColorOptions(false), showColorOptions);
+  usePopoverDismiss([moreMenuRef], () => setShowMoreMenu(false), showMoreMenu);
+
+  const bumpVersion = () => {
+    dirtyRef.current = true;
+    setVersion(v => v + 1);
+  };
+
+  const buildFullNote = (): Note => {
+    const s = stateRef.current;
+    return {
+      ...s.note,
+      title: s.title,
+      content: s.content,
+      isList: s.isList,
+      listItems: s.listItems,
+      image: s.image,
+      color: s.color,
+      labels: s.labels,
+      tableData: s.tableData,
+      isPinned: s.isPinned,
+      updatedAt: Date.now(),
+    };
+  };
+
+  const autosave = useAutosave(
+    buildFullNote,
+    (full) => {
+      if (!dirtyRef.current) return;
+      dirtyRef.current = false;
+      onUpdateRef.current(full);
+    },
+    [version],
+    AUTOSAVE_DELAY_MS
+  );
+
+  const buildSnapshot = (patch?: Partial<EditorSnapshot>): EditorSnapshot => {
+    const s = stateRef.current;
+    return {
+      title: s.title,
+      content: s.content,
+      isList: s.isList,
+      listItems: s.listItems,
+      image: s.image,
+      color: s.color,
+      labels: s.labels,
+      tableData: s.tableData,
+      ...patch,
+    };
+  };
+
+  const pushSnapshot = (entry: EditorSnapshot) => {
+    setHistory(h => {
+      if (snapshotsEqual(h.entries[h.index], entry)) return h;
+      const entries = [...h.entries.slice(0, h.index + 1), entry];
+      const trimmed = entries.length > HISTORY_LIMIT ? entries.slice(entries.length - HISTORY_LIMIT) : entries;
+      return { entries: trimmed, index: trimmed.length - 1 };
+    });
+  };
+
+  const applySnapshot = (snap: EditorSnapshot) => {
+    setTitle(snap.title);
+    setContent(snap.content);
+    setIsList(snap.isList);
+    setListItems(snap.listItems);
+    setImage(snap.image);
+    setColor(snap.color);
+    setLabels(snap.labels);
+    setTableData(snap.tableData);
+    bumpVersion();
+  };
 
   useEffect(() => {
     setTitle(note.title);
     setContent(note.content);
+    setLabels(note.labels || []);
+    setLabelInput('');
     setIsList(note.isList || false);
     setListItems(note.listItems || []);
     setImage(note.image);
-    const initialTableData = note.tableData ? {
-      rows: note.tableData.rows.map(row => 
-        row.map(cell => typeof cell === 'string' ? { text: cell } : cell)
-      )
-    } : undefined;
-    setTableData(initialTableData);
+    setTableData(migrateTableData(note.tableData));
     setIsPinned(note.isPinned);
     setColor(note.color);
-    
-    const initialState = { 
-      title: note.title, 
-      content: note.content, 
-      isList: note.isList || false,
-      listItems: note.listItems || [], 
-      image: note.image, 
-      color: note.color, 
-      tableData: initialTableData 
-    };
-    setHistory([initialState]);
-    setHistoryIndex(0);
-    setLabels(note.labels || []);
-    setLabelInput('');
     setShowLabelEditor(false);
+    setShowColorOptions(false);
+    setShowMoreMenu(false);
+    dirtyRef.current = false;
+    setHistory({ entries: [snapshotFromNote(note)], index: 0 });
+    if (!note.isTrashed) titleInputRef.current?.focus();
+    return () => {
+      if (!dirtyRef.current) return;
+      const s = stateRef.current;
+      dirtyRef.current = false;
+      onUpdateRef.current({
+        ...s.note,
+        title: s.title,
+        content: s.content,
+        isList: s.isList,
+        listItems: s.listItems,
+        image: s.image,
+        color: s.color,
+        labels: s.labels,
+        tableData: s.tableData,
+        isPinned: s.isPinned,
+        updatedAt: Date.now(),
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id]);
 
   useEffect(() => {
     if (textareaRef.current && !isList && !tableData) {
-        textareaRef.current.style.height = 'auto';
-        textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [content, isList, tableData]);
 
-  const addToHistory = (newState: any) => {
-    if (isInternalUpdate.current) return;
-    const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(newState);
-    if (newHistory.length > 50) newHistory.shift();
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
+  const closeAndReport = () => {
+    const hadPending = dirtyRef.current || autosave.hasPending();
+    autosave.flush();
+    dirtyRef.current = false;
+    onClose({ saved: hadPending });
   };
 
-  const handleUpdate = (updates: Partial<Note>) => {
-      onUpdate({ ...note, ...updates, updatedAt: Date.now() });
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showColorOptions || showMoreMenu || showLabelEditor) return;
+      closeAndReport();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showColorOptions, showMoreMenu, showLabelEditor]);
+
+  const persistNow = (overrides?: Partial<Note>) => {
+    dirtyRef.current = true;
+    autosave.cancel();
+    onUpdateRef.current({ ...buildFullNote(), ...overrides });
+    dirtyRef.current = false;
   };
 
-  const commitLabels = (nextLabels: string[]) => {
-    const normalized = Array.from(new Set(nextLabels.map(label => label.trim()).filter(Boolean)));
+  const handleUndo = () => {
+    const h = historyRef.current;
+    if (h.index <= 0) return;
+    applySnapshot(h.entries[h.index - 1]);
+    setHistory({ ...h, index: h.index - 1 });
+  };
+
+  const handleRedo = () => {
+    const h = historyRef.current;
+    if (h.index >= h.entries.length - 1) return;
+    applySnapshot(h.entries[h.index + 1]);
+    setHistory({ ...h, index: h.index + 1 });
+  };
+
+  const commitLabels = (nextRaw: string[]) => {
+    const normalized = Array.from(new Set(nextRaw.map(label => label.trim()).filter(Boolean)));
+    pushSnapshot(buildSnapshot({ labels: normalized }));
     setLabels(normalized);
-    handleUpdate({ labels: normalized });
-    addToHistory({ title, content, isList, listItems, image, color, tableData, labels: normalized });
+    persistNow({ labels: normalized });
   };
 
   const addLabel = (value: string) => {
     const label = value.trim();
-    if (!label) return;
-    if (labels.includes(label)) {
+    if (!label || labels.includes(label)) {
       setLabelInput('');
       return;
     }
@@ -211,294 +284,110 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
     setLabelInput('');
   };
 
-  const removeLabel = (label: string) => {
-    commitLabels(labels.filter(item => item !== label));
-  };
-
-  const handleUndo = () => {
-    if (historyIndex > 0) {
-      isInternalUpdate.current = true;
-      const prevState = history[historyIndex - 1];
-      setTitle(prevState.title);
-      setContent(prevState.content);
-      setIsList(prevState.isList);
-      setListItems(prevState.listItems);
-      setImage(prevState.image);
-      setTableData(prevState.tableData);
-      setColor(prevState.color || NoteColor.DEFAULT);
-      handleUpdate(prevState);
-      setHistoryIndex(historyIndex - 1);
-      setTimeout(() => isInternalUpdate.current = false, 0);
-    }
-  };
-
-  const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
-      isInternalUpdate.current = true;
-      const nextState = history[historyIndex + 1];
-      setTitle(nextState.title);
-      setContent(nextState.content);
-      setIsList(nextState.isList);
-      setListItems(nextState.listItems);
-      setImage(nextState.image);
-      setTableData(nextState.tableData);
-      setColor(nextState.color || NoteColor.DEFAULT);
-      handleUpdate(nextState);
-      setHistoryIndex(historyIndex + 1);
-      setTimeout(() => isInternalUpdate.current = false, 0);
-    }
-  };
+  const removeLabel = (label: string) => commitLabels(labels.filter(item => item !== label));
 
   const handleImageClick = () => fileInputRef.current?.click();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setImage(result);
-        handleUpdate({ image: result });
-        addToHistory({ title, content, listItems, image: result, color, tableData });
-      };
-      reader.readAsDataURL(file);
-    }
+    e.currentTarget.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      pushSnapshot(buildSnapshot({ image: result }));
+      setImage(result);
+      persistNow({ image: result });
+    };
+    reader.readAsDataURL(file);
   };
 
-  const handleNotebookCompose = async (preset: NotebookPromptPreset = selectedPreset) => {
-    if (isGenerating) return;
-    if (!content.trim() && !title.trim() && listItems.length === 0 && !tableData) {
-      addToast({
-        type: 'warning',
-        title: 'Nothing to write from',
-        message: 'Add some note content first, then use Help me write.',
-      });
-      return;
-    }
-
-    setIsGenerating(true);
-    setShowComposeMenu(false);
-    try {
-      const shouldReplace = shouldReplaceNotebookContent(preset);
-      const generated = await generateNotebookDraft({
-        preset,
-        title,
-        currentContent: [title, content].filter(Boolean).join('\n\n'),
-        isList,
-        listItems,
-        tableData,
-      });
-
-      if (isList) {
-        const lines = splitNotebookLines(generated);
-        const newItems = lines.map((line) => ({
-          id: genId(),
-          text: line,
-          checked: false,
-          indentLevel: 0,
-        }));
-        const nextItems = shouldReplace ? newItems : [...listItems, ...newItems];
-        setListItems(nextItems);
-        handleUpdate({ listItems: nextItems, isList: true });
-        addToHistory({ title, content, listItems: nextItems, image, color, tableData });
-      } else {
-        if (shouldReplace) {
-          setContent(generated);
-          handleUpdate({ content: generated });
-          addToHistory({ title, content: generated, listItems, image, color, tableData });
-        } else {
-          const inserted = insertTextAtSelection(textareaRef.current, content, generated);
-          setContent(inserted.nextValue);
-          handleUpdate({ content: inserted.nextValue });
-          addToHistory({ title, content: inserted.nextValue, listItems, image, color, tableData });
-          setTimeout(() => {
-            if (textareaRef.current) {
-              textareaRef.current.style.height = 'auto';
-              textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-              textareaRef.current.selectionStart = inserted.nextSelectionStart;
-              textareaRef.current.selectionEnd = inserted.nextSelectionEnd;
-            }
-          }, 10);
-        }
-      }
-    } catch (e: any) {
-      console.error(e);
-      addToast({
-        type: 'error',
-        title: 'Help me write failed',
-        message: (e?.message?.includes('configured') || e?.message?.includes('Missing'))
-          ? 'Add the NVIDIA API key to continue.'
-          : e?.message || 'Could not generate notebook content.',
-      });
-    } finally {
-      setIsGenerating(false);
-    }
+  const handleRemoveImage = () => {
+    pushSnapshot(buildSnapshot({ image: undefined }));
+    setImage(undefined);
+    persistNow({ image: undefined });
   };
 
-  const handleMagicComposeLegacy = async () => {
-    setIsGenerating(true);
-    try {
-        let prompt = '';
-        if (isList) {
-             const listText = listItems.map(i => i.text).join(', ');
-             prompt = `Rewrite and improve this checklist: ${title}. Items: ${listText}`;
-        } else if (tableData) {
-             const colHeaders = tableData.rows[0].map(c => c.text).join(', ');
-             prompt = `Suggest data for this table about ${title}. Columns are: ${colHeaders}`;
-        } else {
-             prompt = title ? `Rewrite and improve this note: ${title}. ${content}` : `Improve this note: ${content}`;
-        }
-        const generated = await generateNoteContent(prompt);
-        if (isList) {
-            const lines = generated.split('\n').filter(l => l.trim());
-            const newItems = lines.map(line => ({
-                id: genId(), text: line.replace(/^[-*•]\s*/, '').trim(), checked: false, indentLevel: 0
-            }));
-            setListItems(newItems);
-            handleUpdate({ listItems: newItems, isList: true });
-            addToHistory({ title, content, listItems: newItems, image, color, tableData });
-        } else {
-            setContent(generated);
-            handleUpdate({ content: generated });
-            addToHistory({ title, content: generated, listItems, image, color, tableData });
-      }
-    } catch (e) { console.error(e); } finally { setIsGenerating(false); }
+  const handleColorChange = (c: NoteColor) => {
+    pushSnapshot(buildSnapshot({ color: c }));
+    setColor(c);
+    setShowColorOptions(false);
+    persistNow({ color: c });
   };
 
-  const handleMagicCompose = () => {
-    if (isGenerating) return;
-    setShowComposeMenu((prev) => !prev);
+  const handleTogglePin = () => {
+    const next = !isPinned;
+    setIsPinned(next);
+    persistNow({ isPinned: next });
   };
-  
+
+  const handleToggleArchive = () => {
+    persistNow({ isArchived: !note.isArchived });
+    onClose();
+  };
+
   const toggleListMode = () => {
-      let newState;
+    if (isList) {
+      const text = listItems.map(i => i.text).join('\n');
+      pushSnapshot(buildSnapshot({ isList: false, content: text, listItems: [], tableData: undefined }));
+      setContent(text);
+      setIsList(false);
+      setListItems([]);
       setTableData(undefined);
-      if (isList) {
-          const text = listItems.map(i => i.text).join('\n');
-          setContent(text);
-          setIsList(false);
-          newState = { isList: false, content: text, listItems: [], tableData: undefined };
-      } else {
-          const lines = content.split('\n');
-          const items = lines.map(line => ({ id: genId(), text: line, checked: false, indentLevel: 0 }));
-          const newList = items.length ? items : [{ id: genId(), text: '', checked: false, indentLevel: 0 }];
-          setListItems(newList);
-          setIsList(true);
-          newState = { isList: true, listItems: newList, content: '', tableData: undefined };
-      }
-      handleUpdate(newState);
-      addToHistory({ title, ...newState, image, color });
+    } else {
+      const lines = content.split('\n');
+      const items = lines.map(line => ({ id: genId(), text: line, checked: false, indentLevel: 0 }));
+      const newList = items.length ? items : [{ id: genId(), text: '', checked: false, indentLevel: 0 }];
+      pushSnapshot(buildSnapshot({ isList: true, listItems: newList, content: '', tableData: undefined }));
+      setListItems(newList);
+      setIsList(true);
+      setContent('');
+      setTableData(undefined);
+    }
+    bumpVersion();
   };
 
   const addTable = () => {
+    const newTable = createEmptyTable();
+    pushSnapshot(buildSnapshot({ isList: false, content: '', tableData: newTable }));
     setIsList(false);
     setContent('');
-    const newTable = { 
-      rows: [
-        [{ text: '' }, { text: '' }], 
-        [{ text: '' }, { text: '' }]
-      ] 
-    };
     setTableData(newTable);
-    handleUpdate({ tableData: newTable, isList: false, content: '' });
-    addToHistory({ title, content: '', listItems: [], image, color, tableData: newTable });
+    bumpVersion();
   };
 
-  const handleTableCellChange = (rIdx: number, cIdx: number, val: string) => {
-    if (!tableData) return;
-    const newRows = [...tableData.rows];
-    newRows[rIdx][cIdx] = { ...newRows[rIdx][cIdx], text: val };
-    const nextTable = { rows: newRows };
-    setTableData(nextTable);
-    handleUpdate({ tableData: nextTable });
+  const handleListItemsChange = (items: ListItem[]) => {
+    pushSnapshot(buildSnapshot({ listItems: items }));
+    setListItems(items);
+    bumpVersion();
   };
 
-  const handleCellColorChange = (rIdx: number, cIdx: number, cellColor: NoteColor) => {
-    if (!tableData) return;
-    const newRows = [...tableData.rows];
-    newRows[rIdx][cIdx] = { ...newRows[rIdx][cIdx], color: cellColor };
-    const nextTable = { rows: newRows };
-    setTableData(nextTable);
-    handleUpdate({ tableData: nextTable });
-    setShowCellColorOptions(false);
-    addToHistory({ title, content, isList, listItems, image, color, tableData: nextTable });
-  };
-
-  const addRow = () => {
-    if (!tableData) return;
-    const nextTable = { rows: [...tableData.rows, Array(tableData.rows[0].length).fill(null).map(() => ({ text: '' }))] };
-    setTableData(nextTable);
-    handleUpdate({ tableData: nextTable });
-  };
-
-  const addCol = () => {
-    if (!tableData) return;
-    const nextTable = { rows: tableData.rows.map(row => [...row, { text: '' }]) };
-    setTableData(nextTable);
-    handleUpdate({ tableData: nextTable });
-    // Adjust canvas width automatically
-    if (setCanvasWidth) {
-        setCanvasWidth(prev => prev + COLUMN_WIDTH_INC);
+  const handleTableChange = (next: TableData | undefined) => {
+    if (note.isTrashed) return;
+    pushSnapshot(buildSnapshot({ tableData: next }));
+    if (setCanvasWidth && tableData && next) {
+      const prevCols = tableData.rows[0]?.length ?? 0;
+      const nextCols = next.rows[0]?.length ?? 0;
+      if (nextCols > prevCols) setCanvasWidth(prev => prev + COLUMN_WIDTH_INC);
+      else if (nextCols < prevCols) setCanvasWidth(prev => Math.max(CANVAS_MIN_WIDTH, prev - COLUMN_WIDTH_INC));
     }
-  };
-
-  const removeRow = (idx: number) => {
-    if (!tableData || tableData.rows.length <= 1) return;
-    const nextTable = { rows: tableData.rows.filter((_, i) => i !== idx) };
-    setTableData(nextTable);
-    handleUpdate({ tableData: nextTable });
-  };
-
-  const removeCol = (idx: number) => {
-    if (!tableData || tableData.rows[0].length <= 1) return;
-    const nextTable = { rows: tableData.rows.map(row => row.filter((_, i) => i !== idx)) };
-    setTableData(nextTable);
-    handleUpdate({ tableData: nextTable });
-    // Adjust canvas width automatically
-    if (setCanvasWidth) {
-        setCanvasWidth(prev => Math.max(560, prev - COLUMN_WIDTH_INC));    }
+    setTableData(next);
+    bumpVersion();
   };
 
   const adjustWidth = (inc: boolean) => {
-      if (setCanvasWidth) {
-          setCanvasWidth(prev => {
-              const next = inc ? prev + COLUMN_WIDTH_INC : prev - COLUMN_WIDTH_INC;
-              return Math.max(320, Math.min(2000, next));          });
-      }
-  };
-
-  const handleOutsideClick = (e: MouseEvent) => {
-    if (colorPickerRef.current && !colorPickerRef.current.contains(e.target as Node)) {
-      setShowColorOptions(false);
-    }
-    if (cellColorPickerRef.current && !cellColorPickerRef.current.contains(e.target as Node)) {
-      setShowCellColorOptions(false);
-    }
-    if (composeMenuRef.current && !composeMenuRef.current.contains(e.target as Node)) {
-      setShowComposeMenu(false);
+    if (setCanvasWidth) {
+      setCanvasWidth(prev => {
+        const next = inc ? prev + COLUMN_WIDTH_INC : prev - COLUMN_WIDTH_INC;
+        return Math.max(CANVAS_MIN_WIDTH, Math.min(CANVAS_MAX_WIDTH, next));
+      });
     }
   };
 
-  useEffect(() => {
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, []);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  const handleDragEndItems = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      const oldIndex = listItems.findIndex(i => i.id === active.id);
-      const newIndex = listItems.findIndex(i => i.id === over.id);
-      const newItems = arrayMove(listItems, oldIndex, newIndex);
-      setListItems(newItems);
-      handleUpdate({ listItems: newItems });
-      addToHistory({ title, content, isList, listItems: newItems, image, color, tableData });
-    }
+  const handleDelete = () => {
+    dirtyRef.current = false;
+    onDelete(note.id);
+    onClose();
   };
 
   return (
@@ -508,13 +397,17 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
         {image && (
             <div className="relative group w-full">
                 <img src={image} alt="Note attachment" className="w-full h-auto max-h-[600px] object-contain bg-black/20" />
-                <button 
-                    onClick={(e) => { e.stopPropagation(); setImage(undefined); handleUpdate({ image: undefined }); addToHistory({ title, content, listItems, image: undefined, color, tableData }); }}
+                {!note.isTrashed && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveImage}
                     className="absolute bottom-4 right-4 p-3 bg-black/60 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                     title="Remove image"
-                >
+                    aria-label="Remove image"
+                  >
                     <Trash2 className="w-5 h-5" />
-                </button>
+                  </button>
+                )}
             </div>
         )}
         <div className="flex justify-between items-center px-4 pt-4">
@@ -522,27 +415,30 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
               id="edit-note-title"
               name="title"
               aria-label="Note title"
+              ref={titleInputRef}
               type="text" value={title}
               readOnly={note.isTrashed}
               onChange={(e) => {
                   setTitle(e.target.value);
-                  handleUpdate({ title: e.target.value });
+                  bumpVersion();
               }}
-              onBlur={() => addToHistory({ title, content, isList, listItems, image, color, tableData })}
+              onBlur={() => pushSnapshot(buildSnapshot())}
               placeholder="Title"
               className="bg-transparent text-[var(--notebook-text)] placeholder-[var(--notebook-placeholder)] font-medium text-2xl outline-none w-full mr-4"
             />
             <div className="flex items-center gap-1">
                 {!note.isTrashed && (
-                  <button 
-                    onClick={() => { const next = !isPinned; setIsPinned(next); handleUpdate({ isPinned: next }); }}
+                  <button
+                    type="button"
+                    onClick={handleTogglePin}
                     className={`p-2 rounded-full hover:bg-[var(--notebook-hover)] ${isPinned ? 'text-[var(--notebook-text)]' : 'text-[var(--notebook-muted)]'}`}
                     title={isPinned ? "Unpin note" : "Pin note"}
+                    aria-label={isPinned ? "Unpin note" : "Pin note"}
                   >
                     <Pin className={`w-5 h-5 ${isPinned ? 'fill-current' : ''}`} />
                   </button>
                 )}
-                <button onClick={onClose} className="p-2 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] rounded-full" title="Close editor">
+                <button type="button" onClick={closeAndReport} className="p-2 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] rounded-full" title="Close editor" aria-label="Close editor">
                     <X className="w-5 h-5" />
                 </button>
             </div>
@@ -595,129 +491,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
               </div>
             )}
             {tableData ? (
-               <div className="overflow-x-auto custom-scrollbar pb-4">
-                  <table className="w-full border-collapse border border-[var(--notebook-divider)] text-base">
-                    <tbody>
-                      {tableData.rows.map((row, rIdx) => (
-                        <tr key={rIdx}>
-                          {row.map((cell, cIdx) => (
-                            <td key={cIdx} className={`border border-[var(--notebook-divider)] p-0 relative group/cell align-top transition-colors duration-200 ${cell.color ? ColorStyles[cell.color] : ''}`}>
-                                <textarea 
-                                  id={`edit-note-table-cell-${rIdx}-${cIdx}`}
-                                  name={`table-cell-${rIdx}-${cIdx}`}
-                                  aria-label={`Table cell row ${rIdx + 1} column ${cIdx + 1}`}
-                                  value={cell.text}
-                                  rows={1}
-                                  readOnly={note.isTrashed}
-                                  onFocus={() => setFocusedCell({ rIdx, cIdx })}
-                                  onChange={(e) => {
-                                      handleTableCellChange(rIdx, cIdx, e.target.value);
-                                      e.target.style.height = 'auto';
-                                      e.target.style.height = e.target.scrollHeight + 'px';
-                                  }}
-                                  ref={(el) => {
-                                    if (el) {
-                                      el.style.height = 'auto';
-                                      el.style.height = el.scrollHeight + 'px';
-                                    }
-                                  }}
-                                  className="w-full bg-transparent p-3 outline-none text-[var(--notebook-text)] placeholder-[var(--notebook-placeholder)] resize-none overflow-hidden block"
-                                  placeholder={rIdx === 0 && cIdx === 0 ? "Cell..." : ""}
-                                />
-                                <div className="absolute top-1 right-1 opacity-0 group-cell/hover:opacity-100 flex gap-1 z-10">
-                                    <button 
-                                      onClick={() => { setFocusedCell({ rIdx, cIdx }); setShowCellColorOptions(true); }}
-                                      className="p-1 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] bg-[var(--note-default-bg)]/80 rounded-full shadow-sm"
-                                      title="Cell color"
-                                    >
-                                      <Palette className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
-                                {rIdx === 0 && tableData.rows[0].length > 1 && !note.isTrashed && (
-                                  <button onClick={() => removeCol(cIdx)} className="absolute -top-3 left-1/2 -translate-x-1/2 opacity-0 group-cell/hover:opacity-100 text-[var(--notebook-muted)] hover:text-red-400 z-10 bg-[var(--note-default-bg)] rounded-full transition-opacity">
-                                    <MinusSquare className="w-4 h-4" />
-                                  </button>
-                                )}
-                                {cIdx === 0 && tableData.rows.length > 1 && !note.isTrashed && (
-                                  <button onClick={() => removeRow(rIdx)} className="absolute top-1/2 -left-4 -translate-y-1/2 opacity-0 group-cell/hover:opacity-100 text-[var(--notebook-muted)] hover:text-red-400 z-10 bg-[var(--note-default-bg)] rounded-full transition-opacity">
-                                    <MinusSquare className="w-4 h-4" />
-                                  </button>
-                                )}
-                                
-                                {showCellColorOptions && focusedCell?.rIdx === rIdx && focusedCell?.cIdx === cIdx && (
-                                    <div ref={cellColorPickerRef} className="absolute top-full right-0 mt-1 p-2 bg-[var(--note-default-bg)] border border-[var(--notebook-divider)] rounded-lg shadow-2xl grid grid-cols-6 gap-1 z-[60] min-w-[180px]">
-                                        {Object.values(NoteColor).map((c) => (
-                                            <button 
-                                                key={c} 
-                                                className={`w-6 h-6 rounded-full border transition-all ${ColorStyles[c].split(' ')[0]} ${cell.color === c ? 'ring-2 ring-white scale-110' : 'hover:scale-110'}`}
-                                                onClick={() => handleCellColorChange(rIdx, cIdx, c)}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {!note.isTrashed && (
-                    <div className="flex flex-wrap items-center gap-2 mt-4">
-                       <button onClick={addRow} className="flex items-center gap-1.5 text-xs text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] bg-[var(--notebook-hover)] px-3 py-1.5 rounded transition-colors"><PlusSquare className="w-4 h-4" /> Add Row</button>
-                       <button onClick={addCol} className="flex items-center gap-1.5 text-xs text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] bg-[var(--notebook-hover)] px-3 py-1.5 rounded transition-colors"><PlusSquare className="w-4 h-4" /> Add Column</button>
-                       <button onClick={() => { if(tableData && tableData.rows.length > 1) removeRow(tableData.rows.length - 1); }} className="flex items-center gap-1.5 text-xs text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] bg-[var(--notebook-hover)] px-3 py-1.5 rounded transition-colors"><MinusSquare className="w-4 h-4" /> Remove Row</button>
-                       <button onClick={() => { if(tableData && tableData.rows[0].length > 1) removeCol(tableData.rows[0].length - 1); }} className="flex items-center gap-1.5 text-xs text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] bg-[var(--notebook-hover)] px-3 py-1.5 rounded transition-colors"><MinusSquare className="w-4 h-4" /> Remove Column</button>
-                       <button onClick={() => { setTableData(undefined); handleUpdate({ tableData: undefined }); }} className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 ml-auto px-3 py-1.5 rounded bg-red-400/5 transition-colors"><Trash2 className="w-4 h-4" /> Remove Table</button>
-                    </div>
-                  )}
-               </div>
+               <TableEditor tableData={tableData} onChange={handleTableChange} readOnly={!!note.isTrashed} />
             ) : isList ? (
-                <div className="flex flex-col gap-1">
-                    <DndContext 
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleDragEndItems}
-                    >
-                        <SortableContext items={listItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
-                            {listItems.map((item) => (
-                                <SortableListItem 
-                                    key={item.id}
-                                    item={item}
-                                    isTrashed={!!note.isTrashed}
-                                    onToggle={() => {
-                                        const newItems = listItems.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i);
-                                        setListItems(newItems);
-                                        handleUpdate({ listItems: newItems });
-                                        addToHistory({ title, content, isList, listItems: newItems, image, color, tableData });
-                                    }}
-                                    onChange={(val) => {
-                                        const newItems = listItems.map(i => i.id === item.id ? { ...i, text: val } : i);
-                                        setListItems(newItems);
-                                        handleUpdate({ listItems: newItems });
-                                    }}
-                                    onBlur={() => addToHistory({ title, content, isList, listItems, image, color, tableData })}
-                                    onRemove={() => {
-                                        const newItems = listItems.filter(i => i.id !== item.id);
-                                        setListItems(newItems);
-                                        handleUpdate({ listItems: newItems });
-                                        addToHistory({ title, content, isList, listItems: newItems, image, color, tableData });
-                                    }}
-                                />
-                            ))}
-                        </SortableContext>
-                    </DndContext>
-                    {!note.isTrashed && (
-                      <button className="flex items-center gap-3 px-8 py-2 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)]" onClick={() => {
-                          const newItem = { id: genId(), text: '', checked: false, indentLevel: 0 };
-                          const newItems = [...listItems, newItem];
-                          setListItems(newItems);
-                          handleUpdate({ listItems: newItems });
-                          addToHistory({ title, content, isList, listItems: newItems, image, color, tableData });
-                      }}>
-                         <Plus className="w-4 h-4" /> <span>List item</span>
-                      </button>
-                    )}
-                </div>
+                <ListEditor items={listItems} onChange={handleListItemsChange} readOnly={!!note.isTrashed} />
             ) : (
                 <textarea
                     id="edit-note-content"
@@ -725,8 +501,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
                     aria-label="Note content"
                     ref={textareaRef} value={content}
                     readOnly={note.isTrashed}
-                    onChange={(e) => { setContent(e.target.value); handleUpdate({ content: e.target.value }); }}
-                    onBlur={() => addToHistory({ title, content, isList, listItems, image, color, tableData })}
+                    onChange={(e) => { setContent(e.target.value); bumpVersion(); }}
+                    onBlur={() => pushSnapshot(buildSnapshot())}
                     placeholder="Note"
                     className="w-full bg-transparent text-[var(--notebook-text)] placeholder-[var(--notebook-placeholder)] text-base outline-none resize-none min-h-[300px]"
                 />
@@ -737,46 +513,52 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
                  <div className="flex gap-0.5 items-center">
                     {note.isTrashed ? (
                       <>
-                        <ToolbarButton 
-                          onClick={() => onRestore?.(note.id)} 
-                          icon={<RotateCcw className="w-4 h-4" />} 
-                          title="Restore" 
+                        <ToolbarButton
+                          type="button"
+                          onClick={() => onRestore?.(note.id)}
+                          icon={<RotateCcw className="w-4 h-4" />}
+                          title="Restore"
                         />
-                        <div className="relative">
-                            <ToolbarButton icon={<MoreVertical className="w-4 h-4" />} title="More" onClick={() => setShowMoreMenu(!showMoreMenu)} />
+                        <div className="relative" ref={moreMenuRef}>
+                            <ToolbarButton
+                              type="button"
+                              icon={<MoreVertical className="w-4 h-4" />}
+                              title="More"
+                              onClick={() => setShowMoreMenu(!showMoreMenu)}
+                              ariaExpanded={showMoreMenu}
+                            />
                             {showMoreMenu && (
-                                <div className="absolute bottom-full left-0 mb-2 w-48 bg-[var(--note-default-bg)] border border-[var(--notebook-divider)] rounded shadow-2xl z-40 py-1">
-                                    <MenuOption icon={<Trash2 className="w-4 h-4" />} label="Delete forever" onClick={() => { onDelete(note.id); onClose(); }} />
+                                <div role="menu" aria-label="More actions" className="absolute bottom-full left-0 mb-2 w-48 bg-[var(--note-default-bg)] border border-[var(--notebook-divider)] rounded shadow-2xl z-40 py-1">
+                                    <MenuOption icon={<Trash2 className="w-4 h-4" />} label="Delete forever" onClick={handleDelete} />
                                 </div>
                             )}
                         </div>
                       </>
                     ) : (
                       <>
-                        <ToolbarButton icon={<BellIcon />} title="Reminders are not configured yet" disabled />
-                        
+                        <ToolbarButton type="button" icon={<BellIcon />} title="Reminders are not configured yet" disabled />
+
                         <div className="relative" ref={colorPickerRef}>
-                            <ToolbarButton 
-                                onClick={() => setShowColorOptions(!showColorOptions)} 
-                                icon={<Palette className="w-4 h-4" />} 
-                                title="Background options" 
+                            <ToolbarButton
+                                type="button"
+                                onClick={() => setShowColorOptions(!showColorOptions)}
+                                icon={<Palette className="w-4 h-4" />}
+                                title="Background options"
+                                ariaExpanded={showColorOptions}
                             />
                             {showColorOptions && (
-                                <div className="absolute bottom-full left-0 mb-3 p-3 bg-[var(--note-default-bg)] border border-[var(--notebook-divider)] rounded-xl shadow-2xl grid grid-cols-6 gap-3 z-50 animate-in fade-in zoom-in-95 duration-150 min-w-[240px]">
+                                <div role="menu" aria-label="Background options" className="absolute bottom-full left-0 mb-3 p-3 bg-[var(--note-default-bg)] border border-[var(--notebook-divider)] rounded-xl shadow-2xl grid grid-cols-6 gap-3 z-50 animate-in fade-in zoom-in-95 duration-150 min-w-[240px]">
                                     {Object.values(NoteColor).map((c) => (
-                                        <button 
-                                            key={c} 
+                                        <button
+                                            type="button"
+                                            key={c}
                                             title={c.charAt(0) + c.slice(1).toLowerCase()}
+                                            aria-label={`${c.charAt(0) + c.slice(1).toLowerCase()} background`}
                                             className={`w-8 h-8 rounded-full border-2 transition-all flex items-center justify-center
-                                              ${ColorStyles[c].split(' ')[0]} 
+                                              ${ColorStyles[c].split(' ')[0]}
                                               ${color === c ? 'border-white ring-1 ring-white/50 scale-110' : 'border-transparent hover:border-white/30'}
                                             `}
-                                            onClick={() => { 
-                                                setColor(c); 
-                                                handleUpdate({ color: c }); 
-                                                addToHistory({ title, content, listItems, color: c, image, tableData, labels }); 
-                                                setShowColorOptions(false);
-                                            }}
+                                            onClick={() => handleColorChange(c)}
                                         >
                                           {color === c && <Check className="w-4 h-4 text-white drop-shadow-md" />}
                                           {c === NoteColor.DEFAULT && color !== c && (
@@ -790,39 +572,52 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
                             )}
                         </div>
 
-                        <ToolbarButton onClick={handleImageClick} icon={<ImageIcon className="w-4 h-4" />} title="Add Image" />
-                        <ToolbarButton 
-                            onClick={() => { const next = !note.isArchived; handleUpdate({ isArchived: next }); onClose(); }} 
-                            icon={<Archive className="w-4 h-4" />} 
-                            title={note.isArchived ? "Unarchive" : "Archive"} 
+                        <ToolbarButton type="button" onClick={handleImageClick} icon={<ImageIcon className="w-4 h-4" />} title="Add Image" />
+                        <ToolbarButton
+                            type="button"
+                            onClick={handleToggleArchive}
+                            icon={<Archive className="w-4 h-4" />}
+                            title={note.isArchived ? "Unarchive" : "Archive"}
                         />
-                        <div className="relative">
-                            <ToolbarButton icon={<MoreVertical className="w-4 h-4" />} title="More" onClick={() => setShowMoreMenu(!showMoreMenu)} />
+                        <div className="relative" ref={moreMenuRef}>
+                            <ToolbarButton
+                              type="button"
+                              icon={<MoreVertical className="w-4 h-4" />}
+                              title="More"
+                              onClick={() => setShowMoreMenu(!showMoreMenu)}
+                              ariaExpanded={showMoreMenu}
+                            />
                             {showMoreMenu && (
-                                <div className="absolute bottom-full left-0 mb-2 w-48 bg-[var(--note-default-bg)] border border-[var(--notebook-divider)] rounded shadow-2xl z-40 py-1">
-                                    <MenuOption icon={<Trash2 className="w-4 h-4" />} label="Delete note" onClick={() => { onDelete(note.id); onClose(); }} />
+                                <div role="menu" aria-label="More actions" className="absolute bottom-full left-0 mb-2 w-48 bg-[var(--note-default-bg)] border border-[var(--notebook-divider)] rounded shadow-2xl z-40 py-1">
+                                    <MenuOption icon={<Trash2 className="w-4 h-4" />} label="Delete note" onClick={handleDelete} />
                                     <MenuOption icon={<Tag className="w-4 h-4" />} label="Add label" onClick={() => { setShowLabelEditor(true); setShowMoreMenu(false); requestAnimationFrame(() => labelInputRef.current?.focus()); }} />
-                                    <MenuOption icon={<Copy className="w-4 h-4" />} label="Make a copy" onClick={() => { onDuplicate?.(note); setShowMoreMenu(false); }} />
+                                    <MenuOption icon={<Copy className="w-4 h-4" />} label="Make a copy" onClick={() => { onDuplicate?.(buildFullNote()); setShowMoreMenu(false); }} />
                                 </div>
                             )}
                         </div>
-                        <ToolbarButton icon={<CheckSquare className="w-4 h-4" />} title="Toggle checkboxes" onClick={toggleListMode} />
-                        <ToolbarButton icon={<TableIcon className="w-4 h-4" />} title="Add table" onClick={addTable} />
-                        
+                        <ToolbarButton type="button" icon={<CheckSquare className="w-4 h-4" />} title="Toggle checkboxes" onClick={toggleListMode} />
+                        <ToolbarButton type="button" icon={<TableIcon className="w-4 h-4" />} title="Add table" onClick={addTable} />
+
                         <div className="h-4 w-[1px] bg-[var(--notebook-divider)] mx-1" />
-                        <ToolbarButton icon={<Minus className="w-4 h-4" />} title="Decrease canvas width" onClick={() => adjustWidth(false)} />
-                        <ToolbarButton icon={<Plus className="w-4 h-4" />} title="Increase canvas width" onClick={() => adjustWidth(true)} />
+                        <ToolbarButton type="button" icon={<Minus className="w-4 h-4" />} title="Decrease canvas width" onClick={() => adjustWidth(false)} />
+                        <ToolbarButton type="button" icon={<Plus className="w-4 h-4" />} title="Increase canvas width" onClick={() => adjustWidth(true)} />
                         <div className="h-4 w-[1px] bg-[var(--notebook-divider)] mx-1" />
 
-                        <ToolbarButton icon={<RotateCcw className={`w-4 h-4 ${historyIndex <= 0 ? 'opacity-30' : ''}`} />} title="Undo" onClick={handleUndo} />
-                        <ToolbarButton icon={<RotateCw className={`w-4 h-4 ${historyIndex >= history.length - 1 ? 'opacity-30' : ''}`} />} title="Redo" onClick={handleRedo} />
+                        <ToolbarButton type="button" icon={<RotateCcw className="w-4 h-4" />} title="Undo" onClick={handleUndo} disabled={history.index <= 0} />
+                        <ToolbarButton type="button" icon={<RotateCw className="w-4 h-4" />} title="Redo" onClick={handleRedo} disabled={history.index >= history.entries.length - 1} />
                       </>
                     )}
                  </div>
-                 <button onClick={onClose} className="px-6 py-2 text-[var(--notebook-text)] font-medium text-sm rounded hover:bg-[var(--notebook-hover)] transition-colors">Close</button>
+                 <button type="button" onClick={closeAndReport} className="px-6 py-2 text-[var(--notebook-text)] font-medium text-sm rounded hover:bg-[var(--notebook-hover)] transition-colors">Close</button>
             </div>
             <div className="text-[11px] text-[var(--notebook-muted)] text-right">
-                {note.updatedAt ? `Edited ${new Date(note.updatedAt).toLocaleDateString()} ${new Date(note.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                {Boolean(note.createdAt || note.updatedAt) && (
+                  <>
+                    {note.createdAt ? `Created ${formatRelativeTime(note.createdAt)}` : ''}
+                    {note.createdAt && note.updatedAt ? ' · ' : ''}
+                    {note.updatedAt ? `Edited ${formatRelativeTime(note.updatedAt)}` : ''}
+                  </>
+                )}
             </div>
         </div>
       </div>
@@ -830,10 +625,13 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   );
 };
 
-const ToolbarButton = ({ icon, title, onClick, disabled }: { icon: React.ReactNode, title?: string, onClick?: (e: React.MouseEvent) => void, disabled?: boolean }) => (
+const ToolbarButton = ({ icon, title, onClick, disabled, type = 'button', ariaExpanded }: { icon: React.ReactNode, title?: string, onClick?: (e: React.MouseEvent) => void, disabled?: boolean, type?: 'button' | 'submit', ariaExpanded?: boolean }) => (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-label={title}
+      aria-expanded={ariaExpanded}
       className={`w-8 h-8 flex items-center justify-center rounded-full text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] transition-colors ${disabled ? 'opacity-35 cursor-not-allowed hover:bg-transparent hover:text-[var(--notebook-muted)]' : ''}`}
       title={title}
     >
@@ -842,7 +640,7 @@ const ToolbarButton = ({ icon, title, onClick, disabled }: { icon: React.ReactNo
 );
 
 const MenuOption = ({ icon, label, onClick }: { icon: React.ReactNode, label: string, onClick: () => void }) => (
-    <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] text-left">{icon}{label}</button>
+    <button type="button" role="menuitem" onClick={onClick} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] text-left">{icon}{label}</button>
 );
 
 const BellIcon = () => <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>;

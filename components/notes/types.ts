@@ -63,4 +63,4 @@ export const ColorStyles: Record<NoteColor, string> = {
   [NoteColor.GRAY]: 'bg-[var(--note-gray-bg)] border-[var(--note-gray-border)]',
 };
 
-export type SidebarSection = 'NOTES' | 'REMINDERS' | 'EDIT_LABELS' | 'ARCHIVE' | 'TRASH';
+export type SidebarSection = 'NOTES' | 'EDIT_LABELS' | 'ARCHIVE' | 'TRASH';

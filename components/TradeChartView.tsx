@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { RefreshCw, ChevronDown, AlertTriangle, Wifi, Clock, Settings, Cloud, CloudCheck } from 'lucide-react';
+import { RefreshCw, ChevronDown, AlertTriangle, Clock, Settings, Cloud, CloudCheck } from 'lucide-react';
 import { Trade, Candle } from '../types';
 import {
   fetchCtraderCandles,
@@ -50,6 +50,34 @@ function autoTimeframe(trade: Trade): string {
 
 const getTradeCandlesCacheKey = (tradeId: string) => `jfx_trade_candles_${tradeId}`;
 
+const SCALE_CANDIDATES = [10, 100, 1000];
+
+/**
+ * Candles saved before the trendbar unit fix may be 10x/100x/1000x too large.
+ * Detect a clean scale mismatch against the trade's entry price and rescale;
+ * correctly-scaled data passes through untouched.
+ */
+const normalizeCandleScale = (candles: Candle[], trade: Trade): Candle[] => {
+  const entry = Number(trade.entryPrice);
+  if (!candles || candles.length < 2 || !Number.isFinite(entry) || entry <= 0) return candles;
+  const closes = candles
+    .map(c => Number(c.close))
+    .filter(v => Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+  if (closes.length === 0) return candles;
+  const median = closes[Math.floor(closes.length / 2)];
+  const ratio = median / entry;
+  const factor = SCALE_CANDIDATES.find(s => Math.abs(ratio - s) / s <= 0.02);
+  if (!factor) return candles;
+  return candles.map(c => ({
+    ...c,
+    open: c.open / factor,
+    high: c.high / factor,
+    low: c.low / factor,
+    close: c.close / factor,
+  }));
+};
+
 // ─── Status types ─────────────────────────────────────────────────────────────
 
 type Status = 'idle' | 'loading' | 'done' | 'error' | 'no-auth' | 'no-times';
@@ -68,7 +96,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
   const [candlesAfter, setCandlesAfter] = useState(15);
   const [candles, setCandles] = useState<Candle[]>(() => {
     if (trade.chartCandles && trade.chartCandles.length >= 2) {
-      return trade.chartCandles;
+      return normalizeCandleScale(trade.chartCandles, trade);
     }
     return [];
   });
@@ -90,7 +118,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
   const fetchCandles = useCallback(async (tf: string, before: number, after: number, force: boolean = false) => {
     // 1. Guard: check existing cloud / saved candles on trade if not forced
     if (!force && trade.chartCandles && trade.chartCandles.length >= 2 && (trade.chartTimeframe === tf || !trade.chartTimeframe)) {
-      setCandles(trade.chartCandles);
+      setCandles(normalizeCandleScale(trade.chartCandles, trade));
       setStatus('done');
       setIsSavedToCloud(true);
       return;
@@ -103,11 +131,12 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
         if (cachedRaw) {
           const parsed = JSON.parse(cachedRaw);
           if (parsed && Array.isArray(parsed.candles) && parsed.candles.length >= 2 && parsed.timeframe === tf) {
-            setCandles(parsed.candles);
+            const cachedCandles = normalizeCandleScale(parsed.candles, trade);
+            setCandles(cachedCandles);
             setStatus('done');
             setIsSavedToCloud(true);
             if (!trade.chartCandles || trade.chartCandles.length === 0) {
-              onSaveCandles?.(parsed.candles, tf);
+              onSaveCandles?.(cachedCandles, tf);
             }
             return;
           }
@@ -171,7 +200,8 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
         return;
       }
 
-      setCandles(data);
+      const freshCandles = normalizeCandleScale(data, trade);
+      setCandles(freshCandles);
       setStatus('done');
       setIsSavedToCloud(true);
 
@@ -179,7 +209,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
       try {
         localStorage.setItem(
           getTradeCandlesCacheKey(trade.id),
-          JSON.stringify({ candles: data, timeframe: tf, updatedAt: Date.now() })
+          JSON.stringify({ candles: freshCandles, timeframe: tf, updatedAt: Date.now() })
         );
       } catch (e) {
         console.warn('Failed to cache trade candles locally:', e);
@@ -187,7 +217,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
 
       // Persist to Supabase cloud
       if (onSaveCandles) {
-        onSaveCandles(data, tf);
+        onSaveCandles(freshCandles, tf);
       }
     } catch (err: any) {
       if (id !== fetchIdRef.current) return;
@@ -206,7 +236,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
     const tf = autoTimeframe(trade);
     setTimeframe(tf);
     if (trade.chartCandles && trade.chartCandles.length >= 2) {
-      setCandles(trade.chartCandles);
+      setCandles(normalizeCandleScale(trade.chartCandles, trade));
       setStatus('done');
       setIsSavedToCloud(true);
     }
@@ -240,7 +270,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
       return (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10 bg-black/70 backdrop-blur-sm rounded-xl px-6">
           <div className={`p-3 rounded-2xl ${isDarkMode ? 'bg-zinc-900' : 'bg-slate-100'}`}>
-            <Wifi size={24} className="text-zinc-500" />
+            <img src="/icon3.jpeg" alt="cTrader" className="w-6 h-6 object-contain" />
           </div>
           <div className="text-center space-y-1">
             <p className="text-[11px] font-black uppercase tracking-widest text-zinc-300">
@@ -423,6 +453,9 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
           isDarkMode={isDarkMode}
           showGrid={true}
           disablePan={false}
+          tradingView
+          symbol={trade.pair}
+          timeframe={timeframe}
         />
 
         {/* Status overlay (loading / error / no-auth / no-times) */}

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trade, UserProfile, DailyBias, EASession, FirehoseEvent, Note } from '../types';
+import { Trade, UserProfile, DailyBias, EASession, Note } from '../types';
 import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary } from '../services/nvidiaAiService';
 import { browserSpeechService } from '../services/voiceInputService';
 import { calculateStats } from '../lib/statsUtils';
@@ -10,33 +10,24 @@ import { formatDataToolResponse, formatStatementsMarkdown, formatRatiosMarkdown,
 import { formatFinnhubDataToolResponse, FINNHUB_TOOL_LABELS, FINNHUB_TOOL_API_ROUTES, type FinnhubToolKind } from '../lib/finnhubDataTools';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { cleanAssistantResponse, cleanThinkingTags } from '../lib/thinkingCleaner';
-import { TrendingUp, TrendingDown, Brain, Clock, Wand2, Send, User, Trash2, Coins, ChevronDown, List as ListIcon, X, History, Plus, ChevronRight, ChevronLeft, Workflow, CheckCircle2, StickyNote, Download, FileText, Activity, Sparkles, Target, Table, Mic, Star, Square, CheckSquare, ArrowUpRight, Save, RotateCcw, LayoutGrid, MessageSquare, Menu, MoreHorizontal, Copy, ThumbsUp, ThumbsDown, Paperclip, Image, Smile, CornerDownLeft, Zap, AlertCircle, Check, Loader2, StopCircle, ArrowLeft, ArrowRight, ListChecks, BarChart3, Clock3, BrainCircuit, DollarSign, Timer, CircleDot, Goal as GoalIcon, Pause, Play, Settings, Telescope } from 'lucide-react';
+import { TrendingUp, TrendingDown, Brain, Clock, Wand2, Coins, ChevronDown, X, Plus, Workflow, StickyNote, Activity, Sparkles, Target, Mic, Star, RotateCcw, LayoutGrid, Copy, ThumbsUp, ThumbsDown, CornerDownLeft, Zap, AlertCircle, Check, Loader2, StopCircle, ArrowLeft, ArrowRight, ListChecks, BarChart3, Clock3, BrainCircuit, Timer, CircleDot, Goal as GoalIcon, Pause, Play, Settings, Telescope } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from './ui/Toast';
 
-// --- Utilities ---
-const formatDuration = (openTime?: string, closeTime?: string) => {
-  if (!openTime || !closeTime) return null;
+// Paid data proxies (/api/fmp, /api/finnhub) require an authenticated Supabase
+// session server-side; attach the access token so logged-in users keep working.
+const authedFetch = async (url: string): Promise<Response> => {
   try {
-    const start = new Date(openTime).getTime();
-    const end = new Date(closeTime).getTime();
-    const diff = Math.abs(end - start) / 1000;
-
-    const days = Math.floor(diff / 86400);
-    const hours = Math.floor((diff % 86400) / 3600);
-    const mins = Math.floor((diff % 3600) / 60);
-
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${mins}m`;
-    return `${mins}m`;
+    const { getSessionToken } = await import('../lib/supabase');
+    const token = await getSessionToken();
+    return await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
   } catch {
-    return null;
+    return fetch(url);
   }
 };
 
-const VOICE_TRANSCRIPTION_PROMPT = 'Transcribe this trading journal voice note faithfully. Preserve pair symbols such as EURUSD, GBPUSD, XAUUSD, NAS100, US30, percentages, prices, R-multiples, times, and short command phrases. Keep the transcript concise and do not normalize symbols.';
-
+// --- Utilities ---
 const DAILY_CREDIT_MAX = 10;
 
 type DailyCreditState = {
@@ -55,7 +46,9 @@ const createDailyCreditState = (date = getLocalDateKey()): DailyCreditState => (
   mentorRemaining: DAILY_CREDIT_MAX,
 });
 
-type ChecklistStatus = 'todo' | 'doing' | 'blocked' | 'done';
+const formatSignedCurrency = (value: number, symbol: string) => (
+  `${value < 0 ? '-' : ''}${symbol}${Math.abs(value).toFixed(2)}`
+);
 
 type StructuredWidget =
   | {
@@ -72,60 +65,6 @@ type StructuredBlock =
 
 const WIDGET_OPEN_REGEX = /\[WIDGET:(MERMAID)(?::([^\]]+))?\]/g;
 const WIDGET_CLOSE_REGEX = /\[\/WIDGET:(MERMAID)\]|\[\/WIDGET\]/g;
-
-const parseChecklistItems = (body: string) => {
-  const normalized = body.replace(/\r\n/g, '\n').trim();
-  if (!normalized) return [];
-
-  const toChecklistStatus = (value: string): ChecklistStatus => {
-    switch (value.toLowerCase()) {
-      case 'x':
-      case 'done':
-        return 'done';
-      case 'doing':
-        return 'doing';
-      case 'blocked':
-        return 'blocked';
-      default:
-        return 'todo';
-    }
-  };
-
-  const rawLines = normalized.includes('\n')
-    ? normalized.split('\n')
-    : normalized.includes('|')
-      ? normalized.split('|')
-      : [normalized];
-
-  return rawLines
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const leadingIndent = line.match(/^[\t ]*/)?.[0] || '';
-      const indentLevel = Math.min(3, Math.floor(leadingIndent.replace(/\t/g, '    ').length / 2));
-      const stripped = line.replace(/^[\t ]*[-*•]?\s*/, '');
-      const statusMatch = stripped.match(/^\[(x|X|done|doing|blocked|todo| )\]\s*(.*)$/i);
-
-      if (statusMatch) {
-        const text = statusMatch[2].trim();
-        const status = toChecklistStatus(statusMatch[1]);
-
-        return {
-          text,
-          checked: status === 'done',
-          status,
-          indentLevel,
-        };
-      }
-
-      return {
-        text: stripped,
-        checked: false,
-        status: undefined,
-        indentLevel,
-      };
-    });
-};
 
 const findWidgetCloseIndex = (text: string, kind: string, fromIndex: number) => {
   WIDGET_CLOSE_REGEX.lastIndex = fromIndex;
@@ -235,7 +174,7 @@ const buildPairPerformanceAnswer = (input: string, trades: Trade[], userProfile:
     const winRate = pairTrades.length > 0 ? (wins / pairTrades.length) * 100 : 0;
     const currency = userProfile?.currencySymbol || '$';
 
-    return `**${label}:** **${pair.symbol}** with ${currency}${pair.pnl.toFixed(2)} P&L across ${pairTrades.length} trade${pairTrades.length === 1 ? '' : 's'} (${winRate.toFixed(1)}% win rate)`;
+    return `**${label}:** **${pair.symbol}** with ${formatSignedCurrency(pair.pnl, currency)} P&L across ${pairTrades.length} trade${pairTrades.length === 1 ? '' : 's'} (${winRate.toFixed(1)}% win rate)`;
   };
 
   if (wantsBoth) {
@@ -258,7 +197,7 @@ const buildPairPerformanceAnswer = (input: string, trades: Trade[], userProfile:
   const pnl = selectedPair.pnl;
   const label = wantsBestPair ? 'best pair' : 'biggest losing pair';
 
-  return `**${symbol}** is your ${label} with ${currency}${pnl.toFixed(2)} P&L across ${pairTrades.length} trade${pairTrades.length === 1 ? '' : 's'} (${pairWinRate.toFixed(1)}% win rate).`;
+  return `**${symbol}** is your ${label} with ${formatSignedCurrency(pnl, currency)} P&L across ${pairTrades.length} trade${pairTrades.length === 1 ? '' : 's'} (${pairWinRate.toFixed(1)}% win rate).`;
 };
 
 // --- Types ---
@@ -325,19 +264,36 @@ interface VoiceClipAttachment {
   deviceLabel?: string;
 }
 
-const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error('Failed to convert audio to a data URL.'));
-    };
-    reader.onerror = () => reject(reader.error || new Error('Failed to read audio data.'));
-    reader.readAsDataURL(blob);
+// Audio attachments live only in memory (blob object URLs). They are stripped
+// before persisting so base64 audio can never blow the localStorage quota.
+const stripAudioForStorage = (messages: Message[]): Message[] =>
+  messages.map(({ audioAttachment: _audio, ...rest }) => rest as Message);
+
+const reviveStoredMessages = (stored: Message[] = []): Message[] =>
+  stored.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
+
+const useSessionMessages = (storageKey: string): [Message[], React.Dispatch<React.SetStateAction<Message[]>>] => {
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      return raw ? reviveStoredMessages(JSON.parse(raw)) : [];
+    } catch (error) {
+      console.warn(`Error reading chat history key "${storageKey}":`, error);
+      return [];
+    }
   });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(stripAudioForStorage(messages)));
+    } catch (error) {
+      console.warn(`Error saving chat history key "${storageKey}":`, error);
+    }
+  }, [storageKey, messages]);
+
+  return [messages, setMessages];
+};
 
 const formatAudioDuration = (durationMs: number) => {
   const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
@@ -501,7 +457,6 @@ interface AIChatProps {
   lastKnownBridgeBalance?: number | null;
   isBridgeOnline?: boolean;
   onAddNote?: (note: Note) => Promise<Note | undefined>;
-  onUpdateTrade?: (trade: Trade) => Promise<void>;
   onOpenSettings?: () => void;
 }
 
@@ -547,22 +502,6 @@ const ANALYSIS_SECTION_CONFIG: Record<string, { icon: React.ReactNode; color: st
   RECOMMENDATIONS: { icon: <Sparkles size={16} />, color: 'text-indigo-400', bg: 'bg-indigo-500/10', borderColor: 'border-indigo-500/20', label: 'Strategic Fixes' },
 };
 
-const ReadOnlyStarRating = ({ rating, isDarkMode }: { rating: number, isDarkMode: boolean }) => (
-  <div className="flex items-center gap-0.5">
-    {[1, 2, 3, 4, 5].map((star) => (
-      <Star 
-        key={star} 
-        size={10} 
-        className={`${
-          star <= rating 
-            ? 'text-amber-400 fill-amber-400' 
-            : isDarkMode ? 'text-zinc-800' : 'text-slate-200'
-        }`} 
-      />
-    ))}
-  </div>
-);
-
 interface MessageRowProps {
   message: Message;
   isDarkMode: boolean;
@@ -576,7 +515,6 @@ interface MessageRowProps {
 const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessageContent, renderSectionCards, assistantIcon: AssistantIcon, onSaveAsNote }: MessageRowProps) => {
   const [copied, setCopied] = useState(false);
   const [savedAsNote, setSavedAsNote] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const isUser = message.role === 'user';
   const isCompactAudioMessage = isUser && Boolean(message.audioAttachment) && (!message.content || message.content === '[Voice recording]');
   const isMarketDataAssistantMessage = !isUser && /^## .+ — (Stock Quote|Company Profile|Key Metrics|Ratios & Growth|Price Change|DCF Valuation|Financial Statements|Insider Transactions|Analyst Recommendations|Earnings Surprises|Recent News)/.test(message.content || '');
@@ -584,7 +522,7 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
 
   const handleCopy = () => {
     const cleanContentText = stripStructuredBlocks(message.content || '').trim();
-    navigator.clipboard?.writeText(cleanContentText);
+    navigator.clipboard?.writeText(cleanContentText).catch(() => undefined);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -602,8 +540,6 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
       className={`group flex w-full px-4 py-2 hover:bg-zinc-50/50 dark:hover:bg-white/5 transition-colors ${isUser ? 'bg-zinc-50/30 dark:bg-white/[0.02]' : ''}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       <div className="flex gap-4 max-w-4xl mx-auto w-full">
         {/* Avatar */}
@@ -748,12 +684,10 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
             </div>
           )}
 
-          {/* Action Buttons - ChatGPT Style */}
+          {/* Action Buttons - ChatGPT Style (dimmed by default on desktop so they stay reachable on touch) */}
           {!message.isStreaming && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: hovered ? 1 : 0 }}
-              className={`flex items-center gap-1 mt-2 -ml-2 ${isUser ? 'justify-start' : ''}`}
+            <div
+              className={`flex items-center gap-1 mt-2 -ml-2 transition-opacity opacity-70 focus-within:opacity-100 md:opacity-0 md:group-hover:opacity-100 ${isUser ? 'justify-start' : ''}`}
             >
               <button 
                 onClick={handleCopy}
@@ -795,7 +729,7 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
                   )}
                 </>
               )}
-            </motion.div>
+            </div>
           )}
         </div>
       </div>
@@ -803,15 +737,6 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
   );
 });
 MessageRow.displayName = 'MessageRow';
-
-interface QuickPrompt {
-  title: string;
-  icon: React.ReactNode;
-  prompt: string;
-  color: string;
-  category: 'psychology' | 'scaling' | 'analysis' | 'strategy';
-  featureMode?: 'psychology' | 'scaling';
-}
 
 interface WizardData {
   tradingStyle: string;
@@ -1042,12 +967,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { cmd: '/status', kind: 'market-status', source: 'finnhub', label: 'Market Status', needsSymbol: false, desc: 'Open/closed & holidays' },
 ];
 
-const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, onAddNote, onUpdateTrade, onOpenSettings }) => {
-  const safePnL = (value: unknown): number => {
-    const n = typeof value === 'number' ? value : Number(value);
-    return Number.isFinite(n) ? n : 0;
-  };
-
+const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, onAddNote, onOpenSettings }) => {
   const challengeOptions = useMemo(() => ([
     { id: 'emotions', label: 'Emotional Trading', desc: 'FOMO, revenge trading, fear of missing out', icon: <Brain size={20} /> },
     { id: 'discipline', label: 'Lack of Discipline', desc: 'Skipping trades, not following rules', icon: <ListChecks size={20} /> },
@@ -1060,22 +980,13 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     () => Object.fromEntries(challengeOptions.map(({ id, label }) => [id, label])),
     [challengeOptions]
   );
-  const [editingTradeNote, setEditingTradeNote] = useState<Trade | null>(null);
-  const [tradeNoteText, setTradeNoteText] = useState('');
-  const [isUpdatingNote, setIsUpdatingNote] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showForgeMenu, setShowForgeMenu] = useState(false);
   const [showFeaturesMenu, setShowFeaturesMenu] = useState(false);
+  const [commandsSuppressed, setCommandsSuppressed] = useState(false);
+  const [visibleMessageLimit, setVisibleMessageLimit] = useState(60);
   const { addToast } = useToast();
   const [wizardStep, setWizardStep] = useState(0);
-
-  const stats = useMemo(() => {
-    const sorted = [...rawTrades].sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
-    const wins = sorted.filter(t => t.result === 'Win').length;
-    const total = sorted.length;
-    const pnl = sorted.reduce((sum, t) => sum + safePnL(t.pnl), 0);
-    return { total, wins, pnl, winRate: total > 0 ? (wins / total) * 100 : 0 };
-  }, [rawTrades]);
 
   const trades = useMemo(() => [...rawTrades].sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime()), [rawTrades]);
   const analyticsSnapshot = useMemo(
@@ -1111,13 +1022,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const [selectedModel, setSelectedModel] = useLocalStorage<ModalModelType>('jfx_ai_selected_model', 'deepseek');
   const [recallMemory, setRecallMemory] = useLocalStorage<boolean>('jfx_ai_recall_memory', true);
   const [dailyCredits, setDailyCredits] = useLocalStorage<DailyCreditState>('jfx_ai_daily_credits', createDailyCreditState());
-  
-  // Migrate credits when max changes
-  useEffect(() => {
-    if (dailyCredits.researchRemaining < DAILY_CREDIT_MAX || dailyCredits.mentorRemaining < DAILY_CREDIT_MAX) {
-      setDailyCredits(createDailyCreditState());
-    }
-  }, []);
   const assistantMode = useMemo(() => getAssistantMode(selectedModel), [selectedModel]);
   const isResearchMode = assistantMode === 'research';
   const assistantLabel = isResearchMode ? 'JFX Research' : 'JFX Mentor';
@@ -1147,6 +1051,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const analyserSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserFrameRef = useRef<number | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const stickToBottomRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -1201,22 +1106,18 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     return () => window.clearInterval(intervalId);
   }, [setDailyCredits]);
 
-  const normalizeMessages = useCallback((stored: Message[] = []) => (
-    stored.map((m) => ({
-      ...m,
-      timestamp: new Date(m.timestamp),
-    }))
-  ), []);
-
-  const [researchMessages, setResearchMessages] = useLocalStorage<Message[]>('jfx_ai_chat_history_research', []);
-  const [mentorMessages, setMentorMessages] = useLocalStorage<Message[]>('jfx_ai_chat_history_mentor', []);
+  const [researchMessages, setResearchMessages] = useSessionMessages('jfx_ai_chat_history_research');
+  const [mentorMessages, setMentorMessages] = useSessionMessages('jfx_ai_chat_history_mentor');
   const AssistantIcon = selectedModel === 'deepseek' ? Telescope : Brain;
 
-  const messages = useMemo(() => (
-    selectedModel === 'deepseek'
-      ? normalizeMessages(researchMessages)
-      : normalizeMessages(mentorMessages)
-  ), [mentorMessages, normalizeMessages, researchMessages, selectedModel]);
+  const messages = selectedModel === 'deepseek' ? researchMessages : mentorMessages;
+
+  // Render only the latest slice of history; older rows load on demand.
+  const visibleMessages = useMemo(
+    () => (messages.length > visibleMessageLimit ? messages.slice(-visibleMessageLimit) : messages),
+    [messages, visibleMessageLimit]
+  );
+  const hiddenMessageCount = messages.length - visibleMessages.length;
 
   const setMessages = useCallback((value: Message[] | ((val: Message[]) => Message[])) => {
     if (selectedModel === 'deepseek') {
@@ -1228,6 +1129,11 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
 
   useEffect(() => {
     window.localStorage.removeItem('jfx_ai_communication_style');
+  }, []);
+
+  // Abort any in-flight AI request when the page unmounts.
+  useEffect(() => () => {
+    abortControllerRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -1257,6 +1163,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     const container = chatContainerRef.current;
     if (!container) return;
     const isAtBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 100;
+    stickToBottomRef.current = isAtBottom;
     setShowScrollToBottom(!isAtBottom);
   }, []);
 
@@ -1672,6 +1579,9 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   useEffect(() => {
     const shouldAutoFollow = messages.length > 0 || isGenerating || isTranscribing;
     if (!shouldAutoFollow) return;
+    // Respect the reader: never yank the scroll position while they are
+    // browsing older messages (they can use the jump-to-latest button).
+    if (!stickToBottomRef.current) return;
 
     const timer = window.setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: isGenerating || isTranscribing ? 'auto' : 'smooth' });
@@ -1685,12 +1595,13 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     options: { audioAttachment?: Message['audioAttachment']; voiceClip?: VoiceClipAttachment | null } = {}
   ) => {
     if (isProcessingRef.current) return;
-    
+
     const finalInput = overrideInput || input;
     let nextAudioAttachment = options.audioAttachment;
     if (options.voiceClip) {
+      // Blob object URL keeps the audio out of localStorage entirely.
       nextAudioAttachment = {
-        url: await blobToDataUrl(options.voiceClip.blob),
+        url: URL.createObjectURL(options.voiceClip.blob),
         durationMs: options.voiceClip.durationMs,
         mimeType: options.voiceClip.mimeType,
         deviceLabel: options.voiceClip.deviceLabel,
@@ -1701,25 +1612,29 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     const normalizedInput = finalInput.trim();
     if ((!normalizedInput && !hasAudioAttachment) || isGenerating) return;
 
+    const activeCreditMode: 'research' | 'mentor' = isResearchMode ? 'research' : 'mentor';
+    const remainingCredits = activeCreditMode === 'research' ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining;
+
     // --- Slash Command Processing ---
     if (normalizedInput.startsWith('/')) {
       const parts = normalizedInput.split(/\s+/);
       const cmdStr = parts[0].toLowerCase();
       const symbol = parts[1]?.toUpperCase();
-      
+
       const found = SLASH_COMMANDS.find(c => c.cmd === cmdStr);
       if (found) {
         if (found.needsSymbol && !symbol) {
-          addToast({ 
-            type: 'error', 
-            title: 'Symbol Required', 
-            message: `Please provide a symbol for ${found.label} (e.g. ${found.cmd} AAPL)` 
+          addToast({
+            type: 'error',
+            title: 'Symbol Required',
+            message: `Please provide a symbol for ${found.label} (e.g. ${found.cmd} AAPL)`
           });
           return;
         }
-        
+
         setInput('');
-        
+        stickToBottomRef.current = true;
+
         const userMsg: Message = {
           id: Date.now().toString(),
           role: 'user',
@@ -1736,7 +1651,19 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
         return;
       }
     }
-    
+
+    // Bail out BEFORE mutating anything so the draft text and any pending
+    // voice clip survive a credits rejection.
+    if (remainingCredits <= 0) {
+      addToast({
+        type: 'error',
+        title: 'Daily credits used up',
+        message: `You have used all ${isResearchMode ? 'research' : 'mentor'} credits for today. Try again tomorrow.`,
+      });
+      setTimeout(() => inputRef.current?.focus(), 100);
+      return;
+    }
+
     isProcessingRef.current = true;
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -1745,6 +1672,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       timestamp: new Date(),
       audioAttachment: nextAudioAttachment,
     };
+    stickToBottomRef.current = true;
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setPendingVoiceClip(null);
@@ -1760,8 +1688,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       : { trades, userProfile, dailyBias, analyticsSnapshot };
     const requestHistory = recallMemory ? messages.map(m => ({ role: m.role, content: m.content })) : [];
     const contextSummary = buildContextSummary(isResearchMode ? 'research' : 'mentor', isResearchMode ? 0 : requestHistory.length);
-    const activeCreditMode = isResearchMode ? 'research' : 'mentor';
-    const remainingCredits = activeCreditMode === 'research' ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining;
 
     if (isResearchMode && normalizedInput && isPrivateTradingRequest(normalizedInput)) {
       processResponse(
@@ -1782,21 +1708,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       setIsGenerating(false);
       abortControllerRef.current = null;
       isProcessingRef.current = false;
-      setTimeout(() => inputRef.current?.focus(), 100);
-      return;
-    }
-
-    if (remainingCredits <= 0) {
-      setMessages(prev => prev.slice(0, -1));
-      setInput(normalizedInput);
-      setIsGenerating(false);
-      abortControllerRef.current = null;
-      isProcessingRef.current = false;
-      addToast({
-        type: 'error',
-        title: 'Daily credits used up',
-        message: `You have used all ${isResearchMode ? 'research' : 'mentor'} credits for today. Try again tomorrow.`,
-      });
       setTimeout(() => inputRef.current?.focus(), 100);
       return;
     }
@@ -1826,27 +1737,29 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       }
       return;
     }
-    
+
     try {
       consumeDailyCredit(activeCreditMode);
       const res = await modalResearchService.generateResponse(
-        normalizedInput || 'Analyze and respond to this attached voice recording.', 
-        requestContext.trades, 
-        requestContext.userProfile, 
-        requestContext.dailyBias, 
+        normalizedInput || 'Analyze and respond to this attached voice recording.',
+        requestContext.trades,
+        requestContext.userProfile,
+        requestContext.dailyBias,
         requestContext.analyticsSnapshot,
-        false, 
-        requestHistory, 
-        selectedModel, 
-        isPlanMode, 
+        false,
+        requestHistory,
+        selectedModel,
+        isPlanMode,
         undefined,
         abortControllerRef.current.signal
       );
       processResponse(res, (Date.now() + 1).toString(), { contextSummary });
     } catch (error: any) {
-      if (error.message === "Generation aborted") return;
+      // Give the credit back — it was only spent on a successful answer.
+      refundDailyCredit(activeCreditMode);
+      if (error?.message === "Generation aborted") return;
       console.error("AI Error:", error);
-      const errorMessage = error?.message?.includes('API_KEY') 
+      const errorMessage = error?.message?.includes('API_KEY')
         ? 'AI not configured. Please add the NVIDIA API key to the service.'
         : error?.message?.includes('timeout')
         ? 'The AI service took too long to respond. Try a shorter prompt.'
@@ -1890,15 +1803,16 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
 
   const buildScalingSnapshot = useCallback(() => {
     const fullStats = calculateStats(trades);
+    const currency = userProfile?.currencySymbol || '$';
     return {
-      balance: `${userProfile?.currencySymbol || '$'}${userProfile?.initialBalance?.toFixed?.(2) ?? userProfile?.initialBalance ?? 0}`,
-      netProfit: `${userProfile?.currencySymbol || '$'}${fullStats.netProfit.toFixed(2)}`,
+      balance: formatSignedCurrency(userProfile?.initialBalance ?? 0, currency),
+      netProfit: formatSignedCurrency(fullStats.netProfit, currency),
       winRate: `${fullStats.winRate.toFixed(1)}%`,
       profitFactor: fullStats.profitFactor.toFixed(2),
-      avgWin: `${userProfile?.currencySymbol || '$'}${fullStats.avgWin.toFixed(2)}`,
-      avgLoss: `${userProfile?.currencySymbol || '$'}${fullStats.avgLoss.toFixed(2)}`,
+      avgWin: formatSignedCurrency(fullStats.avgWin, currency),
+      avgLoss: formatSignedCurrency(-Math.abs(fullStats.avgLoss), currency),
       riskPerTrade: userProfile?.defaultRR ? `${userProfile.defaultRR}R default` : 'Not set',
-      bestPair: fullStats.bestPair ? `${fullStats.bestPair.symbol} (${userProfile?.currencySymbol || '$'}${fullStats.bestPair.pnl.toFixed(2)})` : 'N/A',
+      bestPair: fullStats.bestPair ? `${fullStats.bestPair.symbol} (${formatSignedCurrency(fullStats.bestPair.pnl, currency)})` : 'N/A',
     };
   }, [trades, userProfile]);
 
@@ -1980,6 +1894,24 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     });
   }, [setDailyCredits]);
 
+  const refundDailyCredit = useCallback((mode: 'research' | 'mentor') => {
+    const today = getLocalDateKey();
+    setDailyCredits((current) => {
+      const base = current.date === today ? current : createDailyCreditState(today);
+      if (mode === 'research') {
+        return {
+          ...base,
+          researchRemaining: Math.min(DAILY_CREDIT_MAX, base.researchRemaining + 1),
+        };
+      }
+
+      return {
+        ...base,
+        mentorRemaining: Math.min(DAILY_CREDIT_MAX, base.mentorRemaining + 1),
+      };
+    });
+  }, [setDailyCredits]);
+
   const processResponse = (
     fullResponse: string,
     messageId: string,
@@ -2021,21 +1953,21 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
 
       if (kind === 'statements' && symbol) {
         const [incRes, balRes, cfRes] = await Promise.all([
-          fetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
-          fetch(`/api/fmp/balance-sheet?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
-          fetch(`/api/fmp/cash-flow?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
+          authedFetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
+          authedFetch(`/api/fmp/balance-sheet?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
+          authedFetch(`/api/fmp/cash-flow?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
         ]);
         markdown = formatStatementsMarkdown(incRes?.data ?? incRes, balRes?.data ?? balRes, cfRes?.data ?? cfRes);
       } else if (kind === 'ratios' && symbol) {
         const [ratRes, groRes] = await Promise.all([
-          fetch(`/api/fmp/ratios?symbol=${encodeURIComponent(symbol)}`).then(r => r.json().catch(() => ({}))),
-          fetch(`/api/fmp/financial-growth?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
+          authedFetch(`/api/fmp/ratios?symbol=${encodeURIComponent(symbol)}`).then(r => r.json().catch(() => ({}))),
+          authedFetch(`/api/fmp/financial-growth?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
         ]);
         markdown = formatRatiosMarkdown(ratRes?.data ?? ratRes, groRes?.data ?? groRes);
       } else {
         const baseUrl = DATA_TOOL_API_ROUTES[kind];
         const url = symbol ? `${baseUrl}?symbol=${encodeURIComponent(symbol)}` : baseUrl;
-        const response = await fetch(url);
+        const response = await authedFetch(url);
         const payload = await response.json().catch(() => ({}));
 
         if (!response.ok) {
@@ -2079,7 +2011,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
 
       const paramStr = params.toString();
       const url = paramStr ? `${baseUrl}?${paramStr}` : baseUrl;
-      const response = await fetch(url);
+      const response = await authedFetch(url);
       const payload = await response.json().catch(() => ({}));
 
       let markdown: string;
@@ -2137,6 +2069,10 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   };
 
   const handleSelectCommand = useCallback((cmd: SlashCommand) => {
+    if (isGenerating) {
+      addToast({ type: 'info', title: 'Please wait', message: 'Let the current response finish first.' });
+      return;
+    }
     // Track usage
     setCommandUsage(prev => ({
       ...prev,
@@ -2158,7 +2094,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
         handleFetchFinnhubDataTool(cmd.kind as FinnhubToolKind);
       }
     }
-  }, [setCommandUsage, handleFetchDataTool, handleFetchFinnhubDataTool, handleFetchForexFactoryCalendar]);
+  }, [isGenerating, setCommandUsage, handleFetchDataTool, handleFetchFinnhubDataTool, handleFetchForexFactoryCalendar]);
 
   const handleFeatureRequest = async (mode: 'psychology' | 'scaling', userRequest: string) => {
     if (isGenerating) return;
@@ -2178,6 +2114,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       timestamp: new Date(),
       kind: mode,
     };
+    stickToBottomRef.current = true;
     setMessages(prev => [...prev, userMessage]);
     setIsGenerating(true);
     setShowForgeMenu(false);
@@ -2222,10 +2159,6 @@ FORMAT REQUIREMENTS
 User request: ${userRequest}`;
 
     if (dailyCredits.mentorRemaining <= 0) {
-      setMessages(prev => prev.slice(0, -1));
-      setIsGenerating(false);
-      abortControllerRef.current = null;
-      isProcessingRef.current = false;
       addToast({
         type: 'error',
         title: 'Daily credits used up',
@@ -2251,7 +2184,9 @@ User request: ${userRequest}`;
       );
       processResponse(res, (Date.now() + 1).toString(), { isDeepAnalysis: true, kind: mode, psychologySnapshot, scalingSnapshot, contextSummary });
     } catch (error: any) {
-      if (error.message === "Generation aborted") return;
+      // Refund the credit — it is only spent on a successful answer.
+      refundDailyCredit('mentor');
+      if (error?.message === "Generation aborted") return;
       addToast({
         type: 'error',
         title: `${mode === 'psychology' ? 'Psychology' : 'Scaling'} Error`,
@@ -2290,10 +2225,7 @@ User request: ${userRequest}`;
       return;
     }
 
-    setShowWizard(false);
-    setIsGenerating(true);
     if (dailyCredits.mentorRemaining <= 0) {
-      setIsGenerating(false);
       addToast({
         type: 'error',
         title: 'Daily credits used up',
@@ -2301,7 +2233,10 @@ User request: ${userRequest}`;
       });
       return;
     }
-    
+
+    setShowWizard(false);
+    setIsGenerating(true);
+
     const strategyProfile = {
       tradingStyle: wizardData.tradingStyle,
       goals: wizardData.goals.trim(),
@@ -2392,6 +2327,7 @@ STYLE
 ${strategyProfile.whyITrade}`;
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: userFacingPrompt, timestamp: new Date(), kind: 'trading-plan', strategyProfile };
+    stickToBottomRef.current = true;
     setMessages(prev => [...prev, userMsg]);
 
     abortControllerRef.current = new AbortController();
@@ -2415,7 +2351,9 @@ ${strategyProfile.whyITrade}`;
       );
       processResponse(res, Date.now().toString(), { isDeepAnalysis: true, kind: 'trading-plan', strategyProfile, contextSummary });
     } catch (error: any) {
-      if (error.message === "Generation aborted") return;
+      // Refund the credit — it is only spent on a successful answer.
+      refundDailyCredit('mentor');
+      if (error?.message === "Generation aborted") return;
       console.error("Trading Plan Error:", error);
       addToast({
         type: 'error',
@@ -2540,7 +2478,9 @@ ${strategyProfile.whyITrade}`;
     );
   }, [isDarkMode, renderMarkdownFragment, renderStructuredContent]);
 
-  const renderSectionCards = (sections: Record<string, string>, message: Message) => {
+  // Memoized so the React.memo'd MessageRow actually skips re-renders while
+  // the parent updates (typing, generation toggles, etc.).
+  const renderSectionCards = useCallback((sections: Record<string, string>, message: Message) => {
     const isTradingPlan = message.kind === 'trading-plan' || message.kind === 'strategy';
     const config = isTradingPlan
       ? STRATEGY_SECTION_CONFIG
@@ -2674,7 +2614,7 @@ ${strategyProfile.whyITrade}`;
         </div>
       </div>
     );
-  };
+  }, [isDarkMode, renderStructuredContent]);
 
   return (
     <div className={`flex flex-col h-full ${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}>
@@ -2683,9 +2623,6 @@ ${strategyProfile.whyITrade}`;
         isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200'
       }`}>
         <div className="flex items-center gap-3">
-          <button className={`p-2 rounded-lg lg:hidden ${isDarkMode ? 'hover:bg-black' : 'hover:bg-slate-100'}`}>
-            <Menu size={20} className={isDarkMode ? 'text-zinc-300' : 'text-slate-700'} />
-          </button>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-black dark:bg-black flex items-center justify-center shadow-lg shadow-black/20">
               <AssistantIcon size={16} className="text-white" />
@@ -3142,16 +3079,24 @@ ${strategyProfile.whyITrade}`;
                   </div>
 
                   <div className={`rounded-2xl border p-5 space-y-4 ${isDarkMode ? 'border-zinc-800 bg-black/50' : 'border-slate-200 bg-slate-50'}`}>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                       {[
                         { label: 'Style', value: wizardData.tradingStyle },
+                        { label: 'Markets', value: wizardData.markets.join(', ') },
                         { label: 'Risk', value: wizardData.riskTolerance },
                         { label: 'Limit', value: wizardData.dailyTradeLimit },
-                        { label: 'HTF/LTF', value: `${wizardData.analysisTimeframe}/${wizardData.entryTimeframe}` }
-                      ].map(item => (
+                        { label: 'HTF/LTF', value: `${wizardData.analysisTimeframe}/${wizardData.entryTimeframe}` },
+                        { label: 'Sessions', value: wizardData.tradingSessions.join(', ') },
+                        { label: 'Watchlist', value: wizardData.preferredPairs.join(', ') },
+                        { label: 'Screen Time', value: wizardData.timeCommitment },
+                        { label: 'Challenges', value: mapChallengeLabels(wizardData.challenges).join(', ') },
+                        { label: 'Exit', value: wizardData.exitMechanics },
+                        { label: 'Management', value: wizardData.tradeManagement },
+                        { label: 'Target / Loss Cap', value: [wizardData.profitTarget, wizardData.lossCap].filter(Boolean).join(' / ') }
+                      ].filter(item => item.value).map(item => (
                         <div key={item.label} className={`p-3 rounded-xl border ${isDarkMode ? 'border-zinc-800 bg-black/20' : 'border-slate-200 bg-white'}`}>
                           <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">{item.label}</div>
-                          <div className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{item.value}</div>
+                          <div className={`text-sm font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`} title={item.value}>{item.value}</div>
                         </div>
                       ))}
                     </div>
@@ -3191,13 +3136,18 @@ ${strategyProfile.whyITrade}`;
                   </button>
                 ) : (
                   <button
-                    disabled
-                    className="flex items-center gap-2 px-6 py-2 rounded-lg font-medium bg-black text-zinc-500 cursor-not-allowed"
-                    title="Under development"
-                    aria-label="Architect Plan under development"
+                    onClick={generateStrategy}
+                    disabled={isGenerating}
+                    title="Generate your Strategy Blueprint from the wizard answers"
+                    aria-label="Generate Strategy Blueprint"
+                    className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100 ${
+                      isGenerating
+                        ? (isDarkMode ? 'bg-black text-zinc-600 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed')
+                        : 'bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-600 hover:to-amber-700'
+                    }`}
                   >
-                    <Sparkles size={16} />
-                    Under development
+                    {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                    {isGenerating ? 'Architecting...' : 'Generate Blueprint'}
                   </button>
                 )}
               </div>
@@ -3250,13 +3200,25 @@ ${strategyProfile.whyITrade}`;
             </motion.div>
           ) : (
             <div key="chat-messages" className="space-y-0">
-              {messages.map((m, i) => (
-                <MessageRow 
-                  key={m.id} 
-                  message={m} 
-                  isDarkMode={isDarkMode} 
-                  userProfile={userProfile} 
-                  renderMessageContent={renderMessageContent} 
+              {hiddenMessageCount > 0 && (
+                <div className="flex justify-center py-3">
+                  <button
+                    onClick={() => setVisibleMessageLimit(limit => limit + 60)}
+                    className={`px-4 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                      isDarkMode ? 'border-zinc-700 text-zinc-400 hover:bg-white/5' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    Show earlier messages ({hiddenMessageCount})
+                  </button>
+                </div>
+              )}
+              {visibleMessages.map((m, i) => (
+                <MessageRow
+                  key={m.id}
+                  message={m}
+                  isDarkMode={isDarkMode}
+                  userProfile={userProfile}
+                  renderMessageContent={renderMessageContent}
                   renderSectionCards={renderSectionCards}
                   assistantIcon={AssistantIcon}
                   onSaveAsNote={m.role === 'assistant' ? handleSaveMessageAsNote : undefined}
@@ -3370,7 +3332,7 @@ ${strategyProfile.whyITrade}`;
                   </div>
                 ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button 
+                  <button
                     onClick={() => { handleFeatureRequest('psychology', "Create a psychology protocol for managing tilt and emotional state during drawdown."); setShowFeaturesMenu(false); }}
                     className={`p-4 rounded-xl border text-left transition-all ${
                       isDarkMode ? 'bg-black border-zinc-700 hover:border-zinc-600' : 'bg-white border-slate-200 hover:border-slate-300'
@@ -3381,6 +3343,18 @@ ${strategyProfile.whyITrade}`;
                       <span className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Psychology</span>
                     </div>
                     <p className={`text-xs ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Tilt & mindset protocols</p>
+                  </button>
+                  <button
+                    onClick={() => { handleFeatureRequest('scaling', "Create a capital scaling plan based on my current performance, risk profile, and best pairs."); setShowFeaturesMenu(false); }}
+                    className={`p-4 rounded-xl border text-left transition-all ${
+                      isDarkMode ? 'bg-black border-zinc-700 hover:border-zinc-600' : 'bg-white border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                    <div className="flex items-center gap-2 mb-1">
+                      <TrendingUp size={16} className="text-amber-500" />
+                      <span className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Scaling</span>
+                    </div>
+                    <p className={`text-xs ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Capital roadmap & risk gates</p>
                   </button>
                 </div>
               )}
@@ -3404,7 +3378,7 @@ ${strategyProfile.whyITrade}`;
                     {RESEARCH_QUICK_PROMPTS.map((item, i) => (
                       <button
                         key={i}
-                        onClick={() => handleSend(item.prompt)}
+                        onClick={() => { handleSend(item.prompt); setShowForgeMenu(false); }}
                         className={`flex flex-col items-center gap-2 p-3 rounded-2xl transition-all hover:scale-105 active:scale-95 ${isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
                       >
                         <div className={`p-2 rounded-xl bg-current/10 ${item.color}`}>{item.icon}</div>
@@ -3413,11 +3387,23 @@ ${strategyProfile.whyITrade}`;
                     ))}
                   </div>
                 ) : (
-                  <>
-                    <div className="text-sm text-slate-500">
-                      Type a message to start.
-                    </div>
-                  </>
+                  <div className="grid grid-cols-2 gap-2">
+                    {FORGE_ITEMS.map((item) => (
+                      <button
+                        key={item.title}
+                        onClick={() => { handleSend(item.prompt); setShowForgeMenu(false); }}
+                        className={`flex items-center gap-3 p-3 rounded-2xl border text-left transition-all active:scale-[0.98] ${
+                          isDarkMode ? 'border-zinc-800 hover:border-zinc-600 hover:bg-white/5' : 'border-slate-200 hover:border-slate-300 hover:bg-white'
+                        }`}
+                      >
+                        <div className={`shrink-0 p-2.5 rounded-xl ${isDarkMode ? 'bg-black text-emerald-300' : 'bg-slate-100 text-emerald-600'}`}>{item.icon}</div>
+                        <div className="min-w-0">
+                          <div className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{item.title}</div>
+                          <div className={`text-xs ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{item.desc}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </motion.div>
             )}
@@ -3486,7 +3472,7 @@ ${strategyProfile.whyITrade}`;
               <div className="relative flex items-center gap-2 p-2">
                 {/* Slash Command Overlay */}
                 <AnimatePresence>
-                  {input.startsWith('/') && !input.includes(' ') && (
+                  {input.startsWith('/') && !input.includes(' ') && !commandsSuppressed && (
                     <motion.div
                       initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -3543,25 +3529,51 @@ ${strategyProfile.whyITrade}`;
                   )}
                 </AnimatePresence>
 
-                <button 
+                <button
+                  onClick={() => { setShowForgeMenu(!showForgeMenu); setShowFeaturesMenu(false); }}
+                  className={`forge-btn shrink-0 p-2.5 rounded-2xl transition-colors ${
+                    showForgeMenu
+                      ? isDarkMode ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white'
+                      : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'
+                  }`}
+                  title="Quick prompts"
+                  aria-label="Open quick prompts menu"
+                  aria-expanded={showForgeMenu}
+                >
+                  <Wand2 size={18} />
+                </button>
+
+                <button
                   onClick={() => setShowFeaturesMenu(!showFeaturesMenu)}
                   className={`features-btn shrink-0 p-2.5 rounded-2xl transition-colors ${
-                    showFeaturesMenu 
+                    showFeaturesMenu
                       ? isDarkMode ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white'
                       : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'
                   }`}
                   title="Features"
                   aria-label="Open features menu"
+                  aria-expanded={showFeaturesMenu}
                 >
                   <Zap size={18} />
                 </button>
 
-                <input 
+                <input
                   ref={inputRef}
-                  value={input} 
-                  onChange={(e) => setInput(e.target.value)} 
+                  value={input}
+                  onChange={(e) => { setInput(e.target.value); setCommandsSuppressed(false); }}
                   onKeyDown={(e) => {
-                    if (filteredCommands.length > 0) {
+                    // Don't hijack keys while an IME composition is in progress.
+                    if (e.nativeEvent.isComposing) return;
+                    const commandOverlayVisible = input.startsWith('/') && !input.includes(' ') && !commandsSuppressed;
+                    if (e.key === 'Escape') {
+                      if (commandOverlayVisible) {
+                        e.preventDefault();
+                        // Dismiss the suggestions without wiping the typed text.
+                        setCommandsSuppressed(true);
+                      }
+                      return;
+                    }
+                    if (commandOverlayVisible && filteredCommands.length > 0) {
                       if (e.key === 'ArrowDown') {
                         e.preventDefault();
                         setSelectedCommandIndex(prev => (prev + 1) % filteredCommands.length);
@@ -3570,20 +3582,18 @@ ${strategyProfile.whyITrade}`;
                         setSelectedCommandIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
                       } else if (e.key === 'Enter' || e.key === 'Tab') {
                         e.preventDefault();
-                        handleSelectCommand(filteredCommands[selectedCommandIndex]);
-                      } else if (e.key === 'Escape') {
-                        setInput('');
+                        const selected = filteredCommands[selectedCommandIndex];
+                        if (selected) handleSelectCommand(selected);
                       }
                     } else if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       handleSend();
                     }
-                  }} 
+                  }}
                   placeholder={inputPlaceholder}
                   className={`min-w-0 flex-1 bg-transparent px-2 py-3 focus:outline-none text-sm ${
                     isDarkMode ? 'text-white placeholder-zinc-500' : 'text-slate-900 placeholder-slate-400'
                   }`}
-                  disabled={isGenerating}
                   aria-label="Chat input"
                 />
 
@@ -3658,11 +3668,6 @@ ${strategyProfile.whyITrade}`;
                   )}
                 </button>
               </div>
-
-              <div className={`flex flex-col gap-2 border-t px-3 pb-3 pt-2 ${isDarkMode ? 'border-zinc-800' : 'border-slate-200'} sm:flex-row sm:items-center sm:justify-between`}>
-                <div />
-                <div />
-              </div>
             </div>
             
             <div className="mt-2 flex flex-col gap-2">
@@ -3686,47 +3691,6 @@ ${strategyProfile.whyITrade}`;
             </div>
         </div>
       </div>
-      )}
-
-      {editingTradeNote && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className={`w-full max-w-lg rounded-[32px] p-8 border shadow-2xl ${isDarkMode ? 'bg-[#0e0e16] border-white/10' : 'bg-white border-slate-200'}`}
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2 rounded-xl bg-indigo-600/10 text-indigo-500"><StickyNote size={20} /></div>
-              <h3 className="text-xl font-black uppercase tracking-tight">Refine Trade Note</h3>
-            </div>
-            <textarea 
-              value={tradeNoteText} 
-              onChange={(e) => setTradeNoteText(e.target.value)} 
-              className={`w-full h-48 p-5 rounded-2xl bg-transparent border focus:ring-2 focus:ring-indigo-500/20 focus:outline-none mb-8 text-sm leading-relaxed transition-all ${
-                isDarkMode ? 'border-white/10 bg-black/20 text-zinc-300' : 'border-slate-200 bg-slate-50 text-slate-700'
-              }`}
-              placeholder="Inject your market logic here..."
-            />
-            <div className="flex justify-end gap-4">
-              <button onClick={() => setEditingTradeNote(null)} className="px-6 py-3 opacity-50 hover:opacity-100 transition-opacity uppercase text-[11px] font-black tracking-widest">Cancel</button>
-              <button 
-                onClick={async () => {
-                  if (!onUpdateTrade) return;
-                  setIsUpdatingNote(true);
-                  try {
-                    await onUpdateTrade({ ...editingTradeNote, notes: tradeNoteText });
-                    addToast({ type: 'success', title: 'Neural Buffer Updated', message: 'Trade records synchronized.' });
-                    setEditingTradeNote(null);
-                  } finally { setIsUpdatingNote(false); }
-                }} 
-                disabled={isUpdatingNote}
-                className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl shadow-lg shadow-indigo-600/20 uppercase text-[11px] font-black tracking-widest flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-              >
-                {isUpdatingNote ? 'Processing...' : 'Sync Note'}
-              </button>
-            </div>
-          </motion.div>
-        </div>
       )}
 
       </div>

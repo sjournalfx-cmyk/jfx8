@@ -187,6 +187,19 @@ describe('ctraderService - WebSocket API integration', () => {
             createTimestamp: 1718000000000,
             executionTimestamp: 1718000100000,
           },
+          {
+            // Position-opening (entry) deal: no closePositionDetail, so it must
+            // be excluded from the closed-deal history.
+            dealId: 6002,
+            orderId: 7002,
+            symbol: 'GBPUSD',
+            tradeSide: 1, // buy
+            filledVolume: 2000000,
+            executionPrice: 1.2800,
+            commission: -305,
+            createTimestamp: 1717999900000,
+            executionTimestamp: 1717999900000,
+          },
         ],
       },
     };
