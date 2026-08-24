@@ -77,9 +77,12 @@ export async function mintAccessToken(refreshToken) {
   return { accessToken: data.access_token, expiresIn: Number(data.expires_in || 2628000) };
 }
 
-/** Build a fully-authenticated session: token + socket + app/account auth. */
+/** Mint a short-lived access token from the service account refresh token.
+ *  cTrader ROTATES the refresh token on every mint, so `onRotate` must persist
+ *  the new token (Supabase service_config) or the next run fails with
+ *  ACCESS_DENIED. */
 export async function createServiceSession(env = {}) {
-  const refreshToken = env.refreshToken ?? '';
+  let refreshToken = env.refreshToken ?? '';
   const accountId = Number(env.accountId ?? 0);
   const isDemo = (env.isDemo ?? 'true') !== 'false';
   const clientId = env.clientId ?? '';
@@ -88,7 +91,20 @@ export async function createServiceSession(env = {}) {
     throw new Error('Service cTrader session not configured (CTRADER_SERVICE_REFRESH_TOKEN / CTRADER_SERVICE_ACCOUNT_ID)');
   }
 
-  const { accessToken } = await mintAccessTokenWith(refreshToken, clientId, clientSecret);
+  // Prefer the latest rotated token persisted by a previous run.
+  if (env.loadRotatedToken) {
+    try {
+      const saved = await env.loadRotatedToken();
+      if (saved) refreshToken = saved;
+    } catch { /* fall back to env token */ }
+  }
+
+  const mint = await mintAccessTokenWith(refreshToken, clientId, clientSecret);
+  // Persist the rotation immediately — the old token is now invalid.
+  if (mint.refreshToken && env.saveRotatedToken) {
+    try { await env.saveRotatedToken(mint.refreshToken); } catch (e) { console.error('[harvester] failed to persist rotated token:', e?.message || e); }
+  }
+  const accessToken = mint.accessToken;
   const session = { accessToken, ctidTraderAccountId: accountId, isDemo, clientId, clientSecret };
 
   const socket = await openSocket(session);
@@ -104,8 +120,8 @@ async function mintAccessTokenWith(refreshToken, clientId, clientSecret) {
     body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, client_secret: clientSecret }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.access_token) throw new Error(data.error || `Token refresh failed (${res.status})`);
-  return { accessToken: data.access_token };
+  if (!res.ok || !data.access_token) throw new Error(data.error || data.description || `Token refresh failed (${res.status})`);
+  return { accessToken: data.access_token, refreshToken: data.refresh_token || null };
 }
 
 export async function listSymbols(session) {

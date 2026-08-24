@@ -58,7 +58,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const timeframes = (process.env.HARVEST_TIMEFRAMES || 'M15,H1,H4,D1').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
     const batchSize = Math.max(1, Number(process.env.HARVEST_BATCH_SIZE || 5));
 
-    session = await createServiceSession();
+    session = await createServiceSession({
+      loadRotatedToken: async () => {
+        const { data } = await supabase.from('service_config').select('value').eq('key', 'ctrader_service_refresh_token').maybeSingle();
+        return data?.value || null;
+      },
+      saveRotatedToken: async (token) => {
+        await supabase.from('service_config').upsert({ key: 'ctrader_service_refresh_token', value: token }, { onConflict: 'key' });
+      },
+    });
 
     let { data: queue } = await supabase
       .from('harvest_queue')

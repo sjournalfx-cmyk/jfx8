@@ -38,3 +38,12 @@ create table if not exists public.harvest_queue (
 );
 
 create index if not exists harvest_queue_status_idx on public.harvest_queue (status, id);
+
+-- Service session storage: cTrader rotates the refresh token on every mint,
+-- so the harvester persists the latest one here (service_role writes; RLS
+-- blocks all client access).
+create table if not exists public.service_config (
+  key   text primary key,
+  value text not null
+);
+alter table public.service_config enable row level security;

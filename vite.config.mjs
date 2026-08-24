@@ -633,6 +633,15 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             isDemo: readCtraderEnv('CTRADER_SERVICE_IS_DEMO') || 'true',
             clientId: readCtraderEnv('VITE_CTRADER_CLIENT_ID') || process.env.CTRADER_CLIENT_ID || '',
             clientSecret: readCtraderEnv('VITE_CTRADER_CLIENT_SECRET') || process.env.CTRADER_CLIENT_SECRET || '',
+            // cTrader rotates refresh tokens on every mint — persist the
+            // latest one so subsequent runs (and the Vercel cron) keep working.
+            loadRotatedToken: async () => {
+              const { data } = await supabase.from('service_config').select('value').eq('key', 'ctrader_service_refresh_token').maybeSingle();
+              return data?.value || null;
+            },
+            saveRotatedToken: async (token) => {
+              await supabase.from('service_config').upsert({ key: 'ctrader_service_refresh_token', value: token }, { onConflict: 'key' });
+            },
           });
 
           const timeframes = (readCtraderEnv('HARVEST_TIMEFRAMES') || 'M15,H1,H4,D1').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
@@ -728,6 +737,30 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           res.statusCode = 500;
           res.end(JSON.stringify({ error: err?.message || String(err) }));
         }
+      });
+
+      // -----------------------------------------------------------------------
+      // DEV-ONLY: /api/ctrader/debug-session — prints the service-account
+      // values needed for .env.local (refresh token from the httpOnly cookie
+      // set by /api/ctrader/exchange). Never deployed: Vercel functions only
+      // serve api/*.ts files, this exists solely in the Vite dev middleware.
+      // Remove after the harvest env vars are captured.
+      // -----------------------------------------------------------------------
+      server.middlewares.use('/api/ctrader/debug-session', async (req, res) => {
+        res.setHeader('Content-Type', 'text/plain');
+        let refreshToken = '';
+        const cookieHeader = req.headers.cookie || '';
+        for (const part of cookieHeader.split(';')) {
+          const eq = part.indexOf('=');
+          if (eq === -1) continue;
+          if (part.slice(0, eq).trim() === 'jfx_ctrader_refresh') {
+            try { refreshToken = decodeURIComponent(part.slice(eq + 1).trim()); } catch { refreshToken = part.slice(eq + 1).trim(); }
+          }
+        }
+        res.end(JSON.stringify({
+          CTRADER_SERVICE_REFRESH_TOKEN: refreshToken || '(no cookie found — connect cTrader first)',
+          hint: 'Copy the token above into .env.local. Account id comes from the accounts list below.',
+        }, null, 2));
       });
 
       // Redirect cTrader OAuth callback to root so Vite serves the SPA through its normal pipeline

@@ -88,8 +88,10 @@ function send(socket: WebSocket, payloadType: number, payload: Record<string, an
   });
 }
 
-/** Mint a short-lived access token from the service account refresh token. */
-export async function mintAccessToken(refreshToken: string): Promise<{ accessToken: string; expiresIn: number }> {
+/** Mint a short-lived access token from the service account refresh token.
+ *  cTrader ROTATES the refresh token on every mint — callers must persist
+ *  `refreshToken` from the result or the next run fails with ACCESS_DENIED. */
+export async function mintAccessToken(refreshToken: string): Promise<{ accessToken: string; expiresIn: number; refreshToken: string | null }> {
   const clientId = process.env.CTRADER_CLIENT_ID || '';
   const clientSecret = process.env.CTRADER_CLIENT_SECRET || '';
   if (!clientId || !clientSecret) throw new Error('cTrader app credentials not configured');
@@ -100,22 +102,36 @@ export async function mintAccessToken(refreshToken: string): Promise<{ accessTok
     body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, client_secret: clientSecret }),
   });
   const data: any = await res.json().catch(() => ({}));
-  if (!res.ok || !data.access_token) throw new Error(data.error || `Token refresh failed (${res.status})`);
-  return { accessToken: data.access_token, expiresIn: Number(data.expires_in || 2628000) };
+  if (!res.ok || !data.access_token) throw new Error(data.error || data.description || `Token refresh failed (${res.status})`);
+  return { accessToken: data.access_token, expiresIn: Number(data.expires_in || 2628000), refreshToken: data.refresh_token || null };
 }
 
 /** Build a fully-authenticated session: token + socket + app/account auth. */
-export async function createServiceSession(): Promise<ServiceSession & { socket: WebSocket }> {
-  const refreshToken = process.env.CTRADER_SERVICE_REFRESH_TOKEN || '';
+export async function createServiceSession(persist?: {
+  loadRotatedToken: () => Promise<string | null>;
+  saveRotatedToken: (token: string) => Promise<void>;
+}): Promise<ServiceSession & { socket: WebSocket }> {
+  let refreshToken = process.env.CTRADER_SERVICE_REFRESH_TOKEN || '';
   const accountId = Number(process.env.CTRADER_SERVICE_ACCOUNT_ID || 0);
   const isDemo = (process.env.CTRADER_SERVICE_IS_DEMO || 'true') !== 'false';
   if (!refreshToken || !accountId) {
     throw new Error('Service cTrader session not configured (CTRADER_SERVICE_REFRESH_TOKEN / CTRADER_SERVICE_ACCOUNT_ID)');
   }
 
-  const { accessToken } = await mintAccessToken(refreshToken);
+  // Prefer the latest rotated token persisted by a previous run.
+  if (persist) {
+    try {
+      const saved = await persist.loadRotatedToken();
+      if (saved) refreshToken = saved;
+    } catch { /* fall back to env token */ }
+  }
+
+  const minted = await mintAccessToken(refreshToken);
+  if (minted.refreshToken && persist) {
+    try { await persist.saveRotatedToken(minted.refreshToken); } catch (e: any) { console.error('[harvester] failed to persist rotated token:', e?.message || e); }
+  }
   const session: ServiceSession = {
-    accessToken,
+    accessToken: minted.accessToken,
     ctidTraderAccountId: accountId,
     isDemo,
     clientId: process.env.CTRADER_CLIENT_ID || '',
@@ -124,7 +140,7 @@ export async function createServiceSession(): Promise<ServiceSession & { socket:
 
   const socket = await openSocket(session);
   await send(socket, PT.APPLICATION_AUTH_REQ, { clientId: session.clientId, clientSecret: session.clientSecret });
-  await send(socket, PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: accountId, accessToken });
+  await send(socket, PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: accountId, accessToken: session.accessToken });
   return { ...session, socket };
 }
 
