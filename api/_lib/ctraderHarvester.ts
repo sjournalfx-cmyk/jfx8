@@ -2,103 +2,24 @@
 // server-side and pulls trendbar history for every symbol, so end users never
 // need to connect their own cTrader account to use the Backtest Lab.
 //
-// Pure helpers (decodeTrendbars / normalizeSymbol / mergeBars) are unit-tested
-// in test/ctraderHarvester.test.ts. The WebSocket/network layer mirrors the
-// browser logic in services/ctraderService.ts but runs on Node's `ws`.
+// Pure helpers (decodeTrendbars / normalizeSymbol / mergeBars / capToNewest)
+// live in harvestCore.mjs (plain ESM) so the Vite dev middleware can reuse
+// them without a TS transform; this module re-exports and adds the typed
+// WebSocket/network layer that runs on Vercel functions.
+export {
+  CTRADER_PRICE_SCALE,
+  normalizeSymbol,
+  decodeTrendbars,
+  mergeBars,
+  capToNewest,
+} from './harvestCore.mjs';
+
 import WebSocket from 'ws';
 import { PT, WS_DEMO, WS_LIVE, mapTimeframeToCtraderPeriod } from './protoTypes';
+import { decodeTrendbars as _decode } from './harvestCore.mjs';
+void _decode; // keep tree-shakers honest about the re-export above
 
-// ------------------------------------------------------------------
-// Pure helpers
-// ------------------------------------------------------------------
-
-export interface RawTrendbar {
-  utcTimestampInMinutes?: number | string;
-  utcTimestamp?: number | string;
-  timestamp?: number | string;
-  low?: number | string;
-  deltaOpen?: number | string;
-  deltaHigh?: number | string;
-  deltaClose?: number | string;
-}
-
-export interface Candle {
-  time: number; // unix seconds
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
-
-const CTRADER_PRICE_SCALE = 100000;
-
-/** Normalize any broker symbol spelling (EURUSD / eur/usd / GBP_JPY) for matching. */
-export function normalizeSymbol(name: string): string {
-  return String(name || '').toUpperCase().replace(/[/_]/g, '');
-}
-
-/**
- * Decode ProtoOAGetTrendbarsRes trendbar entries into OHLC candles.
- * Prices arrive as integers scaled by 10^5; `low` is absolute while
- * open/high/close are deltas from it. `digits` only controls display rounding.
- */
-export function decodeTrendbars(bars: RawTrendbar[], digits: number = 5): Candle[] {
-  const candles: Candle[] = [];
-  if (!Array.isArray(bars)) return candles;
-
-  const round = (v: number) => Number(v.toFixed(digits));
-
-  for (const bar of bars) {
-    if (!bar || typeof bar !== 'object') continue;
-    const low = Number(bar.low);
-    const dOpen = Number(bar.deltaOpen);
-    const dHigh = Number(bar.deltaHigh);
-    const dClose = Number(bar.deltaClose);
-    const tsMin = Number(bar.utcTimestampInMinutes);
-    if (![low, dOpen, dHigh, dClose, tsMin].every(Number.isFinite)) continue;
-
-    let timeInSeconds: number;
-    if (Number.isFinite(tsMin) && tsMin > 0) {
-      timeInSeconds = tsMin * 60;
-    } else {
-      const tsMs = Number(bar.utcTimestamp ?? bar.timestamp);
-      timeInSeconds = Number.isFinite(tsMs) && tsMs > 0 ? Math.floor(tsMs / 1000) : Math.floor(Date.now() / 1000);
-    }
-
-    candles.push({
-      time: timeInSeconds,
-      open: round(low / CTRADER_PRICE_SCALE + dOpen / CTRADER_PRICE_SCALE),
-      high: round(low / CTRADER_PRICE_SCALE + dHigh / CTRADER_PRICE_SCALE),
-      low: round(low / CTRADER_PRICE_SCALE),
-      close: round(low / CTRADER_PRICE_SCALE + dClose / CTRADER_PRICE_SCALE),
-    });
-  }
-
-  return candles.sort((a, b) => a.time - b.time);
-}
-
-/**
- * Merge two bar lists by open time; on overlap the INCOMING bar wins.
- * Same semantics as lib/candleStore.mergeBars — duplicated here because api/
- * functions must not import from the Vite client bundle.
- */
-export function mergeBars(existing: Candle[] | null, incoming: Candle[] | null): Candle[] {
-  const byTime = new Map<number, Candle>();
-  for (const list of [existing, incoming]) {
-    if (!Array.isArray(list)) continue;
-    for (const bar of list) {
-      if (bar && Number.isFinite(bar.time) && Number.isFinite(bar.open) &&
-          Number.isFinite(bar.high) && Number.isFinite(bar.low) && Number.isFinite(bar.close)) {
-        byTime.set(bar.time, bar);
-      }
-    }
-  }
-  return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
-}
-
-export function capToNewest(bars: Candle[], maxBars: number): Candle[] {
-  return bars.length <= maxBars ? bars : bars.slice(-maxBars);
-}
+export interface Candle { time: number; open: number; high: number; low: number; close: number; }
 
 // ------------------------------------------------------------------
 // Network layer
@@ -111,8 +32,6 @@ export interface ServiceSession {
   clientId: string;
   clientSecret: string;
 }
-
-interface PendingReq { resolve: (v: any) => void; reject: (e: any) => void; }
 
 function nextId(): string {
   return `harvest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -133,13 +52,13 @@ async function openSocket(session: ServiceSession): Promise<WebSocket> {
     ws.on('message', (raw: Buffer) => {
       let msg: any;
       try { msg = JSON.parse(raw.toString('utf8')); } catch { return; }
-      const pending = (ws as any).__pending as Map<string, PendingReq> | undefined;
+      const pending = (ws as any).__pending as Map<string, any> | undefined;
       if (!pending) return;
       const clientMsgId: string | undefined = msg.clientMsgId;
       if (clientMsgId && pending.has(clientMsgId)) {
-        const req = pending.get(clientMsgId)!;
+        const req = pending.get(clientMsgId);
         pending.delete(clientMsgId);
-        clearTimeout((req as any).timer);
+        clearTimeout(req.timer);
         if (msg.payloadType === PT.ERROR_RES) {
           const code = msg.payload?.errorCode || 'cTrader error';
           req.reject(new Error(msg.payload?.description ? `${code}: ${msg.payload.description}` : String(code)));
@@ -153,7 +72,7 @@ async function openSocket(session: ServiceSession): Promise<WebSocket> {
 
 function send(socket: WebSocket, payloadType: number, payload: Record<string, any>, timeoutMs = 25000): Promise<any> {
   return new Promise((resolve, reject) => {
-    let pending: Map<string, PendingReq> = (socket as any).__pending;
+    let pending: Map<string, any> = (socket as any).__pending;
     if (!pending) { pending = new Map(); (socket as any).__pending = pending; }
 
     const clientMsgId = nextId();
@@ -162,7 +81,7 @@ function send(socket: WebSocket, payloadType: number, payload: Record<string, an
       reject(new Error(`Request timed out (payloadType ${payloadType})`));
     }, timeoutMs);
 
-    pending.set(clientMsgId, { resolve, reject } as PendingReq & { timer: NodeJS.Timeout });
+    pending.set(clientMsgId, { resolve, reject, timer });
     socket.send(JSON.stringify({ clientMsgId, payloadType, payload }), (err) => {
       if (err) { clearTimeout(timer); pending.delete(clientMsgId); reject(err); }
     });
@@ -238,7 +157,7 @@ export async function fetchTrendbarsServer(
   if (opts.count) payload.count = opts.count;
 
   const res = await send(session.socket, PT.GET_TRENDBARS_REQ, payload);
-  return decodeTrendbars(res.trendbar || [], target.digits);
+  return _decode(res.trendbar || [], target.digits);
 }
 
 export function closeSession(session: { socket: WebSocket } | null) {
