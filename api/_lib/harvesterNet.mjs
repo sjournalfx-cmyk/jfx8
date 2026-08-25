@@ -87,16 +87,20 @@ export async function createServiceSession(env = {}) {
   const isDemo = (env.isDemo ?? 'true') !== 'false';
   const clientId = env.clientId ?? '';
   const clientSecret = env.clientSecret ?? '';
-  if (!refreshToken || !accountId) {
-    throw new Error('Service cTrader session not configured (CTRADER_SERVICE_REFRESH_TOKEN / CTRADER_SERVICE_ACCOUNT_ID)');
+  if (!accountId) {
+    throw new Error('Service cTrader session not configured (CTRADER_SERVICE_ACCOUNT_ID)');
   }
 
-  // Prefer the latest rotated token persisted by a previous run.
+  // The refresh token may live entirely in Supabase (service_config) since
+  // cTrader rotates it on every mint — env var is only the bootstrap fallback.
   if (env.loadRotatedToken) {
     try {
       const saved = await env.loadRotatedToken();
       if (saved) refreshToken = saved;
     } catch { /* fall back to env token */ }
+  }
+  if (!refreshToken) {
+    throw new Error('Service cTrader session not configured (CTRADER_SERVICE_REFRESH_TOKEN missing and no rotated token in service_config)');
   }
 
   const mint = await mintAccessTokenWith(refreshToken, clientId, clientSecret);
