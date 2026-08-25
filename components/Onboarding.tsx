@@ -7,6 +7,7 @@ import { dataService } from '../services/dataService';
 interface OnboardingProps {
   isDarkMode: boolean;
   onComplete: (profile: UserProfile) => void;
+  onExploreDemo: () => void;
 }
 
 const CURRENCIES = [
@@ -46,7 +47,7 @@ const premiumAvatars = [
   'https://api.dicebear.com/7.x/adventurer/svg?seed=3&backgroundColor=c7d2fe',
 ];
 
-const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
+const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExploreDemo }) => {
   const [step, setStep] = useState(1);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
@@ -509,12 +510,23 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete }) => {
                 )}
               </div>
             ) : (
-              <button
-                onClick={handleFinish}
-                className="flex items-center gap-3 px-12 py-4 bg-[#FF4F01] hover:bg-[#e64601] text-white rounded-xl font-black text-sm shadow-xl shadow-[#FF4F01]/20 transition-all hover:scale-[1.05]"
-              >
-                Get Started
-              </button>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={onExploreDemo}
+                  className={`flex items-center gap-2 px-6 py-4 rounded-xl font-bold text-sm border transition-all ${
+                    isDarkMode ? 'border-zinc-700 text-zinc-300 hover:border-zinc-500' : 'border-slate-300 text-slate-600 hover:border-slate-400'
+                  }`}
+                  title="Look around JournalFX with realistic sample data — your real journal stays empty until you log trades"
+                >
+                  Explore with Demo Data
+                </button>
+                <button
+                  onClick={handleFinish}
+                  className="flex items-center gap-3 px-12 py-4 bg-[#FF4F01] hover:bg-[#e64601] text-white rounded-xl font-black text-sm shadow-xl shadow-[#FF4F01]/20 transition-all hover:scale-[1.05]"
+                >
+                  Get Started
+                </button>
+              </div>
             )}
           </div>
         </div>

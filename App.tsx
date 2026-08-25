@@ -7,7 +7,7 @@ import Journal from './components/Journal';
 import Auth from './components/Auth';
 import BetaSplash from './components/BetaSplash';
 
-import { Trade, Note, DailyBias } from './types';
+import { Trade, Note, DailyBias, UserProfile } from './types';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
 import EASetup from './components/EASetup';
@@ -964,6 +964,30 @@ const onLogout = async () => {
       await handleOnboardingComplete(profile);
       setCurrentView(profile.syncMethod === 'EA_CONNECT' ? 'ea-setup' : 'dashboard');
       setTrades([]);
+    }} onExploreDemo={() => {
+      // Enter demo immediately; a real profile gets created when the user
+      // eventually finishes onboarding normally. Demo profile overlays this
+      // one via getDemoProfile until they exit demo.
+      localStorage.setItem('jfx_demo_mode', 'true');
+      setIsDemoMode(true);
+      void (async () => {
+        await handleOnboardingComplete({
+          name: 'Demo Trader',
+          country: '',
+          accountName: 'Sample Trading Account',
+          initialBalance: 12500,
+          currency: 'USD',
+          currencySymbol: '$',
+          syncMethod: 'Manual',
+          experienceLevel: 'Beginner',
+          tradingStyle: 'Day Trader',
+          onboarded: true,
+          plan: 'FREE TIER (JOURNALER)',
+          themePreference: 'obsidian',
+          eaConnected: false,
+        } as UserProfile);
+        setCurrentView('dashboard');
+      })();
     }} />;
   }
 
