@@ -4,12 +4,11 @@
 > charts WITHOUT connecting a personal cTrader account. Data comes from a
 > server-harvested shared store in Supabase.
 
-This directory contains four documents:
+This directory contains three documents:
 
 1. **shared-candle-store.md** (this file) — what was built and how it works
 2. **shared-candle-store-config.md** — credentials, env vars, tables, gotchas
 3. **shared-candle-store-runbook.md** — operations, recovery, troubleshooting
-4. **shared-candle-store-future.md** — improvement ideas + verification log
 
 ## What was built (summary)
 
