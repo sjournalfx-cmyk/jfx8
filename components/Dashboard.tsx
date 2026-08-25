@@ -772,8 +772,8 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
 
         </header>
 
-            {/* EA Setup Prompt (For new EA users) */}
-            {trades.length === 0 && userProfile.syncMethod === 'EA_CONNECT' && !eaSession && (
+            {/* EA Setup Prompt (For new EA users) — hidden in demo mode */}
+            {!isDemoMode && trades.length === 0 && userProfile.syncMethod === 'EA_CONNECT' && !eaSession && (
                 <EASetupPrompt isDarkMode={isDarkMode} onSetupClick={() => onViewChange('ea-setup')} />
             )}
 
