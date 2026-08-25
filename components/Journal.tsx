@@ -734,13 +734,15 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button 
-                        onClick={() => onEditTrade(trade)}
-                        className={`p-2 rounded-lg transition-all ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-white text-slate-500 shadow-sm border border-slate-200'}`} 
-                        title="Edit Entry"
-                    >
-                        <Edit3 size={16} />
-                    </button>
+                    {!isDemoMode && (
+                        <button
+                            onClick={() => onEditTrade(trade)}
+                            className={`p-2 rounded-lg transition-all ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-white text-slate-500 shadow-sm border border-slate-200'}`}
+                            title="Edit Entry"
+                        >
+                            <Edit3 size={16} />
+                        </button>
+                    )}
                     <button onClick={() => setExpandedTradeId(null)} className={`p-2 rounded-lg transition-all bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white`}><X size={18} /></button>
                 </div>
             </div>
@@ -1033,9 +1035,11 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                             <div className={`w-0.5 flex-1 ${isLast ? 'bg-transparent' : 'bg-violet-500/40'}`} />
                         </div>
                     ) : (
-                        <button onClick={() => handleSelectOne(trade.id)} className={`${selectedIds.includes(trade.id) ? 'text-indigo-500' : 'text-zinc-500 hover:text-zinc-300'}`}>
-                            {selectedIds.includes(trade.id) ? <CheckSquare size={16} /> : <Square size={16} />}
-                        </button>
+                        !isDemoMode && (
+                            <button onClick={() => handleSelectOne(trade.id)} className={`${selectedIds.includes(trade.id) ? 'text-indigo-500' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                                {selectedIds.includes(trade.id) ? <CheckSquare size={16} /> : <Square size={16} />}
+                            </button>
+                        )
                     )}
                 </div>
                 <div className="col-span-1 pl-2 cursor-pointer" onClick={() => toggleExpand(trade.id)}>
