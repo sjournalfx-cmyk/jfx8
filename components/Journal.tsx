@@ -1304,7 +1304,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                         )}
                     </div>
                     <p className={`text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
-                        {isDemoMode ? 'Sample trades from January to March are loaded for review.' : 'Detailed history of your market execution.'}
+                        {isDemoMode ? 'Sample trades covering a recent three-month period are loaded for review.' : 'Detailed history of your market execution.'}
                     </p>
                 </div>
                 {selectedIds.length > 0 ? (

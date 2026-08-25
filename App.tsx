@@ -1010,7 +1010,7 @@ const onLogout = async () => {
                 Demo Mode
               </span>
               <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-amber-50">You are viewing a sample journal from January to March.</p>
+                <p className="truncate text-sm font-bold text-amber-50">You are viewing a sample journal covering a recent three-month period.</p>
                 <p className="truncate text-xs text-amber-100/70">Real data is untouched. Switch back any time to resume your live journal.</p>
               </div>
             </div>

@@ -766,7 +766,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
                         )}
                     </div>
                     <p className={`text-sm ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
-                        {isDemoMode ? 'Sample journal loaded with believable January to March trades, notes, and analytics.' : `Welcome back, ${userProfile.name}. Analyzing markets from ${userProfile.country}.`}
+                        {isDemoMode ? 'Sample journal loaded with a recent three-month history of trades, notes, and analytics.' : `Welcome back, ${userProfile.name}. Analyzing markets from ${userProfile.country}.`}
                     </p>
                 </div>
 
