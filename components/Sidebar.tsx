@@ -4,7 +4,7 @@ import {
   LayoutDashboard, PlusCircle, History, BarChart2,
   Target, StickyNote,
   Workflow, ChevronRight, CandlestickChart, LogOut,
-  Settings, Link, Activity, Lock, Bell, X, CheckCircle2, AlertCircle, AlertTriangle, Info, Trash2, Globe, Medal, UserCircle
+  Settings, Link, Activity, Lock, Bell, X, CheckCircle2, AlertCircle, AlertTriangle, Info, Trash2, Globe, Medal
 } from 'lucide-react';
 import {
   IconPower,
@@ -234,20 +234,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
 
       <div className="flex flex-col items-center w-full mb-4 px-[18px] shrink-0">
-        <button
-          type="button"
-          onClick={() => {
-            onToggleDemoMode?.();
-          }}
-          className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-xl overflow-hidden relative shrink-0"
-          title={isDemoMode ? 'Exit demo mode' : 'Enter demo mode'}
-        >
-          {userProfile?.avatarUrl ? (
-            <img src={userProfile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-          ) : (
-            <UserCircle size={28} />
-          )}
-        </button>
         <button
           type="button"
           onClick={() => onToggleDemoMode?.()}
