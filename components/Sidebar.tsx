@@ -4,8 +4,8 @@ import {
   LayoutDashboard, PlusCircle, History, BarChart2,
   Target, StickyNote,
   Workflow, ChevronRight, CandlestickChart, LogOut,
-  Settings, Link, Activity, Lock, Bell, X, CheckCircle2, AlertCircle, AlertTriangle, Info, Trash2, Globe, Medal
-} from 'lucide-react';
+  Settings, Link, Activity, Lock, Bell, X, CheckCircle2, AlertCircle, AlertTriangle, Info, Trash2, Globe, Medal, UserCircle
+ } from 'lucide-react';
 import {
   IconPower,
   IconBell,
@@ -234,14 +234,20 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
 
       <div className="flex flex-col items-center w-full mb-4 px-[18px] shrink-0">
+        <div
+          className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-xl overflow-hidden relative shrink-0 pointer-events-none select-none"
+          aria-hidden="true"
+        >
+          {userProfile?.avatarUrl ? (
+            <img src={userProfile.avatarUrl} alt="" className="w-full h-full object-cover" draggable={false} />
+          ) : (
+            <UserCircle size={28} />
+          )}
+        </div>
         <button
           type="button"
           onClick={() => onToggleDemoMode?.()}
-          className={`mt-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${
-            isDemoMode
-              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-              : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-          }`}
+          className={`mt-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all text-zinc-500 hover:text-zinc-300 border border-transparent`}
         >
           {isDemoMode ? 'Exit Demo' : 'Try Demo'}
         </button>

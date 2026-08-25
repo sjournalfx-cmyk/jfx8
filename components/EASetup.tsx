@@ -25,6 +25,7 @@ interface BridgeProps {
     userProfile: UserProfile;
     onUpdateProfile: (profile: UserProfile) => Promise<void>;
     eaSession?: EASession | null;
+    isDemoMode?: boolean;
     onTradeAdded?: (trade: Trade) => void;
     onEditTrade?: (trade: Trade) => void;
     onAddOffline?: (trade: Trade) => void;
@@ -34,10 +35,18 @@ interface BridgeProps {
     onNavigateToJournal?: () => void;
 }
 
-const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId, onNavigateToJournal }) => {
+const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, isDemoMode = false, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId, onNavigateToJournal }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
     const { connectionMode, updateConnectionMode } = useConnectionMode(userId, userProfile);
+
+    // In demo mode there is nothing to connect — always show the method
+    // choice (with Desktop Bridge hidden) and never resume a saved bridge.
+    useEffect(() => {
+        if (isDemoMode && connectionMode === 'bridge') {
+            updateConnectionMode(null);
+        }
+    }, [isDemoMode, connectionMode, updateConnectionMode]);
 
     // Clear the OAuth redirect flag AFTER the initial render, so it survives
     // React 18 StrictMode's mount → unmount → remount cycle.
@@ -108,11 +117,11 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
         />;
     }
 
-    if (!connectionMode) {
-        return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} />;
+    if (!connectionMode || isDemoMode) {
+        return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} isDemoMode={isDemoMode} />;
     }
 
-    if (isInternalConnected) {
+    if (isInternalConnected && !isDemoMode) {
         return (
             <BridgeMonitor
                 isDarkMode={isDarkMode}
@@ -143,6 +152,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             onUpdateProfile={onUpdateProfile}
             onBack={() => updateConnectionMode(null)}
             onComplete={async (key) => {
+                if (isDemoMode) return;
                 const updated = { ...userProfile, syncKey: key, eaConnected: true };
                 await onUpdateProfile(updated);
                 setSyncKey(key);
@@ -157,12 +167,14 @@ interface MethodChoiceProps {
     onSelect: (mode: 'bridge' | 'ctrader') => void;
     onImportTrades?: (trades: Trade[]) => Promise<void>;
     isDarkMode: boolean;
+    isDemoMode?: boolean;
 }
 
-const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, isDarkMode }) => {
+const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, isDarkMode, isDemoMode = false }) => {
     const csvInputRef = useRef<HTMLInputElement>(null);
     const options = [
-        {
+        // Desktop Bridge omitted in demo mode — demo needs no terminal connection.
+        ...(!isDemoMode ? [{
             id: 'bridge' as const,
             title: 'Desktop Bridge',
             subtitle: 'EA Terminal Bridge',
@@ -178,7 +190,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             accent: '#FF4F01',
             gradient: 'from-[#FF4F01]/20 via-transparent to-transparent',
             description: 'Install the JournalFX Bridge application on your Windows desktop for automated, real-time trade synchronization via the EA.'
-        },
+        }] : []),
         {
             id: 'ctrader' as const,
             title: 'cTrader',

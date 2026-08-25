@@ -1216,6 +1216,7 @@ const onLogout = async () => {
                 userProfile={activeUserProfile}
                 onUpdateProfile={handleUpdateProfile}
                 eaSession={activeEaSession}
+                isDemoMode={isDemoMode}
                 onTradeAdded={(newTrade) => {
                   if (isDemoMode) { blockDemoAction('Cannot save trade'); return; }
                   setTrades(prev => [newTrade, ...prev]);
