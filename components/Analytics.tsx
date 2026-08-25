@@ -272,9 +272,10 @@ interface AnalyticsProps {
   onRefreshPsychologyInsights?: () => void;
   isRefreshingPsychologyInsights?: boolean;
   psychologyAnalyzeLimitReached?: boolean;
+  isDemoMode?: boolean;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false, psychologyAnalyzeLimitReached = false }) => {
+const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false, psychologyAnalyzeLimitReached = false, isDemoMode = false }) => {
     const trades = useMemo(() => {
         return sortTradesChronologically(rawTrades);
     }, [rawTrades]);
@@ -809,7 +810,14 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             <header className="mb-8 flex flex-col gap-6">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className={`text-3xl font-black tracking-tight mb-2 ${pageIsLight ? 'text-slate-950' : 'text-zinc-100'}`}>Performance Analytics</h1>
+                        <div className="flex items-center gap-2 mb-2">
+                            <h1 className={`text-3xl font-black tracking-tight ${pageIsLight ? 'text-slate-950' : 'text-zinc-100'}`}>Performance Analytics</h1>
+                            {isDemoMode && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border border-amber-500/30 bg-amber-500/10 text-amber-300">
+                                    Demo Mode
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </div>
                 <div className={`grid grid-cols-2 gap-1.5 p-1.5 rounded-xl border sm:grid-cols-4 md:grid-cols-8 ${pageIsLight ? 'bg-slate-100 border-slate-200' : 'bg-[#111] border-zinc-800'}`}>

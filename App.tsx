@@ -1169,6 +1169,7 @@ const onLogout = async () => {
             onRefreshPsychologyInsights={() => refreshPsychologyInsights(true)}
             isRefreshingPsychologyInsights={isRefreshingPsychologyInsights}
             psychologyAnalyzeLimitReached={psychologyAnalyzeLimitReached}
+            isDemoMode={isDemoMode}
           />
         )}
             {currentView === 'notes' && (
