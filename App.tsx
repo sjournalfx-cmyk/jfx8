@@ -1192,10 +1192,14 @@ const onLogout = async () => {
                 onUpdateProfile={handleUpdateProfile}
                 eaSession={activeEaSession}
                 onTradeAdded={(newTrade) => {
+                  if (isDemoMode) { blockDemoAction('Cannot save trade'); return; }
                   setTrades(prev => [newTrade, ...prev]);
                 }}
                 onEditTrade={handleEditTrade}
-                onAddOffline={addToOfflineQueue}
+                onAddOffline={(trade) => {
+                  if (isDemoMode) { blockDemoAction('Cannot queue trade'); return; }
+                  addToOfflineQueue(trade);
+                }}
                 onImportTrades={handleBatchAddTrades}
                 trades={activeTrades}
                 userId={userId}

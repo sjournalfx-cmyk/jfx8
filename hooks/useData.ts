@@ -24,6 +24,9 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
   const { addToast } = useToast();
 
   const addToOfflineQueue = (trade: Trade) => {
+    // Demo mode must never touch the real offline sync queue. Checked via
+    // localStorage because this hook has no access to App's isDemoMode state.
+    if (localStorage.getItem('jfx_demo_mode') === 'true') return;
     setOfflineQueue(prev => [...prev, trade]);
     addToast({
       type: 'info',
