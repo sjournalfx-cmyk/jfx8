@@ -12,11 +12,11 @@ export {
   decodeTrendbars,
   mergeBars,
   capToNewest,
-} from './harvestCore.mjs';
+} from './harvestCore.js';
 
 import WebSocket from 'ws';
 import { PT, WS_DEMO, WS_LIVE, mapTimeframeToCtraderPeriod } from './protoTypes';
-import { decodeTrendbars as _decode } from './harvestCore.mjs';
+import { decodeTrendbars as _decode } from './harvestCore.js';
 void _decode; // keep tree-shakers honest about the re-export above
 
 export interface Candle { time: number; open: number; high: number; low: number; close: number; }

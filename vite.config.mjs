@@ -9,7 +9,7 @@ import react from '@vitejs/plugin-react';
 // Static ESM imports so the dev middleware never touches Vite's module runner
 // (dynamic import() inside middleware throws "Vite module runner has been closed").
 const harvestNet = await import('./api/_lib/harvesterNet.mjs');
-const harvestCore = await import('./api/_lib/harvestCore.mjs');
+const harvestCore = await import('./api/_lib/harvestCore.js');
 const supabaseJs = await import('@supabase/supabase-js');
 
 const __filename = fileURLToPath(import.meta.url);

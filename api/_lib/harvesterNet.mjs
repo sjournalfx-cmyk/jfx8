@@ -4,7 +4,7 @@
 // this one is dev-only.
 import WebSocket from 'ws';
 import { PT, WS_DEMO, WS_LIVE, mapTimeframeToCtraderPeriod } from './protoTypes.mjs';
-import { decodeTrendbars } from './harvestCore.mjs';
+import { decodeTrendbars } from './harvestCore.js';
 
 function nextId() {
   return `harvest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
