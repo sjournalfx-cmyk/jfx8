@@ -233,7 +233,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <ChevronRight size={14} className={`${isExpanded ? 'rotate-180' : ''}`} />
       </button>
 
-      <div className="flex items-center w-full mb-4 px-[18px] shrink-0 justify-start">
+      <div className="flex flex-col items-center w-full mb-4 px-[18px] shrink-0">
         <button
           type="button"
           onClick={() => {
@@ -247,6 +247,17 @@ const Sidebar: React.FC<SidebarProps> = ({
           ) : (
             <UserCircle size={28} />
           )}
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggleDemoMode?.()}
+          className={`mt-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all ${
+            isDemoMode
+              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+              : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+          }`}
+        >
+          {isDemoMode ? 'Exit Demo' : 'Try Demo'}
         </button>
       </div>
 
