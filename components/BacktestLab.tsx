@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
     Play, Pause, ChevronRight, ChevronLeft, RotateCcw,
     TrendingUp, TrendingDown, XCircle, X,
-    Settings, Zap, ArrowLeftToLine, StepForward, ChevronDown, Database,
+    Zap, ArrowLeftToLine, StepForward, ChevronDown,
     Trash2, Lock, Unlock, Check, Search, Download, FileUp, RefreshCw,
     ZoomIn, ZoomOut, Calendar, List, Star, Loader2, Monitor
 } from 'lucide-react';
@@ -377,31 +377,8 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const historyStatesRef = useRef<Drawing[][]>([]);
     const historyPointerRef = useRef(-1);
 
-    // Feature: Backtest Settings Modal
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [savedSessions, setSavedSessions] = useLocalStorage<BacktestSession[]>('jfx_backtest_sessions', []);
-    const [isLoadingSessions, setIsLoadingSessions] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
     const importTimeoutRef = useRef<number | null>(null);
-
-    const fetchSavedSessions = useCallback(async () => {
-        setIsLoadingSessions(true);
-        try {
-            const sessions = await dataService.getBacktestSessions();
-            setSavedSessions(sessions);
-        } catch (err: any) {
-            console.error('Failed to fetch sessions', err);
-            addToast({ type: 'error', title: 'Session Load Failed', message: err?.message || 'Could not fetch saved sessions.' });
-        } finally {
-            setIsLoadingSessions(false);
-        }
-    }, [addToast]);
-
-    useEffect(() => {
-        if (isSettingsOpen) {
-            fetchSavedSessions();
-        }
-    }, [isSettingsOpen, fetchSavedSessions]);
 
 useEffect(() => {
         historyStatesRef.current = historyStates;
@@ -427,80 +404,6 @@ useEffect(() => {
             }
         };
     }, []);
-
-    const handleSaveToCloud = async () => {
-        if (allData.length === 0) return;
-
-        // Enforce Data Retention Policy
-        const currentPlan = normalizePlan(userProfile.plan);
-        const limits: Record<string, number> = {
-            [APP_CONSTANTS.PLANS.FREE]: 5,
-            [APP_CONSTANTS.PLANS.HOBBY]: 50,
-            [APP_CONSTANTS.PLANS.STANDARD]: Infinity
-        };
-        const maxSessions = limits[currentPlan] || 5;
-
-        if (savedSessions.length >= maxSessions) {
-            addToast({
-                type: 'error',
-                title: 'Limit Reached',
-                message: `You've reached the ${maxSessions} session limit for the ${currentPlan}. Please upgrade or delete old sessions.`
-            });
-            return;
-        }
-
-        try {
-            await dataService.saveBacktestSession({
-                symbol,
-                timeframe,
-                data: allData,
-                drawings: cloneDrawings(drawings),
-                trades: history.map(trade => ({ ...trade }))
-            });
-            addToast({ type: 'success', title: 'Saved to Cloud', message: `Backtest session for ${symbol} saved successfully.` });
-            fetchSavedSessions();
-        } catch (err: any) {
-            addToast({ type: 'error', title: 'Cloud Save Failed', message: err.message });
-        }
-    };
-
-    const handleLoadSession = (session: BacktestSession) => {
-        try {
-            setIsPlaying(false);
-            setSymbol(session.symbol);
-            setTimeframe(session.timeframe);
-            setAllData(session.data);
-            const restoredDrawings = cloneDrawings(session.drawings || []);
-            const restoredTrades = (session.trades || []).map(trade => ({ ...trade }));
-            setDrawings(restoredDrawings);
-            setHistory(restoredTrades);
-            historyStatesRef.current = restoredDrawings.length > 0 ? [restoredDrawings] : [];
-            historyPointerRef.current = restoredDrawings.length > 0 ? 0 : -1;
-            setHistoryStates(historyStatesRef.current);
-            setHistoryStep(historyPointerRef.current);
-            resetDrawingInteractionState();
-
-setCurrentIdx(session.data.length - 1);
-            setDataSource('cache');
-            localStorage.setItem('jfx_backtest_cached_chart', JSON.stringify({ data: session.data, index: session.data.length - 1 }));
-            setShowWelcome(false);
-            addToast({ type: 'success', title: 'Session Loaded', message: `Restored ${session.symbol} ${session.timeframe} session.` });
-            setIsSettingsOpen(false);
-        } catch (err: any) {
-            addToast({ type: 'error', title: 'Load Failed', message: 'The saved data is corrupted.' });
-        }
-    };
-
-    const handleDeleteSession = async (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-        try {
-            await dataService.deleteBacktestSession(id);
-            addToast({ type: 'info', title: 'Deleted', message: 'Session removed from cloud.' });
-            fetchSavedSessions();
-        } catch (err: any) {
-            addToast({ type: 'error', title: 'Delete Failed', message: err.message });
-        }
-    };
 
     const centerChart = useCallback(() => {
         if (!chartRef.current) return;
@@ -1138,7 +1041,6 @@ setAllData(validData);
                 title: 'cTrader Not Configured',
                 message: err?.message || 'Failed to initiate cTrader connection.'
             });
-            setIsSettingsOpen(true);
         }
     }, [addToast]);
 
@@ -1682,13 +1584,12 @@ setAllData(validData);
 
         // Always show welcome on refresh as requested
         setShowWelcome(true);
-        fetchSavedSessions();
 
         return () => {
             window.removeEventListener('resize', updateDimensions);
             observer.disconnect();
         };
-    }, [fetchSavedSessions]);
+    }, []);
 
     const resetReplay = () => {
         setCurrentIdx(0);
@@ -1865,26 +1766,17 @@ setAllData(validData);
     return (
         <div className={`w-full h-full flex flex-col overflow-hidden font-sans ${isDarkMode ? 'bg-black text-zinc-200' : 'bg-white text-slate-900'}`} onMouseUp={handleMouseUp}>
             <div className={`h-16 shrink-0 border-b flex items-center justify-between px-8 z-50 relative shadow-sm ${isDarkMode ? 'border-zinc-800 bg-black/95 backdrop-blur-sm' : 'border-slate-200 bg-white/95 backdrop-blur-sm'}`}>
-                <div className="flex items-center gap-4 w-[18rem]">
-                    {(!showWelcome || allData.length > 0) ? (
-<button
+                <div className="flex items-center gap-3 w-[18rem]">
+                    {(!showWelcome || allData.length > 0) && (
+                        <button
                             onClick={() => { setShowWelcome(true); setAllData([]); localStorage.removeItem('jfx_backtest_cached_chart'); localStorage.setItem('jfx_backtest_data_source', 'none'); }}
                             className={`p-1.5 rounded-xl border transition-all ${isDarkMode ? 'bg-black border-zinc-700 text-zinc-400 hover:text-[#FF4F01] hover:border-[#FF4F01]/50' : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-[#FF4F01] hover:border-[#FF4F01]/50'}`}
                             title="Back to Lab Menu"
                         >
                             <ArrowLeftToLine size={14} />
                         </button>
-                    ) : (
-                        <div className={`p-1.5 rounded-xl border shadow-inner ${isDarkMode ? 'bg-gradient-to-br from-[#FF4F01]/20 to-[#FF4F01]/5 border-[#FF4F01]/20 shadow-[#FF4F01]/10 text-[#FF4F01]' : 'bg-[#FF4F01]/5 border-[#FF4F01]/20 shadow-[#FF4F01]/5 text-[#FF4F01]'}`}>
-                            <Zap size={14} fill="currentColor" />
-                        </div>
                     )}
-                    <div className="flex flex-col justify-center min-w-0">
-                        <h2 className={`text-base font-black uppercase tracking-tight leading-none ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Backtest Lab</h2>
-                        <div className="mt-1 flex items-center gap-2 min-w-0 flex-wrap">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                        </div>
-                    </div>
+                    <h2 className={`text-base font-black uppercase tracking-tight leading-none ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Backtest Lab</h2>
                 </div>
 
                 <div className={`absolute left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 rounded-2xl border shadow-xl ${isDarkMode ? 'bg-black/80 border-zinc-800 shadow-black/20' : 'bg-slate-50 border-slate-200 shadow-slate-200/50'}`}>
@@ -2062,16 +1954,9 @@ setAllData(validData);
                             >
                                 <StartScreen
                                     isDarkMode={isDarkMode}
-                                    cloudSessions={savedSessions}
-                                    isLoadingSessions={isLoadingSessions}
-                                    cachedSeries={cachedSeries}
-                                    starredSymbols={starredSymbols}
-                                    onToggleStar={toggleStar}
-                                    onResumeCache={handleResumeFromCache}
-                                    onResumeSession={handleLoadSession}
-                                    onStart={handleStartFresh}
                                     defaultSymbol={symbol}
                                     defaultTimeframe={timeframe}
+                                    onOpenWatchlist={() => setIsWatchlistOpen(true)}
                                 />
                             </motion.div>
                         )}
@@ -2186,9 +2071,6 @@ setAllData(validData);
                                 <span className="px-2 py-1 rounded bg-rose-500/20 text-rose-500 text-[8px] font-black uppercase tracking-widest">LOCKED</span>
                             </div>
                         )}
-                        <button onClick={() => setIsSettingsOpen(true)} title="Settings" className={`p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-blue-500' : 'hover:bg-blue-50 text-blue-600'}`}>
-                            <Settings size={20} />
-                        </button>
                         <div className="flex flex-col items-end gap-1 relative">
                             <button onClick={() => setIsSpeedMenuOpen(!isSpeedMenuOpen)} className="flex flex-col items-end gap-1 opacity-70 hover:opacity-100">
                                 <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Replay Speed</span>
@@ -2215,138 +2097,6 @@ setAllData(validData);
                         )}
                     </div>
                 </div>
-            {isSettingsOpen && (
-                <div className="fixed inset-0 flex justify-end pointer-events-auto" style={{ zIndex: 9999 }}>
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setIsSettingsOpen(false)} />
-                    <div onClick={(event) => event.stopPropagation()} className={`relative w-full max-w-md h-full shadow-2xl border-l flex flex-col ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>
-                        <div className={`px-5 py-4 border-b flex items-center justify-between ${isDarkMode ? 'border-zinc-800 bg-black/40' : 'border-slate-100 bg-slate-50/60'}`}>
-                            <div className="flex items-center gap-3">
-                                <div className="h-10 w-10 grid place-items-center bg-[#FF4F01]/10 text-[#FF4F01] rounded-2xl">
-                                    <Settings size={18} />
-                                </div>
-                                <div>
-                                    <h3 className={`text-sm font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Lab Settings</h3>
-                                    <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">Configure your backtest environment</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setIsSettingsOpen(false)}
-                                className={`h-9 w-9 grid place-items-center rounded-xl transition-colors ${isDarkMode ? 'hover:bg-white/5 text-zinc-400' : 'hover:bg-black/5 text-slate-500'}`}
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
-                            <div className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-black/25 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Zap size={14} className="text-[#FF4F01]" />
-                                    <h4 className={`text-[10px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Environment</h4>
-                                </div>
-                                <div className={`rounded-xl border px-4 py-3 ${isDarkMode ? 'bg-black/20 border-zinc-800' : 'bg-white border-slate-200'}`}>
-                                    <div className="flex items-start justify-between gap-4">
-                                        <div className="min-w-0">
-                                            <p className={`text-xs font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Auto-follow price</p>
-                                            <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">Keeps the current bar in view during replay.</p>
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                const next = !isAutoFollow;
-                                                setIsAutoFollow(next);
-                                                if (next && chartRef.current) {
-                                                    chartRef.current.timeScale().scrollToRealtime();
-                                                }
-                                            }}
-                                            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${isAutoFollow ? 'bg-[#FF4F01]' : isDarkMode ? 'bg-black' : 'bg-slate-300'}`}
-                                            aria-label="Toggle auto-follow price"
-                                        >
-                                            <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${isAutoFollow ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-black/25 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Download size={14} className="text-blue-500" />
-                                    <h4 className={`text-[10px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Data</h4>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                        onClick={handleDownloadData}
-                                        className={`rounded-xl border px-3 py-4 text-left transition-colors ${isDarkMode ? 'bg-black/20 border-zinc-800 hover:border-blue-500/40 hover:bg-blue-500/5' : 'bg-white border-slate-200 hover:border-blue-500/40 hover:bg-blue-50/60'}`}
-                                    >
-                                        <Download size={16} className="text-blue-500 mb-3" />
-                                        <div className={`text-[10px] font-black uppercase tracking-[0.16em] ${isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}>Export local</div>
-                                        <div className="mt-1 text-[10px] text-zinc-500">Save the current data to your device.</div>
-                                    </button>
-                                    <button
-                                        onClick={handleSaveToCloud}
-                                        className={`rounded-xl border px-3 py-4 text-left transition-colors ${isDarkMode ? 'bg-black/20 border-zinc-800 hover:border-emerald-500/40 hover:bg-emerald-500/5' : 'bg-white border-slate-200 hover:border-emerald-500/40 hover:bg-emerald-50/60'}`}
-                                    >
-                                        <RefreshCw size={16} className="text-emerald-500 mb-3" />
-                                        <div className={`text-[10px] font-black uppercase tracking-[0.16em] ${isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}>Save cloud</div>
-                                        <div className="mt-1 text-[10px] text-zinc-500">Store this session for later.</div>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-black/25 border-zinc-800' : 'bg-slate-50 border-slate-200'}`}>
-                                <div className="flex items-center justify-between gap-2 mb-3">
-                                    <div className="flex items-center gap-2">
-                                        <Database size={14} className="text-purple-500" />
-                                        <h4 className={`text-[10px] font-black uppercase tracking-[0.18em] ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Recent sessions</h4>
-                                    </div>
-                                    <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">{savedSessions.length}</span>
-                                </div>
-                                <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1 custom-scrollbar">
-                                    {isLoadingSessions ? (
-                                        <div className="flex items-center justify-center py-8">
-                                            <div className="w-5 h-5 border-2 border-[#FF4F01] border-t-transparent rounded-full animate-spin" />
-                                        </div>
-                                    ) : savedSessions.length === 0 ? (
-                                        <div className={`text-center py-8 border rounded-xl border-dashed ${isDarkMode ? 'border-zinc-800 bg-black/20' : 'border-slate-200 bg-white'}`}>
-                                            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.18em]">No saved sessions</p>
-                                        </div>
-                                    ) : (
-                                        savedSessions.map((sess) => (
-                                            <button
-                                                key={sess.id}
-                                                onClick={() => handleLoadSession(sess)}
-                                                className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-left transition-colors ${isDarkMode ? 'bg-black/20 border-zinc-800 hover:border-emerald-500/30 hover:bg-emerald-500/5' : 'bg-white border-slate-200 hover:border-emerald-500/30 hover:bg-emerald-50/60'}`}
-                                            >
-                                                <div className="min-w-0">
-                                                    <div className={`text-xs font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{sess.symbol}</div>
-                                                    <div className="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-zinc-500">{sess.timeframe} � {new Date(sess.updated_at).toLocaleDateString()}</div>
-                                                </div>
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    <button
-                                                        onClick={(e) => handleDeleteSession(e, sess.id)}
-                                                        className="p-2 rounded-lg text-zinc-500 hover:bg-rose-500/10 hover:text-rose-500 transition-colors"
-                                                    >
-                                                        <Trash2 size={12} />
-                                                    </button>
-                                                    <ChevronRight size={14} className="text-zinc-500" />
-                                                </div>
-                                            </button>
-                                        ))
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className={`p-4 border-t ${isDarkMode ? 'bg-black/40 border-zinc-800' : 'bg-slate-50/60 border-slate-100'}`}>
-                            <button
-                                onClick={() => setIsSettingsOpen(false)}
-                                className="w-full rounded-xl bg-[#FF4F01] px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-white transition-transform hover:scale-[1.01] active:scale-[0.99]"
-                            >
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {contextMenu && (
                 <div className="fixed z-[500] w-48 rounded-xl border shadow-2xl overflow-hidden" style={{ left: contextMenu.x, top: contextMenu.y }}>
                     <div className={`flex flex-col p-1 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>

@@ -6,11 +6,9 @@ import { browserSpeechService } from '../services/voiceInputService';
 import { calculateStats } from '../lib/statsUtils';
 import { buildAnalyticsAiSnapshot } from '../lib/analyticsAiSnapshot';
 import { normalizeAssistantMarkdown, stripAssistantWidgetMarkup } from '../lib/aiChatFormatting';
-import { formatDataToolResponse, formatStatementsMarkdown, formatRatiosMarkdown, DATA_TOOL_LABELS, DATA_TOOL_API_ROUTES, type DataToolKind } from '../lib/fmpDataTools';
-import { formatFinnhubDataToolResponse, FINNHUB_TOOL_LABELS, FINNHUB_TOOL_API_ROUTES, type FinnhubToolKind } from '../lib/finnhubDataTools';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { cleanAssistantResponse, cleanThinkingTags } from '../lib/thinkingCleaner';
-import { TrendingUp, TrendingDown, Brain, Clock, Wand2, Coins, ChevronDown, X, Plus, Workflow, StickyNote, Activity, Sparkles, Target, Mic, Star, RotateCcw, LayoutGrid, Copy, ThumbsUp, ThumbsDown, CornerDownLeft, Zap, AlertCircle, Check, Loader2, StopCircle, ArrowLeft, ArrowRight, ListChecks, BarChart3, Clock3, BrainCircuit, Timer, CircleDot, Goal as GoalIcon, Pause, Play, Settings, Telescope } from 'lucide-react';
+import { TrendingUp, TrendingDown, Brain, Clock, Wand2, Coins, ChevronDown, X, Plus, Workflow, StickyNote, Activity, Sparkles, Target, Mic, RotateCcw, LayoutGrid, Copy, ThumbsUp, ThumbsDown, CornerDownLeft, Zap, AlertCircle, Check, Loader2, StopCircle, ArrowLeft, ArrowRight, ListChecks, BarChart3, Clock3, BrainCircuit, Timer, CircleDot, Goal as GoalIcon, Pause, Play, Settings, Telescope } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from './ui/Toast';
@@ -934,39 +932,6 @@ const formatForexFactoryCalendarMarkdown = (events: ForexFactoryEvent[]): string
 };
 
 // --- Slash Commands ---
-type SlashCommand = {
-  cmd: string;
-  kind: DataToolKind | FinnhubToolKind | 'forexfactory-calendar';
-  source: 'fmp' | 'finnhub' | 'forexfactory';
-  label: string;
-  needsSymbol: boolean;
-  desc: string;
-};
-
-const SLASH_COMMANDS: SlashCommand[] = [
-  // FMP Tools
-  { cmd: '/quote', kind: 'quote', source: 'fmp', label: 'Stock Quote', needsSymbol: true, desc: 'Current stock price & volume' },
-  { cmd: '/profile', kind: 'profile', source: 'fmp', label: 'Company Profile', needsSymbol: true, desc: 'Company overview & fundamentals' },
-  { cmd: '/earnings', kind: 'earnings-calendar', source: 'fmp', label: 'Earnings Calendar', needsSymbol: false, desc: 'Upcoming earnings reports' },
-  { cmd: '/treasury', kind: 'treasury-rates', source: 'fmp', label: 'Treasury Rates', needsSymbol: false, desc: 'Yield curve data' },
-  { cmd: '/metrics', kind: 'key-metrics', source: 'fmp', label: 'Key Metrics', needsSymbol: true, desc: 'P/E, EV, ROE & key ratios' },
-  { cmd: '/statements', kind: 'statements', source: 'fmp', label: 'Financial Statements', needsSymbol: true, desc: 'Income, balance & cash flow' },
-  { cmd: '/ratios', kind: 'ratios', source: 'fmp', label: 'Ratios & Growth', needsSymbol: true, desc: 'Margins, ROE, growth rates' },
-  { cmd: '/price', kind: 'price-change', source: 'fmp', label: 'Price Change', needsSymbol: true, desc: 'Performance across timeframes' },
-  { cmd: '/dcf', kind: 'dcf', source: 'fmp', label: 'DCF Valuation', needsSymbol: true, desc: 'Discounted cash flow fair value' },
-  // Finnhub Tools
-  { cmd: '/news', kind: 'market-news', source: 'finnhub', label: 'Market News', needsSymbol: false, desc: 'General market headlines' },
-  { cmd: '/ticker-news', kind: 'company-news', source: 'finnhub', label: 'Company News', needsSymbol: true, desc: 'News by ticker symbol' },
-  { cmd: '/insider', kind: 'insider-transactions', source: 'finnhub', label: 'Insider Trades', needsSymbol: true, desc: 'Insider buying & selling' },
-  { cmd: '/analyst', kind: 'analyst-recommendations', source: 'finnhub', label: 'Analyst Ratings', needsSymbol: true, desc: 'Buy/hold/sell consensus' },
-  { cmd: '/macro', kind: 'economic-calendar', source: 'finnhub', label: 'Macro Events', needsSymbol: false, desc: 'CPI, GDP, jobs & macro events' },
-  { cmd: '/calendar', kind: 'forexfactory-calendar', source: 'forexfactory', label: 'Economic Calendar', needsSymbol: false, desc: 'Live ForexFactory economic events' },
-  { cmd: '/filings', kind: 'sec-filings', source: 'finnhub', label: 'SEC Filings', needsSymbol: true, desc: '10-K, 10-Q & other filings' },
-  { cmd: '/surprises', kind: 'earnings-surprises', source: 'finnhub', label: 'Earnings Surprises', needsSymbol: true, desc: 'Historical beat/miss rates' },
-  { cmd: '/peers', kind: 'peer-companies', source: 'finnhub', label: 'Peer Companies', needsSymbol: true, desc: 'Similar companies' },
-  { cmd: '/status', kind: 'market-status', source: 'finnhub', label: 'Market Status', needsSymbol: false, desc: 'Open/closed & holidays' },
-];
-
 const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, onAddNote, onOpenSettings }) => {
   const challengeOptions = useMemo(() => ([
     { id: 'emotions', label: 'Emotional Trading', desc: 'FOMO, revenge trading, fear of missing out', icon: <Brain size={20} /> },
@@ -983,7 +948,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const [showWizard, setShowWizard] = useState(false);
   const [showForgeMenu, setShowForgeMenu] = useState(false);
   const [showFeaturesMenu, setShowFeaturesMenu] = useState(false);
-  const [commandsSuppressed, setCommandsSuppressed] = useState(false);
   const [visibleMessageLimit, setVisibleMessageLimit] = useState(60);
   const { addToast } = useToast();
   const [wizardStep, setWizardStep] = useState(0);
@@ -1057,42 +1021,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
-  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
-  const commandListRef = useRef<HTMLDivElement>(null);
-  const [commandUsage, setCommandUsage] = useLocalStorage<Record<string, number>>('jfx_ai_command_usage', {});
-
-  const filteredCommands = useMemo(() => {
-    if (!input.startsWith('/') || input.includes(' ')) return [];
-    
-    const search = input.toLowerCase();
-    const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(search));
-    
-    if (matches.length === 0) return [];
-    
-    // Sort by usage count (descending)
-    return [...matches].sort((a, b) => {
-      const usageA = commandUsage[a.cmd] || 0;
-      const usageB = commandUsage[b.cmd] || 0;
-      return usageB - usageA;
-    });
-  }, [input, commandUsage]);
-
-  useEffect(() => {
-    if (filteredCommands.length > 0 && commandListRef.current) {
-      const activeItem = commandListRef.current.children[selectedCommandIndex] as HTMLElement;
-      if (activeItem) {
-        activeItem.scrollIntoView({
-          block: 'nearest',
-          behavior: 'smooth'
-        });
-      }
-    }
-  }, [selectedCommandIndex, filteredCommands.length]);
-
-  useEffect(() => {
-    setSelectedCommandIndex(0);
-  }, [filteredCommands]);
-
   useEffect(() => {
     const syncDailyCredits = () => {
       const today = getLocalDateKey();
@@ -1615,43 +1543,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     const activeCreditMode: 'research' | 'mentor' = isResearchMode ? 'research' : 'mentor';
     const remainingCredits = activeCreditMode === 'research' ? dailyCredits.researchRemaining : dailyCredits.mentorRemaining;
 
-    // --- Slash Command Processing ---
-    if (normalizedInput.startsWith('/')) {
-      const parts = normalizedInput.split(/\s+/);
-      const cmdStr = parts[0].toLowerCase();
-      const symbol = parts[1]?.toUpperCase();
-
-      const found = SLASH_COMMANDS.find(c => c.cmd === cmdStr);
-      if (found) {
-        if (found.needsSymbol && !symbol) {
-          addToast({
-            type: 'error',
-            title: 'Symbol Required',
-            message: `Please provide a symbol for ${found.label} (e.g. ${found.cmd} AAPL)`
-          });
-          return;
-        }
-
-        setInput('');
-        stickToBottomRef.current = true;
-
-        const userMsg: Message = {
-          id: Date.now().toString(),
-          role: 'user',
-          content: normalizedInput,
-          timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, userMsg]);
-
-        if (found.source === 'fmp') {
-          handleFetchDataTool(found.kind as DataToolKind, symbol);
-        } else {
-          handleFetchFinnhubDataTool(found.kind as FinnhubToolKind, symbol);
-        }
-        return;
-      }
-    }
-
     // Bail out BEFORE mutating anything so the draft text and any pending
     // voice clip survive a credits rejection.
     if (remainingCredits <= 0) {
@@ -1725,7 +1616,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       } catch (error) {
         console.error('Economic calendar fetch error:', error);
         processResponse(
-          '## 📅 Economic Calendar\n\nFailed to fetch the live economic calendar. Please check your connection and try again, or use the `/calendar` command.',
+          '## 📅 Economic Calendar\n\nFailed to fetch the live economic calendar. Please check your connection and try again.',
           (Date.now() + 1).toString(),
           { contextSummary }
         );
@@ -1942,159 +1833,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     setMessages(prev => [...prev, { id: messageId, role: 'assistant', content: cleanContent, timestamp: new Date(), sections, isDeepAnalysis, kind, psychologySnapshot, scalingSnapshot, strategyProfile, contextSummary }]);
     playEarcon(kind === 'chat' ? 'thinking-done' : 'task-complete');
   };
-
-  const handleFetchDataTool = async (kind: DataToolKind, symbol?: string) => {
-    if (isGenerating) return;
-    setIsGenerating(true);
-
-
-    try {
-      let markdown: string;
-
-      if (kind === 'statements' && symbol) {
-        const [incRes, balRes, cfRes] = await Promise.all([
-          authedFetch(`/api/fmp/income-statement?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
-          authedFetch(`/api/fmp/balance-sheet?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
-          authedFetch(`/api/fmp/cash-flow?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
-        ]);
-        markdown = formatStatementsMarkdown(incRes?.data ?? incRes, balRes?.data ?? balRes, cfRes?.data ?? cfRes);
-      } else if (kind === 'ratios' && symbol) {
-        const [ratRes, groRes] = await Promise.all([
-          authedFetch(`/api/fmp/ratios?symbol=${encodeURIComponent(symbol)}`).then(r => r.json().catch(() => ({}))),
-          authedFetch(`/api/fmp/financial-growth?symbol=${encodeURIComponent(symbol)}&limit=1`).then(r => r.json().catch(() => ({}))),
-        ]);
-        markdown = formatRatiosMarkdown(ratRes?.data ?? ratRes, groRes?.data ?? groRes);
-      } else {
-        const baseUrl = DATA_TOOL_API_ROUTES[kind];
-        const url = symbol ? `${baseUrl}?symbol=${encodeURIComponent(symbol)}` : baseUrl;
-        const response = await authedFetch(url);
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          const reason = payload?.error || 'The data service did not return data.';
-          markdown = `## ${DATA_TOOL_LABELS[kind].label}\n\nI could not fetch data right now.\n\n**Reason:** ${reason}`;
-        } else {
-          markdown = formatDataToolResponse(kind, payload?.data ?? payload);
-        }
-      }
-
-      processResponse(markdown, (Date.now() + 1).toString(), { contextSummary: buildContextSummary('research', 0) });
-    } catch (error) {
-      console.error('Data tool error:', error);
-      processResponse(
-        `## ${DATA_TOOL_LABELS[kind].label}\n\nFailed to fetch data. Check your connection and try again.`,
-        (Date.now() + 1).toString(),
-        { contextSummary: buildContextSummary('research', 0) }
-      );
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleFetchFinnhubDataTool = async (kind: FinnhubToolKind, symbol?: string) => {
-    if (isGenerating) return;
-    setIsGenerating(true);
-
-
-    try {
-      const baseUrl = FINNHUB_TOOL_API_ROUTES[kind];
-      const params = new URLSearchParams();
-      if (kind === 'market-news') params.set('category', 'general');
-      if (kind === 'company-news' && symbol) { params.set('symbol', symbol); params.set('from', new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]); params.set('to', new Date().toISOString().split('T')[0]); }
-      if (kind === 'market-status') params.set('exchange', 'US');
-      if (kind === 'economic-calendar') { params.set('from', new Date().toISOString().split('T')[0]); params.set('to', new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]); }
-      if (kind === 'insider-transactions' && symbol) { params.set('symbol', symbol); params.set('from', new Date(Date.now() - 365 * 86400000).toISOString().split('T')[0]); params.set('to', new Date().toISOString().split('T')[0]); }
-      if (kind === 'sec-filings' && symbol) { params.set('symbol', symbol); params.set('from', new Date(Date.now() - 365 * 86400000).toISOString().split('T')[0]); params.set('to', new Date().toISOString().split('T')[0]); }
-      if (kind === 'earnings-surprises' && symbol) params.set('symbol', symbol);
-      if (kind === 'peer-companies' && symbol) params.set('symbol', symbol);
-      if (kind === 'analyst-recommendations' && symbol) params.set('symbol', symbol);
-
-      const paramStr = params.toString();
-      const url = paramStr ? `${baseUrl}?${paramStr}` : baseUrl;
-      const response = await authedFetch(url);
-      const payload = await response.json().catch(() => ({}));
-
-      let markdown: string;
-      if (!response.ok) {
-        const reason = payload?.error || 'The data service did not return data.';
-        markdown = `## ${FINNHUB_TOOL_LABELS[kind].label}\n\nI could not fetch data right now.\n\n**Reason:** ${reason}`;
-      } else {
-        markdown = formatFinnhubDataToolResponse(kind, payload?.data ?? payload, symbol);
-      }
-
-      processResponse(markdown, (Date.now() + 1).toString(), { contextSummary: buildContextSummary('research', 0) });
-    } catch (error) {
-      console.error('Finnhub data tool error:', error);
-      processResponse(
-        `## ${FINNHUB_TOOL_LABELS[kind].label}\n\nFailed to fetch data. Check your connection and try again.`,
-        (Date.now() + 1).toString(),
-        { contextSummary: buildContextSummary('research', 0) }
-      );
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleFetchForexFactoryCalendar = async () => {
-    if (isGenerating) return;
-    setIsGenerating(true);
-
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const from = new Date().toISOString().split('T')[0];
-      const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-      const response = await fetch(`/api/economic-calendar?from=${from}&to=${to}&tz=${encodeURIComponent(tz)}`);
-      const payload = await response.json().catch(() => ({}));
-
-      let markdown: string;
-      if (!response.ok) {
-        const reason = payload?.error || 'The economic calendar service did not return data.';
-        markdown = `## 📅 Economic Calendar\n\nI could not fetch calendar data right now.\n\n**Reason:** ${reason}`;
-      } else {
-        const events: ForexFactoryEvent[] = Array.isArray(payload) ? payload : payload?.data ?? payload?.events ?? [];
-        markdown = formatForexFactoryCalendarMarkdown(events);
-      }
-
-      processResponse(markdown, (Date.now() + 1).toString(), { contextSummary: buildContextSummary('research', 0) });
-    } catch (error) {
-      console.error('ForexFactory calendar tool error:', error);
-      processResponse(
-        `## 📅 Economic Calendar\n\nFailed to fetch live economic calendar data. Check your connection and try again.`,
-        (Date.now() + 1).toString(),
-        { contextSummary: buildContextSummary('research', 0) }
-      );
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleSelectCommand = useCallback((cmd: SlashCommand) => {
-    if (isGenerating) {
-      addToast({ type: 'info', title: 'Please wait', message: 'Let the current response finish first.' });
-      return;
-    }
-    // Track usage
-    setCommandUsage(prev => ({
-      ...prev,
-      [cmd.cmd]: (prev[cmd.cmd] || 0) + 1
-    }));
-
-    if (cmd.needsSymbol) {
-      setInput(cmd.cmd + ' ');
-      setSelectedCommandIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    } else {
-      setInput('');
-      setSelectedCommandIndex(0);
-      if (cmd.source === 'forexfactory') {
-        handleFetchForexFactoryCalendar();
-      } else if (cmd.source === 'fmp') {
-        handleFetchDataTool(cmd.kind as DataToolKind);
-      } else {
-        handleFetchFinnhubDataTool(cmd.kind as FinnhubToolKind);
-      }
-    }
-  }, [isGenerating, setCommandUsage, handleFetchDataTool, handleFetchFinnhubDataTool, handleFetchForexFactoryCalendar]);
 
   const handleFeatureRequest = async (mode: 'psychology' | 'scaling', userRequest: string) => {
     if (isGenerating) return;
@@ -3470,65 +3208,6 @@ ${strategyProfile.whyITrade}`;
 
 
               <div className="relative flex items-center gap-2 p-2">
-                {/* Slash Command Overlay */}
-                <AnimatePresence>
-                  {input.startsWith('/') && !input.includes(' ') && !commandsSuppressed && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 6 }}
-                      transition={{ duration: 0.15 }}
-                      className={`absolute bottom-full left-2 right-2 mb-2 overflow-hidden rounded-2xl border ${
-                        isDarkMode ? 'bg-black/70 border-zinc-800 backdrop-blur-sm' : 'bg-white/90 border-slate-200 backdrop-blur-sm'
-                      }`}
-                      style={{ zIndex: 100 }}
-                    >
-                      {filteredCommands.length > 0 ? (
-                        <div 
-                          ref={commandListRef}
-                          className="max-h-[260px] overflow-y-auto p-1.5 custom-scrollbar"
-                        >
-                          {filteredCommands.map((cmd, idx) => {
-                            const usage = commandUsage[cmd.cmd] || 0;
-                            const isFrequent = usage > 5; // Show star for frequently used
-
-                            return (
-                              <button
-                                key={cmd.cmd}
-                                onClick={() => handleSelectCommand(cmd)}
-                                onMouseEnter={() => setSelectedCommandIndex(idx)}
-                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-colors ${
-                                  idx === selectedCommandIndex
-                                    ? (isDarkMode ? 'bg-black text-white' : 'bg-slate-100 text-slate-900')
-                                    : (isDarkMode ? 'text-zinc-400 hover:bg-black/50' : 'text-slate-600 hover:bg-slate-50')
-                                }`}
-                              >
-                                <span className="font-mono text-xs font-semibold">{cmd.cmd}</span>
-                                <span className={`text-xs truncate ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{cmd.desc}</span>
-                                <div className="ml-auto flex items-center gap-2">
-                                  {isFrequent && (
-                                    <Star size={10} className="text-amber-400 fill-amber-400 opacity-60" />
-                                  )}
-                                  {cmd.needsSymbol && (
-                                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0 ${isDarkMode ? 'bg-black text-zinc-500' : 'bg-slate-200 text-slate-400'}`}>
-                                      +SYM
-                                    </span>
-                                  )}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className={`px-4 py-3 text-xs flex items-center gap-2 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                          <AlertCircle size={14} />
-                          No commands found matching "{input}"
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
                 <button
                   onClick={() => { setShowForgeMenu(!showForgeMenu); setShowFeaturesMenu(false); }}
                   className={`forge-btn shrink-0 p-2.5 rounded-2xl transition-colors ${
@@ -3560,32 +3239,11 @@ ${strategyProfile.whyITrade}`;
                 <input
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => { setInput(e.target.value); setCommandsSuppressed(false); }}
+                  onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
                     // Don't hijack keys while an IME composition is in progress.
                     if (e.nativeEvent.isComposing) return;
-                    const commandOverlayVisible = input.startsWith('/') && !input.includes(' ') && !commandsSuppressed;
-                    if (e.key === 'Escape') {
-                      if (commandOverlayVisible) {
-                        e.preventDefault();
-                        // Dismiss the suggestions without wiping the typed text.
-                        setCommandsSuppressed(true);
-                      }
-                      return;
-                    }
-                    if (commandOverlayVisible && filteredCommands.length > 0) {
-                      if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        setSelectedCommandIndex(prev => (prev + 1) % filteredCommands.length);
-                      } else if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setSelectedCommandIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
-                      } else if (e.key === 'Enter' || e.key === 'Tab') {
-                        e.preventDefault();
-                        const selected = filteredCommands[selectedCommandIndex];
-                        if (selected) handleSelectCommand(selected);
-                      }
-                    } else if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       handleSend();
                     }
