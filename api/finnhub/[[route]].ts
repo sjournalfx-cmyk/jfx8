@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCorsHeaders } from '../_lib/cors';
-import { requireUser } from '../_lib/auth';
-import { rateLimit } from '../_lib/rateLimit';
+import { applyCorsHeaders } from '../_lib/cors.js';
+import { requireUser } from '../_lib/auth.js';
+import { rateLimit } from '../_lib/rateLimit.js';
 
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
 

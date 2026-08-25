@@ -7,7 +7,7 @@ import {
   mergeBars,
   capToNewest,
   closeSession,
-} from '../_lib/ctraderHarvester';
+} from '../_lib/ctraderHarvester.js';
 
 // Cron-driven harvester. Each invocation processes a small bounded batch of
 // the persistent harvest_queue so a full backfill completes across many short

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireUser } from './_lib/auth';
-import { rateLimit } from './_lib/rateLimit';
-import { applyCorsHeaders } from './_lib/cors';
+import { requireUser } from './_lib/auth.js';
+import { rateLimit } from './_lib/rateLimit.js';
+import { applyCorsHeaders } from './_lib/cors.js';
 
 export const config = {
   api: {

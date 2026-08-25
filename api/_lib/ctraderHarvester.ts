@@ -15,7 +15,7 @@ export {
 } from './harvestCore.js';
 
 import WebSocket from 'ws';
-import { PT, WS_DEMO, WS_LIVE, mapTimeframeToCtraderPeriod } from './protoTypes';
+import { PT, WS_DEMO, WS_LIVE, mapTimeframeToCtraderPeriod } from './protoTypes.js';
 import { decodeTrendbars as _decode } from './harvestCore.js';
 void _decode; // keep tree-shakers honest about the re-export above
 
