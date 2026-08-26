@@ -1379,7 +1379,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             time: sastClose.fullTime,
             openTime: openDate.toISOString(),
             closeTime: closeDate.toISOString(),
-            direction: deal.tradeSide === 'sell' ? 'Long' : 'Short',
+            direction: deal.tradeSide === 'buy' ? 'Long' : 'Short',
             entryPrice: deal.entryPrice || deal.price || 0,
             exitPrice: deal.price || 0,
             stopLoss: deal.stopLoss || 0,
