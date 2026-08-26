@@ -177,15 +177,16 @@ describe('ctraderService - WebSocket API integration', () => {
             symbol: 'GBPUSD',
             tradeSide: 2, // sell
             filledVolume: 2000000, // 2000000 cents = 0.2 lots
-            executionPrice: 1.2750,
+            // Raw ProtoOA price: integer ticks (5-digit GBPUSD) → 1.27500
+            executionPrice: 127500,
             closePositionDetail: {
               grossProfit: -1500, // cents
               swap: 0,
-              entryPrice: 1.2800,
+              entryPrice: 128000,
+              commission: -200,
+              createTimestamp: 1718000000000,
+              executionTimestamp: 1718000100000,
             },
-            commission: -200,
-            createTimestamp: 1718000000000,
-            executionTimestamp: 1718000100000,
           },
           {
             // Position-opening (entry) deal: no closePositionDetail, so it must
@@ -195,7 +196,7 @@ describe('ctraderService - WebSocket API integration', () => {
             symbol: 'GBPUSD',
             tradeSide: 1, // buy
             filledVolume: 2000000,
-            executionPrice: 1.2800,
+            executionPrice: 128000,
             commission: -305,
             createTimestamp: 1717999900000,
             executionTimestamp: 1717999900000,
@@ -209,7 +210,8 @@ describe('ctraderService - WebSocket API integration', () => {
     expect(deals[0].dealId).toBe(6001);
     expect(deals[0].tradeSide).toBe('sell');
     expect(deals[0].volume).toBe(0.2);
-    expect(deals[0].price).toBe(1.2750);
+    // Digit-normalized from raw ticks (no digits map → 5-digit default for non-JPY)
+    expect(deals[0].price).toBe(1.275);
     expect(deals[0].profit).toBe(-15);
   });
 
