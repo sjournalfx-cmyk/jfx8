@@ -1457,18 +1457,22 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         try {
             const { getPositions, getClosedDeals, getPendingOrders, getTrader, getSymbolsList } = await import('../services/ctraderService');
             const isDemo = !!acc.isDemo;
-            const [positions, deals, orders, trader, symbols] = await Promise.all([
+            // Symbols must resolve before deals so absolute prices can be
+            // digit-normalized (raw ProtoOA prices are scaled integers).
+            const symbols = await getSymbolsList(id, isDemo).catch(() => []);
+            const { buildDigitsMap } = await import('../services/ctraderService');
+            const digitsById = buildDigitsMap(symbols);
+            const [positions, deals, orders, trader] = await Promise.all([
                 getPositions(id, isDemo),
-                getClosedDeals(id, undefined, undefined, isDemo),
+                getClosedDeals(id, undefined, undefined, isDemo, digitsById),
                 getPendingOrders(id, isDemo),
                 getTrader(id, isDemo),
-                getSymbolsList(id, isDemo).catch(() => []),
             ]);
             setAccountPositions(positions);
             setAccountDeals(deals);
             setPendingOrders(orders);
             setTraderDetails(trader);
-            
+
             const uniqueSymbols = symbols.reduce((accList: any[], currentSym: any) => {
                 if (!accList.some((item: any) => item.symbolId === currentSym.symbolId)) {
                     accList.push(currentSym);
@@ -1718,10 +1722,12 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                     }
                 } else if (payloadType === PT.TRADER_UPDATE_EVENT) {
                     if (payload.trader) {
+                        // Raw WS payload — monetary fields in cents, ÷100 to match
+                        // getTrader's normalized output.
                         setTraderDetails(prev => prev ? {
                             ...prev,
-                            balance: payload.trader.balance !== undefined ? Number(payload.trader.balance) : prev.balance,
-                            equity: payload.trader.equity !== undefined ? Number(payload.trader.equity) : prev.equity,
+                            balance: payload.trader.balance !== undefined ? Number(payload.trader.balance) / 100 : prev.balance,
+                            equity: payload.trader.equity !== undefined ? Number(payload.trader.equity) / 100 : prev.equity,
                         } : null);
                     }
                 }

@@ -694,7 +694,45 @@ export async function getPositions(ctidTraderAccountId: number, isDemo: boolean 
   });
 }
 
-export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?: number, toTimestamp?: number, isDemo: boolean = true): Promise<CtraderDeal[]> {
+// ---------------------------------------------------------------------------
+// cTrader ProtoOA absolute prices are integers scaled by the symbol's "digits"
+// (e.g. EURUSD 5 digits → 108245 means 1.08245; JPY pairs 3 digits).
+// Monetary fields (profit/swap/commission/balance/equity) arrive in cents and
+// are divided by 100 at their respective map sites.
+// ---------------------------------------------------------------------------
+export type SymbolDigitsMap = Map<number, number>;
+
+export const buildDigitsMap = (symbols: any[]): SymbolDigitsMap => {
+  const map: SymbolDigitsMap = new Map();
+  (symbols || []).forEach((s: any) => {
+    if (s && s.symbolId !== undefined) {
+      const digits = Number(s.digits);
+      if (Number.isFinite(digits)) map.set(Number(s.symbolId), digits);
+    }
+  });
+  return map;
+};
+
+export const scalePrice = (
+  raw: unknown,
+  symbolId: unknown,
+  digitsById: SymbolDigitsMap | undefined,
+  symbolName?: string
+): number => {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  let digits = symbolId !== undefined && symbolId !== null && digitsById
+    ? digitsById.get(Number(symbolId))
+    : undefined;
+  if (digits === undefined) {
+    // Fallback heuristic matching the chart helper: JPY quote → 3, else 5.
+    const clean = (symbolName || '').toUpperCase().replace('/', '');
+    digits = clean.endsWith('JPY') ? 3 : 5;
+  }
+  return n / Math.pow(10, digits);
+};
+
+export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?: number, toTimestamp?: number, isDemo: boolean = true, digitsById?: SymbolDigitsMap): Promise<CtraderDeal[]> {
   const payload: Record<string, any> = {
     ctidTraderAccountId,
   };
@@ -760,15 +798,21 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
       symbolId: typeof symbolId === 'number' && Number.isFinite(symbolId) ? symbolId : undefined,
       tradeSide: deal.tradeSide === 1 ? 'buy' : 'sell',
       volume: Number(deal.filledVolume ?? deal.volume ?? 0) / 10000000,
-      price: Number(deal.executionPrice ?? deal.price ?? 0),
+      price: scalePrice(deal.executionPrice ?? deal.price ?? 0, symbolId, digitsById, deal.symbolName || tradeData.symbolName),
       profit: Number(deal.closePositionDetail?.grossProfit ?? deal.profit ?? 0) / 100,
       swap: Number(deal.closePositionDetail?.swap ?? deal.swap ?? 0) / 100,
       commission: Number(deal.commission ?? 0) / 100,
       openTimestamp: openTime ? new Date(openTime).toISOString() : '',
       closeTimestamp: closeTime ? new Date(closeTime).toISOString() : '',
-      stopLoss: deal.closePositionDetail?.stopLoss ? Number(deal.closePositionDetail.stopLoss) : undefined,
-      takeProfit: deal.closePositionDetail?.takeProfit ? Number(deal.closePositionDetail.takeProfit) : undefined,
-      entryPrice: deal.closePositionDetail?.entryPrice ? Number(deal.closePositionDetail.entryPrice) : undefined,
+      stopLoss: deal.closePositionDetail?.stopLoss
+        ? scalePrice(deal.closePositionDetail.stopLoss, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
+        : undefined,
+      takeProfit: deal.closePositionDetail?.takeProfit
+        ? scalePrice(deal.closePositionDetail.takeProfit, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
+        : undefined,
+      entryPrice: deal.closePositionDetail?.entryPrice
+        ? scalePrice(deal.closePositionDetail.entryPrice, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
+        : undefined,
     };
   });
 }
@@ -990,7 +1034,15 @@ export async function getTrader(ctidTraderAccountId: number, isDemo: boolean = t
   const data = await authenticatedRequest(ctidTraderAccountId, PT.TRADER_REQ, {
     ctidTraderAccountId,
   }, isDemo, { allowEnvironmentFallback: true });
-  return data.trader;
+  // ProtoOA monetary fields arrive in cents — normalize once at the boundary
+  // so every consumer (UI display, balance resolution) sees account currency.
+  const trader = data.trader || {};
+  return {
+    ...trader,
+    balance: trader.balance !== undefined ? Number(trader.balance) / 100 : undefined,
+    equity: trader.equity !== undefined ? Number(trader.equity) / 100 : undefined,
+    margin: trader.margin !== undefined ? Number(trader.margin) / 100 : undefined,
+  };
 }
 
 export async function getPendingOrders(ctidTraderAccountId: number, isDemo: boolean = true): Promise<CtraderOrder[]> {
