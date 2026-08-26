@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, HelpCircle, CalendarDays, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, CalendarDays, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
     DndContext,
     closestCenter,
@@ -65,7 +65,7 @@ interface DashboardProps {
     userProfile: UserProfile;
     onViewChange: (view: string) => void;
     eaSession?: EASession | null;
-    lastKnownBridgeBalance?: number | null;
+    lastKnownBridgeBalance?: import('../lib/bridgeBalance').StoredBridgeBalance | number | null;
     isBridgeOnline?: boolean;
     isLoading?: boolean;
     offlineQueue?: Trade[];
@@ -152,13 +152,6 @@ const StatCard = ({ label, value, subtext, trend, isDarkMode, icon: Icon, colorC
         <h3 className={`text-2xl font-bold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{value}</h3>
         <div className="flex items-center gap-2">
             <p className={`text-xs font-medium uppercase tracking-wider opacity-50 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{label}</p>
-                <Tooltip content={tooltip} isDarkMode={isDarkMode}>
-                    <HelpCircle 
-                        size={14} 
-                        onClick={onInfoClick}
-                        className="opacity-40 cursor-help hover:opacity-100 transition-opacity" 
-                    />
-                </Tooltip>
         </div>
         {subtext && <p className="text-xs text-zinc-500 mt-2">{subtext}</p>}
     </div>
@@ -494,16 +487,7 @@ const DailyBiasWidget = React.memo(({ isDarkMode, dailyBias, onUpdateBias, onInf
     return (
         <div className={`h-full p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-zinc-800 shadow-2xl' : 'bg-white border-slate-100 shadow-md'}`}>
             <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                    <h3 className="font-bold flex items-center gap-2"><Zap size={18} className="text-yellow-500" /> Daily Bias</h3>
-                    <Tooltip content="Track your daily market outlook to stay aligned with higher time-frame direction." isDarkMode={isDarkMode}>
-                        <HelpCircle 
-                            size={14} 
-                            onClick={onInfoClick}
-                            className="opacity-40 cursor-help hover:opacity-100 transition-opacity" 
-                        />
-                    </Tooltip>
-                </div>
+                <h3 className="font-bold flex items-center gap-2"><Zap size={18} className="text-yellow-500" /> Daily Bias</h3>
             </div>
             <div className="grid grid-cols-7 gap-2 flex-1 items-center">
                 {days.map(date => {

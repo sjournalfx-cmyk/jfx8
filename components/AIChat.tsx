@@ -452,7 +452,7 @@ interface AIChatProps {
   userProfile: UserProfile | null;
   dailyBias?: DailyBias[];
   eaSession?: EASession | null;
-  lastKnownBridgeBalance?: number | null;
+  lastKnownBridgeBalance?: import('../lib/bridgeBalance').StoredBridgeBalance | number | null;
   isBridgeOnline?: boolean;
   onAddNote?: (note: Note) => Promise<Note | undefined>;
   onOpenSettings?: () => void;

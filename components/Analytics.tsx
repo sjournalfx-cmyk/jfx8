@@ -265,7 +265,7 @@ interface AnalyticsProps {
   userProfile: UserProfile;
   onViewChange: (view: string) => void;
   eaSession?: EASession | null;
-  lastKnownBridgeBalance?: number | null;
+  lastKnownBridgeBalance?: import('../lib/bridgeBalance').StoredBridgeBalance | number | null;
   isBridgeOnline?: boolean;
   cashTransactions?: CashTransaction[];
   dailyPsychologyInsights?: PsychologyInsightsEntry | null;
@@ -320,8 +320,9 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             eaSession,
             lastKnownBridgeBalance,
             isBridgeOnline,
+            isDemoMode,
         });
-    }, [userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline, completedTrades]);
+    }, [userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline, completedTrades, isDemoMode]);
 
     const equityData = useMemo(() => {
         // Merge completed trades and cash transactions by timestamp

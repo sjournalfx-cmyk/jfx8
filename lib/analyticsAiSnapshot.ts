@@ -35,14 +35,16 @@ const buildEffectiveInitialBalance = (
   trades: Trade[],
   userProfile: UserProfile | null,
   eaSession?: EASession | null,
-  lastKnownBridgeBalance?: number | null,
-  isBridgeOnline = false
+  lastKnownBridgeBalance?: import('./bridgeBalance').StoredBridgeBalance | number | null,
+  isBridgeOnline = false,
+  isDemoMode = false
 ) => resolveBridgeBackedInitialBalance({
   trades,
   userProfile,
   eaSession,
   lastKnownBridgeBalance,
   isBridgeOnline,
+  isDemoMode,
 });
 
 export const buildAnalyticsAiSnapshot = (
@@ -50,13 +52,14 @@ export const buildAnalyticsAiSnapshot = (
   userProfile: UserProfile | null,
   dailyBias: DailyBias[] = [],
   eaSession?: EASession | null,
-  lastKnownBridgeBalance?: number | null,
-  isBridgeOnline = false
+  lastKnownBridgeBalance?: import('./bridgeBalance').StoredBridgeBalance | number | null,
+  isBridgeOnline = false,
+  isDemoMode = false
 ) => {
   const trades = [...rawTrades].sort((a, b) => getTradeDateTime(a).getTime() - getTradeDateTime(b).getTime());
   const stats = calculateStats(trades);
   const currencySymbol = userProfile?.currencySymbol || '$';
-  const effectiveInitialBalance = buildEffectiveInitialBalance(trades, userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline);
+  const effectiveInitialBalance = buildEffectiveInitialBalance(trades, userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline, isDemoMode);
   const currentBalance = round(effectiveInitialBalance + trades.reduce((sum, trade) => sum + getSafePnL(trade.pnl), 0));
 
   let runningBalance = effectiveInitialBalance;

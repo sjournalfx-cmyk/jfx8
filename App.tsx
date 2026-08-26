@@ -203,7 +203,7 @@ const {
   }, [isAuthenticated]);
 
   const analyticsSnapshot = useMemo(
-    () => buildAnalyticsAiSnapshot(activeTrades, activeUserProfile, activeDailyBias, activeEaSession, lastKnownBridgeBalance, isBridgeOnline),
+    () => buildAnalyticsAiSnapshot(activeTrades, activeUserProfile, activeDailyBias, activeEaSession, lastKnownBridgeBalance, isBridgeOnline, isDemoMode),
     [activeTrades, activeUserProfile, activeDailyBias, activeEaSession, lastKnownBridgeBalance, isBridgeOnline]
   );
   const [psychologyInsightsCache, setPsychologyInsightsCache] = useLocalStorage<PsychologyInsightsCache>(PSYCHOLOGY_INSIGHTS_STORAGE_KEY, {});
@@ -1006,6 +1006,7 @@ const onLogout = async () => {
     eaSession: activeEaSession,
     lastKnownBridgeBalance,
     isBridgeOnline,
+    isDemoMode,
   });
 
   const { date: sastDate } = getSASTDateTime();

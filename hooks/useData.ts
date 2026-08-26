@@ -15,7 +15,7 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
   const [dailyBias, setDailyBias] = useState<DailyBias[]>([]);
   const [cashTransactions, setCashTransactions] = useState<CashTransaction[]>([]);
   const [eaSession, setEASession] = useLocalStorage<EASession | null>(`jfx_ea_session_${userId}`, null);
-  const [lastKnownBridgeBalance, setLastKnownBridgeBalance] = useLocalStorage<number | null>(`jfx_last_bridge_balance_${userId}`, null);
+  const [lastKnownBridgeBalance, setLastKnownBridgeBalance] = useLocalStorage<import('../lib/bridgeBalance').StoredBridgeBalance | null>(`jfx_last_bridge_balance_${userId}`, null);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isBridgeOnline, setIsBridgeOnline] = useState(false);
@@ -344,9 +344,14 @@ const biasChannel = supabase
         if (response.ok) {
           const accData = await response.json();
           if (accData && accData.account && isActive) {
-            // Persist the last known balance so it survives disconnects
+            // Persist the last known balance so it survives disconnects —
+            // timestamped so stale snapshots expire (see bridgeBalance.ts).
             if (typeof accData.account.balance === 'number') {
-              setLastKnownBridgeBalance(accData.account.balance);
+              setLastKnownBridgeBalance({
+                v: 1,
+                balance: accData.account.balance,
+                capturedAt: new Date().toISOString(),
+              });
             }
             setEASession(prev => {
               const currentData = prev?.data || {
