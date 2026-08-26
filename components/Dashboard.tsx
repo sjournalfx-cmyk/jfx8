@@ -686,6 +686,17 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
             case 'equityCurve':
                 return <EquityCurveWidget trades={trades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={userProfile.currencySymbol} hideCurrentValue={!isFreeTier && trades.length === 0} isLoading={isLoading} />;
             case 'openPositions':
+                if (!userProfile.eaConnected) {
+                    // Stale cached sessions would show ghost positions — the
+                    // widget is only meaningful with an active bridge.
+                    return (
+                        <div className={`h-full p-6 rounded-2xl border flex flex-col items-center justify-center gap-2 ${isDarkMode ? 'bg-[#000000] border-zinc-800 shadow-2xl' : 'bg-white border-slate-100 shadow-md'}`}>
+                            <Activity size={22} className="text-zinc-600" />
+                            <p className={`text-sm font-bold ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>No active bridge connection</p>
+                            <p className={`text-xs ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>Connect Desktop Bridge to see live open positions.</p>
+                        </div>
+                    );
+                }
                 return (
                     <div className={`h-full p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-zinc-800 shadow-2xl' : 'bg-white border-slate-100 shadow-md'}`}>
                         <div className="flex items-center justify-between mb-4">
