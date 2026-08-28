@@ -39,7 +39,11 @@ function toVolumeCents(volume: number): number {
 }
 
 function hashToken(raw: string): string {
-  return createHash('sha256').update(raw).digest('hex');
+  try { return createHash('sha256').update(raw).digest('hex'); } catch (e: any) {
+    // Fallback: simple hex via Buffer if crypto fails (should not happen)
+    console.error('[trade] createHash failed', e?.message);
+    throw new Error('hash_failed: ' + (e?.message || String(e)));
+  }
 }
 
 interface WsSession {
@@ -204,13 +208,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 1. JFX Personal API Key (X-API-Key: jfx_pat_...) -> SECURE & RECOMMENDED
   // 2. Direct cTrader Access Token (Authorization: Bearer <raw_token>) -> BACKWARD COMPAT
   // ---------------------------------------------------------------------------
+  try {
   if (TOKEN_PATTERN.test(rawKey)) {
     if (!supabaseUrl || !serviceKey) {
       res.status(503).json({ error: 'Database service not configured' });
       return;
     }
 
-    const keyHash = hashToken(rawKey);
+    let keyHash: string;
+    try { keyHash = hashToken(rawKey); } catch (e: any) { res.status(500).json({ error: 'hash_failed', message: e?.message || String(e) }); return; }
     const keyQueryRes = await fetch(`${supabaseUrl}/rest/v1/api_keys?key_hash=eq.${keyHash}&select=id,user_id,scopes,expires_at`, {
       headers: {
         'apikey': serviceKey,
@@ -325,6 +331,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     accessToken = rawKey;
   } else {
     res.status(401).json({ error: 'Missing X-API-Key or Authorization header' });
+    return;
+  }
+  } catch (e: any) {
+    console.error('[trade] auth error', e);
+    if (!res.headersSent) res.status(500).json({ error: 'auth_failed', message: e?.message || String(e) });
     return;
   }
 
