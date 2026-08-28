@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import WebSocket from 'ws';
-import crypto from 'crypto';
+import { createHash } from 'crypto';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const TOKEN_PATTERN = /^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/;
@@ -39,7 +39,7 @@ function toVolumeCents(volume: number): number {
 }
 
 function hashToken(raw: string): string {
-  return crypto.createHash('sha256').update(raw).digest('hex');
+  return createHash('sha256').update(raw).digest('hex');
 }
 
 interface WsSession {
