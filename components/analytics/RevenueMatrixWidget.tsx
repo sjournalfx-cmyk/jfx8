@@ -50,33 +50,16 @@ export function RevenueMatrixWidget({
 
   const MAX_BLOCKS = 18;
 
+  const hasNoData = useMemo(() => {
+    return trades.filter((t) => t.result !== 'Pending' && t.pnl !== undefined).length === 0;
+  }, [trades]);
+
   // Process completed trades into 12 periods
   const matrixData: MatrixPeriodData[] = useMemo(() => {
     const closedTrades = trades.filter((t) => t.result !== 'Pending' && t.pnl !== undefined);
 
     if (closedTrades.length === 0) {
-      // Return normalized demo data if no trades are present
-      const maxVal = Math.max(...DEFAULT_DEMO_DATA.map((d) => Math.max(d.grossProfit, d.grossLoss)), 1000);
-      return DEFAULT_DEMO_DATA.map((d) => {
-        const netPnL = d.grossProfit - d.grossLoss;
-        const profitBlocks = d.grossProfit > 0 ? Math.min(MAX_BLOCKS, Math.max(1, Math.round((d.grossProfit / maxVal) * MAX_BLOCKS))) : 0;
-        const lossBlocks = d.grossLoss > 0 ? Math.min(MAX_BLOCKS, Math.max(1, Math.round((d.grossLoss / maxVal) * MAX_BLOCKS))) : 0;
-
-        return {
-          month: d.month,
-          year: d.year,
-          grossProfit: d.grossProfit,
-          grossLoss: d.grossLoss,
-          netPnL,
-          grossProfitStr: `+${currencySymbol}${d.grossProfit.toLocaleString()}`,
-          grossLossStr: `-${currencySymbol}${d.grossLoss.toLocaleString()}`,
-          profitFactor: d.grossLoss > 0 ? (d.grossProfit / d.grossLoss).toFixed(2) : 'N/A',
-          subBars: [
-            { profitBlocks, lossBlocks: 0 }, // Gross Profit Bar
-            { profitBlocks: 0, lossBlocks }  // Gross Loss Bar
-          ]
-        };
-      });
+      return [];
     }
 
     // Group real trades by selected period (Monthly / Weekly / Yearly)
@@ -158,8 +141,8 @@ export function RevenueMatrixWidget({
     });
   }, [trades, period, currencySymbol]);
 
-  const selectedIndex = Math.min(hoveredIndex !== null ? hoveredIndex : activeMonthIndex, matrixData.length - 1);
-  const currentPeriodData = matrixData[selectedIndex] || matrixData[0];
+  const selectedIndex = hasNoData ? 0 : Math.min(hoveredIndex !== null ? hoveredIndex : activeMonthIndex, Math.max(0, matrixData.length - 1));
+  const currentPeriodData = matrixData[selectedIndex] || { month: '—', year: new Date().getFullYear(), grossProfit: 0, grossLoss: 0, netPnL: 0, grossProfitStr: `+${currencySymbol}0`, grossLossStr: `-${currencySymbol}0`, profitFactor: '0.00', subBars: [{ profitBlocks: 0, lossBlocks: 0 }, { profitBlocks: 0, lossBlocks: 0 }] } as MatrixPeriodData;
 
   // Overall Total Metrics
   const totalGrossProfit = useMemo(() => matrixData.reduce((acc, curr) => acc + curr.grossProfit, 0), [matrixData]);
@@ -249,9 +232,19 @@ export function RevenueMatrixWidget({
         </div>
       </div>
 
-      {/* Dedicated Active Period Info Header Strip (Replaces Floating Tooltip) */}
-      <div
-        className={`w-full mb-4 px-4 py-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 transition-colors ${
+      {hasNoData ? (
+        <div className={`flex flex-col items-center justify-center py-16 px-6 rounded-2xl border border-dashed text-center ${isDarkMode ? 'border-zinc-800 bg-zinc-900/30 text-zinc-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${isDarkMode ? 'bg-zinc-900 text-zinc-500' : 'bg-slate-100 text-slate-400'}`}>
+            <BarChart2 size={22} />
+          </div>
+          <p className="text-sm font-black uppercase tracking-widest">No Data Available</p>
+          <p className="text-xs mt-1.5 max-w-[320px] leading-relaxed opacity-70">No closed trades yet. Log a trade to see your Gross Gains vs Gross Losses matrix here.</p>
+        </div>
+      ) : (
+        <>
+          {/* Dedicated Active Period Info Header Strip (Replaces Floating Tooltip) */}
+          <div
+            className={`w-full mb-4 px-4 py-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 transition-colors ${
           isDarkMode
             ? 'bg-zinc-900/50 border-zinc-800/80 text-zinc-200'
             : 'bg-slate-50 border-slate-200 text-slate-800'
@@ -444,6 +437,8 @@ export function RevenueMatrixWidget({
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

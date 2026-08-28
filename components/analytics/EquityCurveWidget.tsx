@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Trade } from '../../types';
-import { Tooltip } from '../ui/Tooltip';
-import { TrendingUp, Activity, HelpCircle } from 'lucide-react';
+import { TrendingUp, Activity } from 'lucide-react';
 
 interface EquityCurveWidgetProps {
     trades: Trade[];
@@ -106,16 +105,7 @@ export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [
                             <TrendingUp size={18} style={{ color: accentColor }} />
                         </div>
                         <div>
-                            <div className="flex items-center gap-2">
-                                <h3 className="font-bold text-base tracking-tight text-white">Equity Curve</h3>
-                                <Tooltip content="Visual representation of your account balance growth over time." isDarkMode={isDarkMode}>
-                                    <HelpCircle 
-                                        size={13}
-                                        onClick={onInfoClick}
-                                        className={`cursor-help ${isDarkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-slate-400 hover:text-slate-600'}`}
-                                    />
-                                </Tooltip>
-                            </div>
+                            <h3 className="font-bold text-base tracking-tight text-white">Equity Curve</h3>
                             <p className={`text-[10px] font-medium tracking-wider mt-0.5 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
                                 Account Value Over Time
                             </p>

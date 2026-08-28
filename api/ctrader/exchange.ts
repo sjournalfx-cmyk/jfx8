@@ -3,12 +3,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 
-// Vite deployments already use VITE_CTRADER_* values. Accept those legacy
-// names at the API boundary too, so a deployment does not fail after the OAuth
-// redirect merely because the variables were renamed for server use. New
-// deployments should still set the unprefixed CTRADER_* variables: a VITE_*
-// secret is bundled into the browser and must be rotated once clients no
-// longer depend on it.
 function getCredentials() {
   return {
     clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
@@ -16,9 +10,6 @@ function getCredentials() {
   };
 }
 
-// Exact-match allowlist for redirect_uri hosts (port stripped). Suffix matching
-// (e.g. "endsWith('.vercel.app')") and trusting the Host / x-forwarded-host
-// header are both rejected because they allow attackers to intercept OAuth codes.
 const DEFAULT_ALLOWED_REDIRECT_HOSTS = new Set([
   'localhost',
   '127.0.0.1',
@@ -43,17 +34,46 @@ function isAllowedRedirectUri(redirectUri: string): boolean {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
   if (!getAllowedRedirectHosts().has(parsed.hostname.toLowerCase())) return false;
-  // Bind the redirect to the app's own callback path so an attacker cannot
-  // point the code at an arbitrary path on an allowed host.
   return parsed.pathname === '/api/ctrader/callback';
 }
 
+async function persistTokenServerSide(
+  userId: string,
+  refreshToken: string,
+): Promise<void> {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceKey || !userId || !refreshToken) return;
+
+  try {
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/user_ctrader_tokens`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': serviceKey,
+          'Authorization': `Bearer ${serviceKey}`,
+          'Prefer': 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          refresh_token: refreshToken,
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    );
+    if (!response.ok) {
+      console.error('[cTrader] Failed to persist refresh token to DB, status:', response.status);
+    }
+  } catch (err) {
+    console.error('[cTrader] Exception persisting refresh token:', err instanceof Error ? err.message : err);
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // This endpoint is only called by the same-origin SPA. Keeping it
-  // dependency-free is intentional: a failed shared helper import prevents a
-  // Vercel Function from starting and surfaces as FUNCTION_INVOCATION_FAILED.
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
@@ -67,6 +87,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const code = req.query.code as string;
   const redirectUri = req.query.redirect_uri as string;
+  const authHeader = (req.headers['authorization'] || '') as string;
+  const supabaseJwt = authHeader.replace(/^Bearer\s+/i, '').trim();
 
   if (!code || !redirectUri) {
     res.status(400).json({ error: 'Missing code or redirect_uri' });
@@ -81,9 +103,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { clientId, clientSecret } = getCredentials();
   if (!clientId || !clientSecret) {
-    // This is a deployment configuration problem, not an unexpected function
-    // failure. Returning a clear response means the UI no longer masks it as
-    // an unexplained HTTP 500.
     const missing = [!clientId && 'CTRADER_CLIENT_ID', !clientSecret && 'CTRADER_CLIENT_SECRET']
       .filter(Boolean);
     console.error('[cTrader] Missing production OAuth configuration:', missing.join(', '));
@@ -112,8 +131,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!tokenRes.ok) {
       const errMsg = body?.description || body?.error_description || body?.error || rawText;
-      // Log the status code only — upstream response bodies can contain
-      // sensitive fragments and must not end up in server logs.
       console.error('cTrader exchange HTTP error:', tokenRes.status);
       res.status(502).json({
         error: errMsg || 'Token exchange failed',
@@ -123,7 +140,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    // cTrader sometimes returns HTTP 200 with an errorCode field
     if (body.errorCode) {
       const errMsg = body.description || body.errorCode;
       console.error('cTrader exchange errorCode:', body.errorCode, body.description);
@@ -136,13 +152,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    // Store the long-lived refresh token in an httpOnly cookie so it is not
-    // readable by JavaScript (mitigates XSS token theft). The access token is
-    // returned to the client and kept in memory only.
     if (body.refreshToken) {
       res.setHeader('Set-Cookie', [
         `${REFRESH_COOKIE}=${encodeURIComponent(String(body.refreshToken))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
       ]);
+
+      if (supabaseJwt) {
+        try {
+          const [, payloadB64] = supabaseJwt.split('.');
+          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+          const userId = payload.sub as string | undefined;
+          if (userId) {
+            void persistTokenServerSide(userId, String(body.refreshToken));
+          }
+        } catch {}
+      }
     }
 
     res.json({

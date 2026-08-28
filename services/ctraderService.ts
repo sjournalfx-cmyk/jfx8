@@ -1,4 +1,5 @@
 import { Candle, EADeal, EAPosition } from '../types';
+import { supabase } from '../lib/supabase';
 
 const CTRADER_ID_BASE = 'https://id.ctrader.com';
 const WS_DEMO = 'wss://demo.ctraderapi.com:5036';
@@ -89,7 +90,7 @@ export interface CtraderPosition {
   takeProfit?: number;
 }
 
-const SCOPE = 'accounts';
+const SCOPE = 'trading'; // cTrader OAuth scope: trading includes accounts + trade execution (was 'accounts' → read-only, caused TRADE permission required)
 
 // ------------------------------------------------------------------
 // Token storage — memory only.
@@ -172,11 +173,17 @@ async function refreshTokensFromCookie(): Promise<boolean> {
 }
 
 /** Return a valid token, silently refreshing from the httpOnly cookie when needed. */
-async function getTokens(): Promise<{ accessToken: string; expiresAt: number } | null> {
+export async function getTokens(): Promise<{ accessToken: string; expiresAt: number } | null> {
   const cached = getStoredTokens();
   if (cached) return cached;
   const refreshed = await refreshTokensFromCookie();
   return refreshed ? getStoredTokens() : null;
+}
+
+/** Returns the active cTrader access token string for AI agent API use. */
+export async function getActiveAccessToken(): Promise<string | null> {
+  const t = await getTokens();
+  return t ? t.accessToken : null;
 }
 
 let wsDemo: WebSocket | null = null;
@@ -460,7 +467,12 @@ export function getAuthorizeUrl(): string {
 export async function exchangeCode(code: string): Promise<{ ok: boolean; error?: string }> {
   const redirectUri = `${window.location.origin}/api/ctrader/callback`;
   try {
-    const res = await fetch(`/api/ctrader/exchange?code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}`);
+    const sessionRes = await supabase.auth.getSession();
+    const jwt = sessionRes?.data?.session?.access_token;
+    const headers: Record<string, string> = {};
+    if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
+
+    const res = await fetch(`/api/ctrader/exchange?code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}`, { headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = data?.error || data?.errorCode || `HTTP ${res.status}`;
@@ -1064,47 +1076,90 @@ export async function getPendingOrders(ctidTraderAccountId: number, isDemo: bool
   });
 }
 
+/**
+ * Opens a new order on a cTrader account.
+ *
+ * Supports market (orderType 1), limit (2), stop (3), and stop-limit (4) orders.
+ * Volume is in lots (1 lot = 100,000 units). Optional stopLoss / takeProfit are
+ * absolute prices (e.g. 1.08000 for EURUSD).
+ *
+ * ProtoOA: ProtoOANewOrderReq (payloadType 2106)
+ */
 export async function createNewOrder(
   ctidTraderAccountId: number,
   symbolId: number,
   tradeSide: 'buy' | 'sell',
   volume: number,
-  limitPrice?: number,
-  stopPrice?: number,
-  isDemo: boolean = true
+  optionsOrLimitPrice?: {
+    limitPrice?: number;
+    stopPrice?: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    isDemo?: boolean;
+    comment?: string;
+  } | number,
+  legacyStopPrice?: number,
+  legacyIsDemo?: boolean
 ): Promise<any> {
+  const isOptionsObj = typeof optionsOrLimitPrice === 'object' && optionsOrLimitPrice !== null;
+  const limitPrice = isOptionsObj ? optionsOrLimitPrice.limitPrice : optionsOrLimitPrice;
+  const stopPrice = isOptionsObj ? optionsOrLimitPrice.stopPrice : legacyStopPrice;
+  const stopLoss = isOptionsObj ? optionsOrLimitPrice.stopLoss : undefined;
+  const takeProfit = isOptionsObj ? optionsOrLimitPrice.takeProfit : undefined;
+  const isDemo = isOptionsObj ? (optionsOrLimitPrice.isDemo ?? true) : (legacyIsDemo ?? true);
+  const comment = isOptionsObj ? optionsOrLimitPrice.comment : undefined;
+
   let orderType = 1; // 1=MARKET, 2=LIMIT, 3=STOP, 4=STOP_LIMIT
   if (limitPrice && stopPrice) orderType = 4;
   else if (limitPrice) orderType = 2;
   else if (stopPrice) orderType = 3;
+
+  // Auto-detect lots vs units: volumes >= 500 are units; < 500 are lots.
+  const volumeCents = volume >= 500 ? unitsToCtraderVolume(volume) : lotsToCtraderVolume(volume);
 
   const payload: Record<string, any> = {
     ctidTraderAccountId,
     symbolId,
     orderType,
     tradeSide: tradeSide === 'buy' ? 1 : 2,
-    volume: unitsToCtraderVolume(volume),
+    volume: volumeCents,
   };
 
   if (limitPrice) payload.limitPrice = limitPrice;
   if (stopPrice) payload.stopPrice = stopPrice;
+  if (stopLoss) payload.stopLoss = stopLoss;
+  if (takeProfit) payload.takeProfit = takeProfit;
+  if (comment) payload.comment = comment;
 
   return authenticatedRequest(ctidTraderAccountId, PT.NEW_ORDER_REQ, payload, isDemo);
 }
 
+/**
+ * Closes an open position, fully or partially.
+ *
+ * volume: how many lots (e.g. 0.01) or units (e.g. 1000) to close.
+ *
+ * ProtoOA: ProtoOAClosePositionReq (payloadType 2111)
+ */
 export async function closePosition(
   ctidTraderAccountId: number,
   positionId: number,
   volume: number,
   isDemo: boolean = true
 ): Promise<any> {
+  const volumeCents = volume >= 500 ? unitsToCtraderVolume(volume) : lotsToCtraderVolume(volume);
   return authenticatedRequest(ctidTraderAccountId, PT.CLOSE_POSITION_REQ, {
     ctidTraderAccountId,
     positionId,
-    volume: lotsToCtraderVolume(volume),
+    volume: volumeCents,
   }, isDemo);
 }
 
+/**
+ * Cancels a pending (limit/stop) order.
+ *
+ * ProtoOA: ProtoOACancelOrderReq (payloadType 2108)
+ */
 export async function cancelOrder(
   ctidTraderAccountId: number,
   orderId: number,
@@ -1114,6 +1169,78 @@ export async function cancelOrder(
     ctidTraderAccountId,
     orderId,
   }, isDemo);
+}
+
+/**
+ * Modifies the Stop Loss and/or Take Profit on an open position.
+ *
+ * Prices must be absolute (e.g. 1.08000 for EURUSD), not relative pips.
+ * Pass undefined to leave an existing SL or TP unchanged, or 0 to remove it.
+ *
+ * ProtoOA: ProtoOAAmendPositionSLTPReq (payloadType 2110)
+ */
+export async function amendPositionSltp(
+  ctidTraderAccountId: number,
+  positionId: number,
+  options: {
+    stopLoss?: number;
+    takeProfit?: number;
+    guaranteedStopLoss?: boolean;
+    isDemo?: boolean;
+  } = {}
+): Promise<any> {
+  const { stopLoss, takeProfit, guaranteedStopLoss = false, isDemo = true } = options;
+
+  const payload: Record<string, any> = {
+    ctidTraderAccountId,
+    positionId,
+    guaranteedStopLoss,
+  };
+
+  // Only include SL/TP when explicitly provided.
+  // Passing 0 removes the level; omitting the field leaves it unchanged.
+  if (stopLoss !== undefined) payload.stopLoss = stopLoss;
+  if (takeProfit !== undefined) payload.takeProfit = takeProfit;
+
+  return authenticatedRequest(ctidTraderAccountId, PT.AMEND_POSITION_SLTP_REQ, payload, isDemo);
+}
+
+/**
+ * Modifies a pending (limit/stop) order — volume, prices, SL, or TP.
+ *
+ * Supply only the fields you want to change. Unspecified optional fields are
+ * left at their current values by the cTrader backend.
+ *
+ * ProtoOA: ProtoOAAmendOrderReq (payloadType 2109)
+ */
+export async function amendOrder(
+  ctidTraderAccountId: number,
+  orderId: number,
+  options: {
+    volumeLots?: number;
+    limitPrice?: number;
+    stopPrice?: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    expirationTimestamp?: number;
+    isDemo?: boolean;
+  } = {}
+): Promise<any> {
+  const { volumeLots, limitPrice, stopPrice, stopLoss, takeProfit, expirationTimestamp, isDemo = true } = options;
+
+  const payload: Record<string, any> = {
+    ctidTraderAccountId,
+    orderId,
+  };
+
+  if (volumeLots !== undefined) payload.volume = lotsToCtraderVolume(volumeLots);
+  if (limitPrice !== undefined) payload.limitPrice = limitPrice;
+  if (stopPrice !== undefined) payload.stopPrice = stopPrice;
+  if (stopLoss !== undefined) payload.stopLoss = stopLoss;
+  if (takeProfit !== undefined) payload.takeProfit = takeProfit;
+  if (expirationTimestamp !== undefined) payload.expirationTimestamp = expirationTimestamp;
+
+  return authenticatedRequest(ctidTraderAccountId, PT.AMEND_ORDER_REQ, payload, isDemo);
 }
 
 export async function getSymbolsList(ctidTraderAccountId: number, isDemo: boolean = true): Promise<any[]> {

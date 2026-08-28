@@ -10,11 +10,35 @@ function getCredentials() {
   };
 }
 
+async function updateStoredRefreshToken(
+  userId: string,
+  newRefreshToken: string,
+): Promise<void> {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceKey || !userId || !newRefreshToken) return;
+
+  try {
+    await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({
+        refresh_token: newRefreshToken,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch (err) {
+    console.error('[cTrader] Error updating stored refresh token:', err);
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Same-origin endpoint; do not depend on the shared CORS helper at function
-  // startup because a failed import makes the whole Vercel Function return 500.
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
@@ -26,8 +50,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // The refresh token is only ever read from the httpOnly cookie set during the
-  // exchange — never from the request body, which a script attacker could supply.
   const refreshToken = (req.cookies?.[REFRESH_COOKIE] || '') as string;
   if (!refreshToken) {
     res.status(401).json({ error: 'Missing cTrader session' });
@@ -39,6 +61,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(503).json({ error: 'cTrader OAuth credentials are not configured for this deployment' });
     return;
   }
+
+  const authHeader = (req.headers['authorization'] || '') as string;
+  const supabaseJwt = authHeader.replace(/^Bearer\s+/i, '').trim();
 
   try {
     const body = new URLSearchParams({
@@ -55,8 +80,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!tokenRes.ok) {
-      // Log the status code only — upstream response bodies can contain
-      // sensitive fragments and must not end up in server logs.
       console.error('cTrader refresh failed:', tokenRes.status);
       res.status(502).json({
         error: 'Token refresh failed',
@@ -67,11 +90,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const tokens = await tokenRes.json();
 
-    // Rotate the refresh cookie if cTrader issued a new one.
     if (tokens.refresh_token) {
       res.setHeader('Set-Cookie', [
         `${REFRESH_COOKIE}=${encodeURIComponent(String(tokens.refresh_token))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
       ]);
+
+      if (supabaseJwt) {
+        try {
+          const [, payloadB64] = supabaseJwt.split('.');
+          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+          const userId = payload.sub as string | undefined;
+          if (userId) {
+            void updateStoredRefreshToken(userId, String(tokens.refresh_token));
+          }
+        } catch {}
+      }
     }
 
     res.json({

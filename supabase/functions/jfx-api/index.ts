@@ -14,9 +14,16 @@ const json = (body: unknown, status = 200, headers: HeadersInit = {}) => new Res
 
 const cors = (req: Request) => {
   const origin = req.headers.get('origin') ?? ''
-  return APP_ORIGINS.has(origin)
-    ? { 'access-control-allow-origin': origin, 'vary': 'Origin', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS' }
-    : {}
+  if (APP_ORIGINS.has(origin)) {
+    return { 'access-control-allow-origin': origin, 'vary': 'Origin', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS' }
+  }
+  // API-key routes are server-to-server (no Origin) or from arbitrary agent UIs.
+  // Allow * for API consumers while keeping tight checks for browser cookie flows.
+  const hasApiKey = Boolean(req.headers.get('x-api-key')?.trim())
+  if (!origin || hasApiKey) {
+    return { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, x-api-key, authorization', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS' }
+  }
+  return {}
 }
 
 const fingerprint = async (token: string) => {
@@ -74,9 +81,17 @@ Deno.serve(async (req) => {
   const { data: allowed, error: rateError } = await admin.rpc('consume_api_key_rate_limit', { p_user_id: key.user_id, p_key_id: key.id })
   if (rateError || !allowed) return respond({ error: 'rate_limited' }, 429, { 'retry-after': '60' })
 
-  const requireScope = async (scope: string) => key!.scopes.includes(scope)
+  const hasScope = (need: string) => {
+    const scopes = key!.scopes || []
+    if (scopes.includes(need)) return true
+    // Imply read from write for ergonomic keys (trades:write => trades:read, notes:write => notes:read)
+    if (need === 'trades:read' && scopes.includes('trades:write')) return true
+    if (need === 'notes:read' && scopes.includes('notes:write')) return true
+    return false
+  }
+  const requireScope = async (scope: string) => hasScope(scope)
     ? null
-    : respond({ error: 'insufficient_scope', need: scope }, 403)
+    : respond({ error: 'insufficient_scope', need: scope, have: key!.scopes }, 403)
   const touch = () => admin.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', key!.id)
 
   try {
@@ -182,7 +197,11 @@ Deno.serve(async (req) => {
       void touch(); return respond(data ?? { phase: 'disconnected' })
     }
     if (path === '/v1/positions' && req.method === 'GET') {
-      const denied = await requireScope('bridge:read'); if (denied) return denied
+      // MT5 bridge positions: allow bridge:read primary, but also accept trades:read/write for convenience
+      // (agents often granted trading scopes and expect positions to work)
+      if (!hasScope('bridge:read') && !hasScope('trades:read')) {
+        return respond({ error: 'insufficient_scope', need: 'bridge:read', have: key!.scopes, hint: 'bridge:read or trades:read required' }, 403)
+      }
       const { data, error } = await admin.from('mt_trades').select('*').eq('user_id', key.user_id).eq('is_open', true).order('open_time', { ascending: false }); if (error) throw error
       void touch(); return respond({ data })
     }
