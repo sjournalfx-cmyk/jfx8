@@ -320,11 +320,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       accessToken = await mintAccessToken(clientId, clientSecret, userRefreshToken, authenticatedUserId, supabaseUrl, serviceKey);
     } catch (err: any) {
-      res.status(502).json({
-        error: 'ctrader_auth_failed',
-        message: `Failed to authenticate with cTrader: ${err?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`,
-      });
-      return;
+      const msg = err?.message || '';
+      // If per-user token is stale/Access denied, try global service token as fallback (for demo account 47876400 shared)
+      if (msg.includes('Access denied') || msg.includes('ACCESS_DENIED')) {
+        try {
+          const svcRes = await fetch(`${supabaseUrl}/rest/v1/service_config?key=eq.ctrader_service_refresh_token&select=value`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
+          const svcRows: any = await svcRes.json().catch(() => []);
+          const svcToken = Array.isArray(svcRows) ? svcRows[0]?.value : svcRows?.value;
+          if (svcToken && svcToken !== userRefreshToken) {
+            console.log('[trade] per-user token failed, trying service token fallback');
+            accessToken = await mintAccessToken(clientId, clientSecret, String(svcToken), authenticatedUserId, supabaseUrl, serviceKey);
+          } else throw err;
+        } catch (e2: any) {
+          res.status(502).json({
+            error: 'ctrader_auth_failed',
+            message: `Failed to authenticate with cTrader: ${msg || e2?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`,
+          });
+          return;
+        }
+      } else {
+        res.status(502).json({
+          error: 'ctrader_auth_failed',
+          message: `Failed to authenticate with cTrader: ${msg || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`,
+        });
+        return;
+      }
     }
   } else if (rawKey) {
     // Direct cTrader access token

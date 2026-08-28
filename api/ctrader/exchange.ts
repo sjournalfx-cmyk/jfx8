@@ -159,8 +159,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (supabaseJwt) {
         try {
-          const [, payloadB64] = supabaseJwt.split('.');
-          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+          const parts2 = supabaseJwt.split('.');
+          const pb64 = parts2[1] || '';
+          let payload: any = {};
+          try { payload = JSON.parse(Buffer.from(pb64, 'base64url').toString('utf8')); } catch { try { const pad = pb64 + '='.repeat((4 - pb64.length % 4) % 4); const b64 = pad.replace(/-/g, '+').replace(/_/g, '/'); payload = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); } catch {} }
           const userId = payload.sub as string | undefined;
           if (userId) {
             void persistTokenServerSide(userId, String(body.refreshToken));
