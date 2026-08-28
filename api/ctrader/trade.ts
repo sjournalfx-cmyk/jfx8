@@ -7,10 +7,10 @@ const TOKEN_PATTERN = /^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/;
 
 function getCredentials() {
   return {
-    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
-    clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '',
-    supabaseUrl: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '',
-    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    clientId: (process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '').trim(),
+    clientSecret: (process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '').trim(),
+    supabaseUrl: (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim().replace(/\/$/, ''),
+    serviceKey: (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
   };
 }
 
