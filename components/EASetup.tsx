@@ -170,8 +170,87 @@ interface MethodChoiceProps {
     isDemoMode?: boolean;
 }
 
+const CTRADER_BROKERS: { name: string; logo: string; minDeposit: string; maxLeverage: string; rating?: string; reviews?: string; tags: string[] }[] = [
+    { name: 'FxPro', logo: '/brokers/ctrader/fxpro.png', minDeposit: '$100', maxLeverage: '1:30', rating: 'Excellent', reviews: '771', tags: ['Local choice', 'Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Pepperstone', logo: '/brokers/ctrader/pepperstone.png', minDeposit: '$0', maxLeverage: '1:30', rating: 'Excellent', reviews: '3282', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Fusion Markets', logo: '/brokers/ctrader/fusionmarkets.png', minDeposit: '$0', maxLeverage: '1:500', rating: 'Excellent', reviews: '6559', tags: ['Local choice', 'Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'IC Markets', logo: '/brokers/ctrader/icmarkets.png', minDeposit: '$200', maxLeverage: '1:1000', rating: 'Excellent', reviews: '52175', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Widgets', 'Crypto deposits'] },
+    { name: 'BlackBull Markets', logo: '/brokers/ctrader/blackbullmarkets.png', minDeposit: '$0', maxLeverage: '1:500', rating: 'Excellent', reviews: '3195', tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Blueberry Markets', logo: '/brokers/ctrader/blueberrymarkets.png', minDeposit: '$100', maxLeverage: '1:500', rating: 'Excellent', reviews: '3193', tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'FP Markets', logo: '/brokers/ctrader/fpmarkets.png', minDeposit: '$100', maxLeverage: '1:500', rating: 'Excellent', reviews: '10072', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Varianse', logo: '/brokers/ctrader/varianse.png', minDeposit: '$100', maxLeverage: '1:500', rating: 'Good', reviews: '30', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Widgets', 'Crypto deposits'] },
+    { name: 'AUS Group', logo: '/brokers/ctrader/ausgroup.png', minDeposit: '$100', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Asset Bridge', logo: '/brokers/ctrader/assetbridge.png', minDeposit: '$50', maxLeverage: '1:200', rating: 'Good', reviews: '1', tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'FPM Trading', logo: '/brokers/ctrader/fpmtrading.png', minDeposit: '$200', maxLeverage: '1:500',   tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'OpoFinance', logo: '/brokers/ctrader/opofinance.png', minDeposit: '$500', maxLeverage: '1:500', rating: 'Excellent', reviews: '543', tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Scandinavian Capital Markets', logo: '/brokers/ctrader/scm.png', minDeposit: '$25', maxLeverage: '1:100', rating: 'Excellent', reviews: '64', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Errante Securities', logo: '/brokers/ctrader/errantesecurities.png', minDeposit: '$50', maxLeverage: '1:1000', rating: 'Excellent', reviews: '59', tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'TopFX', logo: '/brokers/ctrader/topfx.png', minDeposit: '$50', maxLeverage: '1:1000', rating: 'Excellent', reviews: '464', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Triumph FX', logo: '/brokers/ctrader/triumphfxcy.png', minDeposit: '$100', maxLeverage: '1:1000',   tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'CRX', logo: '/brokers/ctrader/crx.png', minDeposit: '$0', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Wantage Markets', logo: '/brokers/ctrader/wantagemarkets.png', minDeposit: '$500', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Crypto deposits'] },
+    { name: 'Traders Way', logo: '/brokers/ctrader/tradersway.png', minDeposit: '$10', maxLeverage: '1:1000', rating: 'Excellent', reviews: '66', tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'FIBO', logo: '/brokers/ctrader/fibo.png', minDeposit: '$250', maxLeverage: '1:400',   tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Total FX', logo: '/brokers/ctrader/totalfx.png', minDeposit: '$500', maxLeverage: '1:50', rating: 'Good', reviews: '56', tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Tradona Markets', logo: '/brokers/ctrader/tradonamarkets.png', minDeposit: '$10', maxLeverage: '1:1000', rating: 'Excellent', reviews: '18', tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Skilling', logo: '/brokers/ctrader/skilling.png', minDeposit: '$500', maxLeverage: '1:30', rating: 'Excellent', reviews: '423', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'GoMarkets', logo: '/brokers/ctrader/gomarkets.png', minDeposit: '$0', maxLeverage: '1:500', rating: 'Excellent', reviews: '706', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'APFX', logo: '/brokers/ctrader/apfx.png', minDeposit: '$20', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Crypto deposits'] },
+    { name: 'RyoEx', logo: '/brokers/ctrader/ryoex.png', minDeposit: '$10', maxLeverage: '1:2000', rating: 'Excellent', reviews: '16', tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Dar Al Dahab', logo: '/brokers/ctrader/daraldahab.png', minDeposit: '$100', maxLeverage: '1:30',   tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'M4Markets', logo: '/brokers/ctrader/m4markets.png', minDeposit: '$5', maxLeverage: '1:5000', rating: 'Excellent', reviews: '140', tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Legacy Global Bank', logo: '/brokers/ctrader/legacyglobalbank.png', minDeposit: '$10', maxLeverage: '1:500', rating: 'Excellent', reviews: '23', tags: ['Copy unavailable', 'Crypto deposits'] },
+    { name: 'Dominion Markets', logo: '/brokers/ctrader/dominionmarkets.png', minDeposit: '$250', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Jade Forex', logo: '/brokers/ctrader/jadeforex.png', minDeposit: '$250', maxLeverage: '1:200',   tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Qartal Markets', logo: '/brokers/ctrader/qartalmarkets.png', minDeposit: '$500', maxLeverage: '1:500', rating: 'Good', reviews: '65', tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'LiteFinance', logo: '/brokers/ctrader/litefinance.png', minDeposit: '$50', maxLeverage: '1:1000', rating: 'Excellent', reviews: '612', tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Inzo', logo: '/brokers/ctrader/inzo.png', minDeposit: '$200', maxLeverage: '1:500',   tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Niivesh', logo: '/brokers/ctrader/niivesh.png', minDeposit: '$100', maxLeverage: '1:500', rating: 'Excellent', reviews: '15', tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Front Broker', logo: '/brokers/ctrader/frontbroker.png', minDeposit: '$250', maxLeverage: '1:500', rating: 'Good', reviews: '13', tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Quantum Capital Global', logo: '/brokers/ctrader/quantumcapitalglobal.png', minDeposit: '$1', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'TCrater', logo: '/brokers/ctrader/tcrater.png', minDeposit: '$10', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Ruby Star Gold', logo: '/brokers/ctrader/rubystargold.png', minDeposit: '$0', maxLeverage: '1:1',   tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Purple Trading', logo: '/brokers/ctrader/purpletrading.png', minDeposit: '$0', maxLeverage: '1:500', rating: 'Excellent', reviews: '111', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'GCI', logo: '/brokers/ctrader/gci.png', minDeposit: '$500', maxLeverage: '1:500', rating: 'Good', reviews: '2', tags: ['Copy unavailable', 'Cloud cBots', 'Widgets', 'Crypto deposits'] },
+    { name: 'Dak Markets Global', logo: '/brokers/ctrader/dakmarketsglobal.png', minDeposit: '$250', maxLeverage: '1:500', rating: 'Excellent', reviews: '7', tags: ['Copy unavailable', 'Cloud cBots', 'Widgets', 'Crypto deposits'] },
+    { name: 'Virex Market', logo: '/brokers/ctrader/virexmarket.png', minDeposit: '$50', maxLeverage: '1:400',   tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'FX Oak', logo: '/brokers/ctrader/fxoak.png', minDeposit: '$250', maxLeverage: '1:500',   tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Axiory', logo: '/brokers/ctrader/axiory.png', minDeposit: '$10', maxLeverage: '1:2000', rating: 'Good', reviews: '63', tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'AUTU', logo: '/brokers/ctrader/autu.png', minDeposit: '$100', maxLeverage: '1:500', rating: 'Excellent', reviews: '5', tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'FX Pig', logo: '/brokers/ctrader/fxpig.png', minDeposit: '$200', maxLeverage: '1:500',   tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'TRDP', logo: '/brokers/ctrader/trdp.png', minDeposit: '$10', maxLeverage: '1:200',   tags: ['Copy unavailable', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Tradeview Markets', logo: '/brokers/ctrader/tradeviewmarkets.png', minDeposit: '$100', maxLeverage: '1:500', rating: 'Excellent', reviews: '437', tags: ['Copy available', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'Vittaverse', logo: '/brokers/ctrader/vittaverse.png', minDeposit: '$15', maxLeverage: '1:2000', rating: 'Good', reviews: '70', tags: ['Copy available', 'Cloud cBots', 'Crypto deposits'] },
+    { name: 'Geldbeat', logo: '/brokers/ctrader/geldbeat.png', minDeposit: '$10', maxLeverage: '1:1000',   tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+    { name: 'EPlanet Brokers', logo: '/brokers/ctrader/eplanetbrokers.png', minDeposit: '$100', maxLeverage: '1:30',   tags: ['Copy unavailable', 'Cloud cBots', 'Widgets', 'Crypto deposits'] },
+    { name: 'Klas Trading', logo: '/brokers/ctrader/klastrading.png', minDeposit: '$100', maxLeverage: '1:200',   tags: ['Copy unavailable', 'Cloud cBots', 'Branded apps', 'Crypto deposits'] },
+];
+
+const BrokerLogo: React.FC<{ broker: typeof CTRADER_BROKERS[number] }> = ({ broker }) => {
+    const [failed, setFailed] = useState(false);
+    if (failed) {
+        return <span className="text-[11px] font-black text-[#FF4F00]">{broker.name.slice(0, 2).toUpperCase()}</span>;
+    }
+    return (
+        <img
+            src={broker.logo}
+            alt={broker.name}
+            loading="lazy"
+            className="w-full h-full object-contain"
+            onError={() => setFailed(true)}
+        />
+    );
+};
+
 const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, isDarkMode, isDemoMode = false }) => {
     const csvInputRef = useRef<HTMLInputElement>(null);
+    const [showCtraderBrokers, setShowCtraderBrokers] = useState(false);
+    const [brokerQuery, setBrokerQuery] = useState('');
+    const filteredBrokers = useMemo(() => {
+        const q = brokerQuery.trim().toLowerCase();
+        if (!q) return CTRADER_BROKERS;
+        return CTRADER_BROKERS.filter(b => b.name.toLowerCase().includes(q));
+    }, [brokerQuery]);
     const options = [
         // Desktop Bridge omitted in demo mode — demo needs no terminal connection.
         ...(!isDemoMode ? [{
@@ -273,23 +352,26 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                 {/* Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {options.map((opt, idx) => (
-                        <button
+                        <div
                             key={opt.id}
+                            role="button"
+                            tabIndex={0}
                             onClick={() => void handleCardClick(opt)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void handleCardClick(opt); } }}
                             style={{
                                 animationDelay: `${idx * 150}ms`,
                                 animationFillMode: 'both'
                             } as React.CSSProperties}
-                            className={`group relative text-left w-full rounded-3xl border bg-black/60 backdrop-blur-xl p-6 lg:p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 ${
+                            className={`group relative text-left w-full rounded-3xl border bg-[#000000] p-6 lg:p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 cursor-pointer ${
                                 opt.id === 'bridge'
                                     ? 'border-white/10 hover:border-[#FF4F01]/40'
                                     : opt.id === 'ctrader'
                                     ? 'border-white/10 hover:border-[#FF4F00]/40'
                                     : 'border-white/10 hover:border-[#8B5CF6]/40'
-                            } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-white/10`}
+                            }`}
                         >
                             {/* Content */}
-                            <div className="relative z-10">
+                            <div className="relative z-10 flex flex-col h-full">
                                 {/* Icon */}
                                 <div
                                     className="w-12 h-12 lg:w-14 lg:h-14 rounded-2xl flex items-center justify-center mb-4 lg:mb-6"
@@ -325,23 +407,39 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                                     ))}
                                 </ul>
 
-                                {/* CTA */}
-                                <div
-                                    className={`inline-flex items-center gap-2 px-4 py-2 lg:px-5 lg:py-2.5 rounded-xl text-xs lg:text-sm font-semibold transition-all duration-300 ${
-                                        opt.id === 'csv'
-                                            ? 'bg-[#8B5CF6] text-white border border-[#8B5CF6] group-hover:gap-3'
-                                            : 'text-white group-hover:gap-3'
-                                    }`}
-                                    style={opt.id !== 'csv' ? { backgroundColor: opt.accent } : undefined}
-                                >
-                                    Get Started
-                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <line x1="5" y1="12" x2="19" y2="12" />
-                                        <polyline points="12 5 19 12 12 19" />
-                                    </svg>
+                                {/* CTA row */}
+                                <div className="mt-auto flex flex-col gap-3">
+                                    <div
+                                        className={`inline-flex items-center gap-2 px-4 py-2 lg:px-5 lg:py-2.5 rounded-xl text-xs lg:text-sm font-semibold transition-all duration-300 w-fit ${
+                                            opt.id === 'csv'
+                                                ? 'bg-[#8B5CF6] text-white border border-[#8B5CF6] group-hover:gap-3'
+                                                : 'text-white group-hover:gap-3'
+                                        }`}
+                                        style={opt.id !== 'csv' ? { backgroundColor: opt.accent } : undefined}
+                                    >
+                                        Get Started
+                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <line x1="5" y1="12" x2="19" y2="12" />
+                                            <polyline points="12 5 19 12 12 19" />
+                                        </svg>
+                                    </div>
+                                    {opt.id === 'ctrader' && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setBrokerQuery(''); setShowCtraderBrokers(true); }}
+                                            className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-zinc-400 hover:text-white transition-colors w-fit -ml-1 px-1 py-1 rounded-lg hover:bg-white/5"
+                                        >
+                                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <circle cx="12" cy="12" r="10" />
+                                                <path d="M12 16v-4" />
+                                                <path d="M12 8h.01" />
+                                            </svg>
+                                            See available brokers
+                                            <svg className="w-3 h-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                                        </button>
+                                    )}
                                 </div>
                             </div>
-                        </button>
+                        </div>
                     ))}
                 </div>
 
@@ -353,6 +451,91 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                     onChange={handleCsvImport}
                 />
             </div>
+
+            {/* cTrader brokers drawer */}
+            {showCtraderBrokers && (
+                <div className="fixed inset-0 z-[100] flex justify-end">
+                    <div className="absolute inset-0 bg-black/60" onClick={() => setShowCtraderBrokers(false)} />
+                    <div className="relative w-full max-w-[420px] h-full bg-[#000000] border-l border-white/10 flex flex-col shadow-2xl">
+                        {/* header */}
+                        <div className="p-6 border-b border-white/10 shrink-0">
+                            <div className="flex items-start justify-between gap-4 mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-11 h-11 rounded-xl bg-transparent flex items-center justify-center shrink-0 overflow-hidden">
+                                        <img src="/icon3.jpeg" alt="cTrader" className="w-full h-full object-contain" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-white font-black tracking-tight leading-none">cTrader Brokers</h3>
+                                        <p className="text-[11px] text-zinc-500 mt-1">Any broker below connects via cTrader ID OAuth.</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setShowCtraderBrokers(false)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white shrink-0">
+                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                                </button>
+                            </div>
+                            <div className="relative">
+                                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                                <input
+                                    autoFocus
+                                    value={brokerQuery}
+                                    onChange={(e) => setBrokerQuery(e.target.value)}
+                                    placeholder="Search broker..."
+                                    className="w-full h-10 pl-10 pr-3 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#FF4F00]/40 focus:bg-white/[0.06]"
+                                />
+                            </div>
+                            <p className="text-[11px] text-zinc-500 mt-3 leading-relaxed">
+                                Don&apos;t see yours? If your broker offers cTrader, it works — just hit <span className="text-zinc-300 font-semibold">Get Started → cTrader</span> and log in with cTrader ID.
+                            </p>
+                        </div>
+                        {/* list */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1.5">
+                            {filteredBrokers.length === 0 ? (
+                                <div className="py-10 text-center">
+                                    <p className="text-sm text-zinc-500">No brokers match “{brokerQuery}”.</p>
+                                    <p className="text-xs text-zinc-600 mt-1">Try a different search or connect anyway — any cTrader broker works.</p>
+                                </div>
+                            ) : (
+                                filteredBrokers.map((b) => (
+                                    <div
+                                        key={b.name}
+                                        className="group flex items-center gap-3 px-3 py-3 rounded-2xl bg-[#000000] border border-white/5 hover:border-white/10"
+                                    >
+                                        <div className="w-11 h-11 rounded-xl bg-transparent flex items-center justify-center shrink-0 overflow-hidden">
+                                            <BrokerLogo broker={b} />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="text-sm font-semibold text-white leading-none truncate">{b.name}</div>
+                                            <div className="text-[11px] text-zinc-500 mt-1 flex items-center gap-2 flex-wrap leading-none">
+                                                <span><span className="text-white font-medium">{b.minDeposit}</span> min</span>
+                                                <span className="w-1 h-1 rounded-full bg-white/20 shrink-0"></span>
+                                                <span><span className="text-white font-medium">{b.maxLeverage}</span> leverage</span>
+                                                {b.reviews && (
+                                                    <>
+                                                        <span className="w-1 h-1 rounded-full bg-white/20 shrink-0"></span>
+                                                        <span className={b.rating === 'Excellent' ? 'text-emerald-400' : b.rating === 'Good' ? 'text-amber-400' : 'text-zinc-500'}>{b.rating}</span>
+                                                        <span>· {b.reviews}</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        {/* footer cta */}
+                        <div className="p-4 border-t border-white/10 shrink-0 bg-[#000000]">
+                            <button
+                                onClick={() => { setShowCtraderBrokers(false); onSelect('ctrader'); }}
+                                className="w-full h-11 rounded-xl bg-[#FF4F00] hover:bg-[#ff5a0f] text-white text-sm font-bold tracking-wide flex items-center justify-center gap-2"
+                            >
+                                Connect with cTrader
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
+                            </button>
+                            <p className="text-[10px] text-zinc-600 text-center mt-2">Secure OAuth via Spotware cTrader ID. No password stored.</p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -392,7 +575,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
     
     // ✅ FIX: cardStyle defined here — used throughout the component
     // Obsidian Black theme: deeper blacks and subtle borders
-    const cardStyle = 'bg-[#000000]/80 border border-white/5 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)]';
+    const cardStyle = 'bg-black/80 border border-white/5 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)]';
 
     const handleCopy = (text: string) => {
         navigator.clipboard.writeText(text);
@@ -1764,7 +1947,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                 </button>
             </div>
 
-            <div className="rounded-2xl border border-white/5 bg-[#000000] overflow-hidden">
+            <div className="rounded-2xl border border-white/5 bg-black overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/5 flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-[#FF4F00]/10">
                         <img src="/icon3.jpeg" alt="cTrader" className="w-10 h-10 object-contain" />
@@ -1893,9 +2076,9 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
 
                             {/* --- Account details sub-panel --- */}
                             {selectedAccountId != null && (
-                                        <div className="mt-4 rounded-xl border border-white/5 bg-[#000000] overflow-hidden">
+                                        <div className="mt-4 rounded-xl border border-white/5 bg-black overflow-hidden">
                                             {/* Header */}
-                                            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-[#000000]">
+                                            <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-black">
                                                 <div className="flex items-center gap-2">
                                                     <Activity size={14} className="text-[#FF4F00]" />
                                                     <span className="text-xs font-bold text-white uppercase tracking-wider">
@@ -1939,7 +2122,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                             {!isLoadingDetails && !detailsError && (
                                                 <div>
                                                     {/* Account Summary Cards */}
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x md:divide-x divide-y md:divide-y-0 divide-white/5 border-b border-white/5 bg-[#000000]">
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 divide-x md:divide-x divide-y md:divide-y-0 divide-white/5 border-b border-white/5 bg-black">
                                                         <div className="p-3">
                                                             <span className="text-[9px] uppercase tracking-wider text-zinc-500">Balance</span>
                                                             <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
@@ -1969,7 +2152,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                     </div>
 
                                                     {/* Tabs Selectors */}
-                                                    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-[#000000]">
+                                                    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-black">
                                                         {(['overview', 'positions', 'history', 'market', 'logs'] as const).map((t) => (
                                                             <button
                                                                 key={t}
@@ -1990,7 +2173,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                         {activeTab === 'overview' && (
                                                             <div className="space-y-4">
                                                                 {/* Account parameters */}
-                                                                <div className="grid grid-cols-2 gap-3 text-xs border border-white/5 rounded-xl p-3 bg-[#000000]">
+                                                                <div className="grid grid-cols-2 gap-3 text-xs border border-white/5 rounded-xl p-3 bg-black">
                                                                     <div>
                                                                         <span className="text-zinc-500 text-[10px]">Broker Server</span>
                                                                         <p className="font-medium text-white mt-0.5">{traderDetails?.brokerName || 'cTrader Server'}</p>
@@ -2010,7 +2193,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                 </div>
 
                                                                 {/* Manual Order Entry */}
-                                                                <div className="border border-white/5 rounded-xl p-4 bg-[#000000] space-y-3">
+                                                                <div className="border border-white/5 rounded-xl p-4 bg-black space-y-3">
                                                                     <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Manual Order Desk</p>
                                                                     <div className="grid grid-cols-2 gap-2.5">
                                                                         <div>
@@ -2018,7 +2201,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                             <select
                                                                                 value={tradingSymbolId}
                                                                                 onChange={(e) => setTradingSymbolId(e.target.value)}
-                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
+                                                                                className="w-full text-xs bg-black border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             >
                                                                                 {symbolsList.map((s) => (
                                                                                     <option key={s.symbolId} value={s.symbolId}>{s.symbolName}</option>
@@ -2033,7 +2216,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                                 min="0.01"
                                                                                 value={tradingVolume}
                                                                                 onChange={(e) => setTradingVolume(Number(e.target.value))}
-                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
+                                                                                className="w-full text-xs bg-black border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             />
                                                                         </div>
                                                                         <div>
@@ -2043,7 +2226,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                                 placeholder="Market Price"
                                                                                 value={tradingLimitPrice}
                                                                                 onChange={(e) => setTradingLimitPrice(e.target.value)}
-                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
+                                                                                className="w-full text-xs bg-black border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             />
                                                                         </div>
                                                                         <div>
@@ -2053,7 +2236,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                                 placeholder="Market Price"
                                                                                 value={tradingStopPrice}
                                                                                 onChange={(e) => setTradingStopPrice(e.target.value)}
-                                                                                className="w-full text-xs bg-[#000000] border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
+                                                                                className="w-full text-xs bg-black border border-white/10 rounded-lg py-1.5 px-2 text-white outline-none focus:border-[#FF4F00]/50"
                                                                             />
                                                                         </div>
                                                                     </div>
@@ -2084,12 +2267,12 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                         {/* Tab Content: POSITIONS & PENDING ORDERS */}
                                                         {activeTab === 'positions' && (
                                                             <div className="space-y-4">
-                                                                <div className="rounded-xl border border-white/5 bg-[#000000] px-4 py-5 text-center">
+                                                                <div className="rounded-xl border border-white/5 bg-black px-4 py-5 text-center">
                                                                     <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">Open Positions</p>
                                                                     <p className="mt-2 text-sm text-zinc-400">Under development</p>
                                                                 </div>
 
-                                                                <div className="rounded-xl border border-white/5 bg-[#000000] px-4 py-5 text-center">
+                                                                <div className="rounded-xl border border-white/5 bg-black px-4 py-5 text-center">
                                                                     <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">Pending Orders</p>
                                                                     <p className="mt-2 text-sm text-zinc-400">Under development</p>
                                                                 </div>
@@ -2120,7 +2303,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                         <p className="text-xs text-zinc-600">No closed deal logs found</p>
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="border border-white/10 rounded-lg max-h-[420px] overflow-y-auto overflow-x-auto custom-scrollbar bg-[#000000]">
+                                                                    <div className="border border-white/10 rounded-lg max-h-[420px] overflow-y-auto overflow-x-auto custom-scrollbar bg-black">
                                                                         <table className="w-full text-left text-xs text-zinc-300 border-collapse">
                                                                             <thead>
                                                                                 <tr className="border-b border-white/10 text-[11px] font-medium text-zinc-400">
