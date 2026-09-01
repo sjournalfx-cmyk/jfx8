@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, CalendarDays, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Lock, Info, X, Gauge, CalendarDays, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
     DndContext,
     closestCenter,
@@ -99,28 +99,6 @@ const DashboardSkeleton = ({ isDarkMode }: { isDarkMode: boolean }) => (
                 </div>
             </div>
         </div>
-    </div>
-);
-
-const EASetupPrompt = ({ isDarkMode, onSetupClick }: { isDarkMode: boolean, onSetupClick: () => void }) => (
-    <div className={`mb-8 p-8 rounded-[32px] border-2 border-dashed flex flex-col md:flex-row items-center justify-between gap-6 transition-all ${isDarkMode ? 'bg-indigo-500/5 border-indigo-500/20' : 'bg-indigo-50 border-indigo-200'}`}>
-        <div className="flex flex-col md:flex-row items-center gap-6 text-center md:text-left">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                <Cpu size={32} />
-            </div>
-            <div>
-                <h3 className="text-xl font-black mb-1">Finish your EA Setup</h3>
-                <p className={`text-sm max-w-md ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
-                    You've selected EA Sync, but we haven't received any data yet. Complete the setup to see your real-time trades and equity.
-                </p>
-            </div>
-        </div>
-        <button
-            onClick={onSetupClick}
-            className="px-8 py-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-2xl font-black text-sm transition-all hover:scale-105 active:scale-95 shadow-xl shadow-indigo-500/20 flex items-center gap-2 shrink-0"
-        >
-            Setup Guide <ArrowRight size={18} />
-        </button>
     </div>
 );
 
@@ -766,11 +744,6 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
                 </div>
 
         </header>
-
-            {/* EA Setup Prompt (For new EA users) — hidden in demo mode */}
-            {!isDemoMode && trades.length === 0 && userProfile.syncMethod === 'EA_CONNECT' && !eaSession && (
-                <EASetupPrompt isDarkMode={isDarkMode} onSetupClick={() => onViewChange('ea-setup')} />
-            )}
 
             {/* Session Clock Widget (Fixed at Top) */}
             <SessionClock isDarkMode={isDarkMode} />

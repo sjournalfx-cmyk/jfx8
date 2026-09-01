@@ -27,49 +27,28 @@ import { PLByMindsetWidget } from './analytics/PLByMindsetWidget';
 
 import { PerformanceBySession } from './analytics/PerformanceBySession';
 import { ReportView } from './analytics/ReportView';
-import { PerformanceByPairWidget } from './analytics/PerformanceByPairWidget';
 import { CurrencyStrengthMeter } from './analytics/CurrencyStrengthMeter';
 import { PairDistributionTreemapWidget } from './analytics/PairDistributionTreemapWidget';
 import { EquityCurveWidget } from './analytics/EquityCurveWidget';
-import { LargestWinLossWidget } from './analytics/LargestWinLossWidget';
 import { MomentumStreakWidget } from './analytics/MomentumStreakWidget';
 import { SymbolPerformanceWidget } from './analytics/SymbolPerformanceWidget';
 import { DrawdownOverTimeWidget } from './analytics/DrawdownOverTimeWidget';
 import { StrategyPerformancePieChart } from './analytics/StrategyPerformancePieChart';
 import { TradingMistakesBarChartWidget } from './analytics/TradingMistakesBarChartWidget';
 import { RevenueMatrixWidget } from './analytics/RevenueMatrixWidget';
-import { OutcomeDistributionWidget } from './analytics/OutcomeDistributionWidget';
-import { RobustnessLab } from './analytics/RobustnessLab';
 import { ComparisonView } from './analytics/ComparisonView';
 import { TradeGradeDistributionWidget } from './analytics/TradeGradeDistributionWidget';
-import { PsychologicalSlipWidget } from './analytics/PsychologicalSlipWidget';
 import { PsychologyAnalyzeLoader, PsychologyAnalyzeEmptyState } from './analytics/PsychologyAnalyzeState';
 import { TimeAnalysisMatrixWidget } from './analytics/TimeAnalysisMatrixWidget';
 import { DetailedStatistics } from './analytics/DetailedStatistics';
 import { PLByPlanAdherenceWidget } from './analytics/PLByPlanAdherenceWidget';
 import { CashTransactionsView } from './analytics/CashTransactionsView';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 import { WidgetHelpDrawer } from './ui/WidgetHelpDrawer';
 import { resolveBridgeBackedInitialBalance } from '../lib/bridgeBalance';
 import { calculateDisciplineScore } from '../lib/disciplineScore';
 import { type PsychologyInsightsEntry } from '../lib/psychologyInsights';
 
-import {
-    DndContext,
-    closestCenter,
-    KeyboardSensor,
-    PointerSensor,
-    useSensor,
-    useSensors,
-    DragEndEvent
-} from '@dnd-kit/core';
-import {
-    arrayMove,
-    SortableContext,
-    sortableKeyboardCoordinates,
-    rectSortingStrategy,
-} from '@dnd-kit/sortable';
-import { SortableWidget } from './ui/SortableWidget';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 import { calculateStats } from '../lib/statsUtils';
 import { getCompletedTrades, sortTradesChronologically } from '../lib/analyticsUtils';
 
@@ -146,19 +125,19 @@ const parsePsychologyBrief = (content: string): PsychologyBriefSection[] => {
 
 const psychologyCardToneClasses: Record<PsychologyBriefTone, { shell: string; stripe: string; icon: string; title: string }> = {
     insight: {
-        shell: 'border-[#19371f] bg-[#0e1711]',
+        shell: 'border-[#19371f] bg-[#000000]',
         stripe: 'bg-emerald-500',
         icon: 'text-emerald-400',
         title: 'text-white',
     },
     warning: {
-        shell: 'border-[#4a201f] bg-[#170e0f]',
+        shell: 'border-[#4a201f] bg-[#000000]',
         stripe: 'bg-rose-500',
         icon: 'text-rose-400',
         title: 'text-white',
     },
     action: {
-        shell: 'border-[#19412b] bg-[#0d1612]',
+        shell: 'border-[#19412b] bg-[#000000]',
         stripe: 'bg-sky-500',
         icon: 'text-sky-400',
         title: 'text-white',
@@ -295,8 +274,8 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     const [allWidgetsOrder, setAllWidgetsOrder] = useLocalStorage('analytics_bento_order', [
       'winRate', 'profitFactor', 'grossProfit', 'grossLoss',
       'equityCurve', 'drawdown',
-      'streakMomentum', 'symbolPerformance', 'largestWinLoss', 'currencyStrength',
-      'outcomeDist', 'riskReward', 'tradeGrade', 'psychSlip', 'timeMatrix'
+      'streakMomentum', 'symbolPerformance', 'currencyStrength',
+      'riskReward', 'tradeGrade', 'psychSlip', 'timeMatrix'
     ]);
 
     const reportWidgets = useMemo(() => {
@@ -475,7 +454,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                             </Tooltip>
                         </div>
                         <div
-                            className="inline-flex rounded-[8px] border border-[#2a2a2a] bg-[#0a0a0a] p-1 shadow-[0_1px_0_rgba(255,255,255,0.03)]"
+                            className="inline-flex rounded-[8px] border border-[#2a2a2a] bg-[#000000] p-1 shadow-[0_1px_0_rgba(255,255,255,0.03)]"
                             role="tablist"
                             aria-label="Tilt score display mode"
                         >
@@ -617,7 +596,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                                 )}
                             </div>
                         ) : (
-                            <div className="rounded-[14px] border border-[#1f1f1f] bg-[#080808] px-5 py-5">
+                            <div className="rounded-[14px] border border-[#1f1f1f] bg-[#000000] px-5 py-5">
                                 <pre className="whitespace-pre-wrap text-[15px] leading-7 text-white">
                                     {dailyPsychologyInsights.content}
                                 </pre>
@@ -678,51 +657,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             );
             case 'equityCurve': return <EquityCurveWidget trades={completedTrades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={currencySymbol} hideCurrentValue={normalizePlan(userProfile?.plan) !== 'FREE' && completedTrades.length === 0} onInfoClick={() => handleOpenHelp('equityCurve')} />;
             case 'drawdown': return <DrawdownOverTimeWidget trades={completedTrades} isDarkMode={isDarkMode} userProfile={userProfile} startingBalance={effectiveInitialBalance} onInfoClick={() => handleOpenHelp('drawdown')} />;
-            case 'streakMomentum': return <MomentumStreakWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('momentumStreak')} />;
-            case 'symbolPerformance': return <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('symbolPerformance')} />;
-            case 'largestWinLoss': return <LargestWinLossWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('largestWinLoss')} />;
             case 'currencyStrength': return <CurrencyStrengthMeter isDarkMode={isDarkMode} trades={completedTrades} onInfoClick={() => handleOpenHelp('currencyStrength')} />;
-            case 'outcomeDist': return <OutcomeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('outcomeDistribution')} />;
-            case 'riskReward': return (
-                <div className={`h-full p-8 rounded-[32px] border ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
-                    <h3 className="font-bold text-lg mb-6 flex items-center justify-between">
-                        <span className="flex items-center gap-2"><Activity size={20} className="text-indigo-500" /> Risk/Reward</span>
-                        <Tooltip content="Compares average winning trade size vs average losing trade size. Higher is better." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('riskReward')}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
-                    </h3>
-                    <div className="space-y-6"><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Win</span><span className="text-xl font-black text-emerald-500">{currencySymbol}{Math.round(stats.avgWin).toLocaleString()}</span></div><div className="flex justify-between items-end"><span className="text-sm opacity-60">Avg Loss</span><span className="text-xl font-black text-rose-500">{currencySymbol}{Math.round(stats.avgLoss).toLocaleString()}</span></div></div>
-                </div>
-            );
             case 'tradeGrade': return <TradeGradeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradeGrade')} />;
-            case 'psychSlip': return <PsychologicalSlipWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('psychSlip')} />;
-            case 'timeMatrix': return <TimeAnalysisMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('timeAnalysis')} />;
             default: return null;
         }
-    };
-
-    const getColSpan = (id: string) => {
-        switch (id) {
-            case 'equityCurve': return 'col-span-12 lg:col-span-8';
-            case 'drawdown': return 'col-span-12 lg:col-span-4';
-            case 'winRate': case 'profitFactor': case 'grossProfit': case 'grossLoss': return 'col-span-12 sm:col-span-6 lg:col-span-3';
-            case 'riskReward': case 'tradeGrade': return 'col-span-12 md:col-span-6 lg:col-span-4';
-            case 'psychSlip': case 'timeMatrix': return 'col-span-12';
-            default: return 'col-span-12 md:col-span-6 lg:col-span-4';
-        }
-    };
-
-    const sensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-    );
-
-    const handleDragEnd = (event: DragEndEvent) => {
-        const { active, over } = event;
-        if (!active || !over || active.id === over.id) return;
-        setAllWidgetsOrder((items) => {
-            const oldIndex = items.indexOf(String(active.id));
-            const newIndex = items.indexOf(String(over.id));
-            return arrayMove(items, oldIndex, newIndex);
-        });
     };
 
     const [activeTab, setActiveTab] = useState<'overview' | 'trades' | 'psychology' | 'advanced' | 'comparison' | 'cash' | 'reports' | 'session'>('overview');
@@ -807,8 +745,8 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             : 'bg-[#000000] text-zinc-200';
 
     return (
-        <div className={`w-full h-full overflow-y-auto custom-scrollbar p-6 lg:p-10 font-sans ${pageBackgroundClass}`}>
-            <header className="mb-8 flex flex-col gap-6">
+        <div className={`w-full h-full overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-10 pb-nav font-sans ${pageBackgroundClass}`}>
+            <header className="mb-4 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-2 mb-2">
@@ -821,21 +759,27 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         </div>
                     </div>
                 </div>
-                <div className={`grid grid-cols-2 gap-1.5 p-1.5 rounded-xl border sm:grid-cols-4 md:grid-cols-8 ${pageIsLight ? 'bg-slate-100 border-slate-200' : 'bg-[#111] border-zinc-800'}`}>
-                    {tabDefinitions.map(tab => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id as any)}
-                            className={`w-full justify-center px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id 
-                                ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-[#FF4F00] text-white shadow-lg') 
-                                : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
-                        >
-                            <tab.icon size={14} />
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
             </header>
+            <nav
+                role="tablist"
+                aria-label="Analytics sections"
+                className={`sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x snap-mandatory gap-2 border-b backdrop-blur-xl ${pageIsLight ? 'bg-white/90 border-slate-200' : 'bg-black/80 border-zinc-800'}`}
+            >
+                {tabDefinitions.map(tab => (
+                    <button
+                        key={tab.id}
+                        role="tab"
+                        aria-selected={activeTab === tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className={`shrink-0 snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 min-h-[44px] ${activeTab === tab.id
+                            ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-[#FF4F00] text-white shadow-lg')
+                            : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
+                    >
+                        <tab.icon size={14} />
+                        {tab.label}
+                    </button>
+                ))}
+            </nav>
 
             {activeTab === 'overview' && renderOverviewLayout()}
             
