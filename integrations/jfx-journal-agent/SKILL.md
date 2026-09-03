@@ -45,20 +45,51 @@ Scopes: `trades:read` for reads, `trades:write` for journal writes and cTrader e
 
 Endpoint: `POST https://www.jfxjournal.site/api/ctrader/trade` (local dev: `POST http://127.0.0.1:3000/api/ctrader/trade`)
 Auth: `X-API-Key: $JFX_KEY` (or `Authorization: Bearer $JFX_KEY`). No broker access tokens needed — the server mints cTrader tokens from the stored OAuth grant.
+Always include header: `Content-Type: application/json`.
 
-Scopes: any trade execution (`open`, `close`, `modify_position`, `modify_order`, `cancel_order`, also aliases `buy`/`sell` and fields `pair`/`instrument`/`ticker` as aliases for `symbol`) requires `trades:write`. Reading positions requires `trades:read` (or `trades:write`).
-`isDemo` accepts boolean or string (`true`/`false`); `true` = demo host, `false` = live host. When in doubt, omit it — the server falls back to the stored default.
+Scopes: any trade execution (`open`, `close`, `modify_position`, `modify_order`, `cancel_order`) requires `trades:write`. Reading positions, accounts, or auth status requires `trades:read` (or `trades:write`).
 
-If you get `400 ctrader_not_connected`, the user's key is valid but their cTrader account has not been linked yet — instruct them to connect cTrader once in the JFX web app on the **Connect & Import** page. If you get `502 ctrader_auth_failed`, ask them to reconnect cTrader (stored grant expired).
+### Multi-Account & Multi-Broker Support
+Users often have multiple cTrader accounts across different brokers (e.g. Fusion Markets, IC Markets, Pepperstone) and account types (Demo vs. Live):
+1. **Default Account (Automatic)**: If you omit `ctidTraderAccountId`, the server automatically routes trades to the user's active default account.
+2. **Target Specific Account**: Pass `"ctidTraderAccountId": <number>` in the payload to trade on a specific broker account.
+3. **Demo vs. Live**: Set `"isDemo": true` for Demo servers (`demo.ctraderapi.com`) or `"isDemo": false` for Live servers (`live.ctraderapi.com`). Omission defaults to Demo for safety.
 
-### Get Open Positions & Pending Orders
+---
+
+### Recommended Agent Workflow
+
+#### Step 1: Healthcheck & Active Account Check (Zero-Risk)
+Always verify the key and inspect the active account before placing trades:
+```bash
+curl -sS -H "X-API-Key: $JFX_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"check_auth"}' \
+  "${JFX_CTRADER_TRADE_URL:-https://www.jfxjournal.site/api/ctrader/trade}"
+```
+Returns: `{"ok": true, "accountId": 47876400, "isDemo": true, "userId": "..."}`
+
+#### Step 2: List All Available Accounts (Multi-Account Discovery)
+If the user specifies a specific broker or account, query all linked accounts first:
+```bash
+curl -sS -H "X-API-Key: $JFX_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"get_accounts"}' \
+  "${JFX_CTRADER_TRADE_URL:-https://www.jfxjournal.site/api/ctrader/trade}"
+```
+Returns:
 ```json
 {
-  "action": "get_positions",
-  "isDemo": true
+  "ok": true,
+  "defaultAccountId": 47876400,
+  "accounts": [
+    { "accountId": 47876400, "traderLogin": 10124027, "broker": "Fusion Markets", "isLive": false, "isDemo": true },
+    { "accountId": 38291044, "traderLogin": 5018291, "broker": "IC Markets", "isLive": true, "isDemo": false }
+  ]
 }
 ```
 
+#### Step 3: Get Open Positions & Pending Orders
 ```bash
 curl -sS -H "X-API-Key: $JFX_KEY" \
   -H "Content-Type: application/json" \
@@ -66,42 +97,49 @@ curl -sS -H "X-API-Key: $JFX_KEY" \
   "${JFX_CTRADER_TRADE_URL:-https://www.jfxjournal.site/api/ctrader/trade}"
 ```
 
-### Open Market, Limit, or Stop Order
+#### Step 4: Open Market, Limit, or Stop Order
+- `symbol` (aliases: `pair`, `instrument`, `ticker`): `EURUSD`, `GBPUSD`, `XAUUSD`, `BTCUSD`. Broker suffixes like `EURUSD.pro` or `EURUSDm` are automatically matched.
+- `volume` / `volumeLots`: standard lots (e.g. `0.01` = 1 micro lot = 1,000 units).
+- `side`: `"buy"` or `"sell"`.
+- `orderType`: `"market"` (default), `"limit"`, `"stop"`.
+
 ```json
 {
   "action": "open",
   "symbol": "EURUSD",
   "side": "buy",
-  "volume": 0.01,
+  "volumeLots": 0.01,
   "orderType": "market",
   "stopLoss": 1.0750,
   "takeProfit": 1.0950,
   "isDemo": true,
+  "ctidTraderAccountId": 47876400,
   "comment": "Opened by AI agent"
 }
 ```
 
 ```bash
-curl -sS -H "X-API-Key: $JFX_KEY" -H "Content-Type: application/json" \
-  -d '{"action":"open","symbol":"EURUSD","side":"buy","volume":0.01,"orderType":"market","isDemo":true}' \
+curl -sS -H "X-API-Key: $JFX_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"open","symbol":"EURUSD","side":"buy","volumeLots":0.01,"orderType":"market","isDemo":true}' \
   "${JFX_CTRADER_TRADE_URL:-https://www.jfxjournal.site/api/ctrader/trade}"
 ```
 
-### Close Position (Full or Partial)
+#### Step 5: Close Position (Full or Partial)
 ```json
 {
   "action": "close",
-  "positionId": 9876543,
-  "volume": 0.01,
+  "positionId": 41352173,
+  "volumeLots": 0.01,
   "isDemo": true
 }
 ```
 
-### Modify Position (Stop Loss & Take Profit)
+#### Step 6: Modify Position (Stop Loss & Take Profit)
 ```json
 {
   "action": "modify_position",
-  "positionId": 9876543,
+  "positionId": 41352173,
   "stopLoss": 1.0760,
   "takeProfit": 1.0960,
   "isDemo": true

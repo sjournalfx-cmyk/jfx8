@@ -135,6 +135,32 @@ function getStoredTokens(): { accessToken: string; expiresAt: number } | null {
   return null;
 }
 
+async function getOrWaitForSession(): Promise<{ jwt?: string; userId?: string } | null> {
+  try {
+    const sessionRes = await supabase.auth.getSession();
+    let jwt = sessionRes?.data?.session?.access_token;
+    let userId = sessionRes?.data?.session?.user?.id;
+    if (jwt && userId) return { jwt, userId };
+
+    // Fallback: check localStorage directly (Supabase persists session synchronously)
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') && key.endsWith('-auth-token'))) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          try {
+            const parsed = JSON.parse(item);
+            jwt = parsed?.access_token || parsed?.token;
+            userId = parsed?.user?.id || parsed?.user_id;
+            if (jwt || userId) return { jwt, userId };
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
 /** Refresh the access token from the server (which reads the httpOnly cookie). */
 async function refreshTokensFromCookie(): Promise<boolean> {
   try {
@@ -152,9 +178,9 @@ async function refreshTokensFromCookie(): Promise<boolean> {
     // from. Without it, web sessions heal via cookie while agent keys rot.
     const refreshHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const sessionRes = await supabase.auth.getSession();
-      const jwt = sessionRes?.data?.session?.access_token;
-      if (jwt) refreshHeaders['Authorization'] = `Bearer ${jwt}`;
+      const session = await getOrWaitForSession();
+      if (session?.jwt) refreshHeaders['Authorization'] = `Bearer ${session.jwt}`;
+      if (session?.userId) payload.user_id = session.userId;
     } catch { /* ignore — refresh still works via cookie, DB just won't update */ }
     const res = await fetch('/api/ctrader/refresh', {
       method: 'POST',
@@ -476,12 +502,19 @@ export function getAuthorizeUrl(): string {
 export async function exchangeCode(code: string): Promise<{ ok: boolean; error?: string }> {
   const redirectUri = `${window.location.origin}/api/ctrader/callback`;
   try {
-    const sessionRes = await supabase.auth.getSession();
-    const jwt = sessionRes?.data?.session?.access_token;
+    const session = await getOrWaitForSession();
+    const jwt = session?.jwt;
+    const userId = session?.userId;
     const headers: Record<string, string> = {};
     if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
 
-    const res = await fetch(`/api/ctrader/exchange?code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}`, { headers });
+    const queryParams = new URLSearchParams({
+      code,
+      redirect_uri: redirectUri,
+    });
+    if (userId) queryParams.set('user_id', userId);
+
+    const res = await fetch(`/api/ctrader/exchange?${queryParams.toString()}`, { headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = data?.error || data?.errorCode || `HTTP ${res.status}`;

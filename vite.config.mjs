@@ -776,7 +776,7 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
       server.middlewares.use('/api/ctrader/exchange', async (req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
         if (req.method === 'OPTIONS') {
           res.statusCode = 204;
@@ -859,8 +859,8 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
                 // Try per-user insert when the browser sent its Supabase JWT (Connect & Import does)
                 const authH = req.headers['authorization'] || req.headers['Authorization'] || '';
                 const jwt = String(authH).replace(/^Bearer\s+/i, '').trim();
-                let userId = null;
-                if (jwt && jwt.split('.').length === 3) {
+                let userId = requestUrl.searchParams.get('user_id') || null;
+                if (!userId && jwt && jwt.split('.').length === 3) {
                   try {
                     const payloadB64 = jwt.split('.')[1];
                     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
@@ -868,19 +868,49 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
                   } catch {}
                 }
                 const tok = String(body.refreshToken);
+                const persistPromises = [];
                 if (userId) {
                   // Upsert per-user row — this is what /api/ctrader/trade checks first
-                  fetch(`${surl}/rest/v1/user_ctrader_tokens`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'apikey': skey,
-                      'Authorization': `Bearer ${skey}`,
-                      'Prefer': 'resolution=merge-duplicates',
-                    },
-                    body: JSON.stringify({ user_id: userId, refresh_token: tok, updated_at: new Date().toISOString() }),
-                  }).catch(() => {});
+                  persistPromises.push(
+                    fetch(`${surl}/rest/v1/user_ctrader_tokens`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': skey,
+                        'Authorization': `Bearer ${skey}`,
+                        'Prefer': 'resolution=merge-duplicates',
+                      },
+                      body: JSON.stringify({ user_id: userId, refresh_token: tok, updated_at: new Date().toISOString() }),
+                    }).catch(() => {})
+                  );
+                  // Also PATCH for existing rows
+                  persistPromises.push(
+                    fetch(`${surl}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
+                      method: 'PATCH',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': skey,
+                        'Authorization': `Bearer ${skey}`,
+                      },
+                      body: JSON.stringify({ refresh_token: tok, updated_at: new Date().toISOString() }),
+                    }).catch(() => {})
+                  );
                   // Also keep per-user service_config as secondary fallback
+                  persistPromises.push(
+                    fetch(`${surl}/rest/v1/service_config`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': skey,
+                        'Authorization': `Bearer ${skey}`,
+                        'Prefer': 'resolution=merge-duplicates',
+                      },
+                      body: JSON.stringify({ key: `ctrader_refresh_${userId}`, value: tok }),
+                    }).catch(() => {})
+                  );
+                }
+                // Always keep global fallback too
+                persistPromises.push(
                   fetch(`${surl}/rest/v1/service_config`, {
                     method: 'POST',
                     headers: {
@@ -889,25 +919,18 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
                       'Authorization': `Bearer ${skey}`,
                       'Prefer': 'resolution=merge-duplicates',
                     },
-                    body: JSON.stringify({ key: `ctrader_refresh_${userId}`, value: tok }),
-                  }).catch(() => {});
-                }
-                // Always keep global fallback too
-                fetch(`${surl}/rest/v1/service_config`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': skey,
-                    'Authorization': `Bearer ${skey}`,
-                    'Prefer': 'resolution=merge-duplicates',
-                  },
-                  body: JSON.stringify({
-                    key: 'ctrader_service_refresh_token',
-                    value: tok,
-                  }),
-                }).catch(() => {});
+                    body: JSON.stringify({
+                      key: 'ctrader_service_refresh_token',
+                      value: tok,
+                    }),
+                  }).catch(() => {})
+                );
+                await Promise.allSettled(persistPromises);
+                console.log(`[cTrader dev] Persisted refresh token to DB (user: ${userId || 'none'})`);
               }
-            } catch {}
+            } catch (err) {
+              console.warn('[cTrader dev] DB persist exception:', err);
+            }
           }
 
           res.end(JSON.stringify({
@@ -1110,7 +1133,12 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           });
         } catch {}
         let body = {};
-        try { if (rawBody) body = JSON.parse(rawBody); } catch {}
+        try {
+          const cleanRaw = rawBody.replace(/^\uFEFF/, '').trim();
+          if (cleanRaw) body = JSON.parse(cleanRaw);
+        } catch (e) {
+          console.warn('[cTrader dev] JSON parse failed on rawBody:', rawBody, e?.message);
+        }
         // Also merge query string for GET
         try {
           const qUrl = new URL(req.url || '', 'http://127.0.0.1');
@@ -1120,7 +1148,7 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         const authHeader = (req.headers['x-api-key'] || req.headers['authorization'] || req.headers['x-access-token'] || '');
         const rawKey = String(authHeader).replace(/^(Bearer|Token|ApiKey|APIKey)\s+/i, '').trim();
         const action = String(body.action || (req.method === 'GET' ? 'get_positions' : 'open')).toLowerCase();
-        const isReadAction = action === 'get_positions' || action === 'positions' || req.method === 'GET';
+        const isReadAction = action === 'get_positions' || action === 'positions' || action === 'get_accounts' || action === 'accounts' || action === 'check_auth' || action === 'auth_status' || req.method === 'GET';
 
         const clientId = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
         const clientSecret = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
@@ -1253,6 +1281,40 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
               }
             } catch {}
           }
+          if (action === 'get_accounts' || action === 'accounts') {
+            let accounts = [];
+            try {
+              const tmp = await openCtraderSessionDev(host, clientId, clientSecret, 0, accessToken);
+              const accRes = await tmp.send(PT_DEV.GET_ACCOUNTS_BY_TOKEN_REQ, { accessToken });
+              tmp.close();
+              accounts = accRes.ctidTraderAccount || [];
+            } catch {}
+            res.statusCode = 200;
+            res.end(JSON.stringify({
+              ok: true,
+              defaultAccountId: accountId,
+              isDemo,
+              accounts: accounts.map(a => ({
+                accountId: Number(a.ctidTraderAccountId),
+                traderLogin: a.traderLogin ? Number(a.traderLogin) : undefined,
+                broker: a.brokerTitleShort || a.brokerName || a.server || undefined,
+                isLive: Boolean(a.isLive),
+                isDemo: !a.isLive,
+              })),
+            }));
+            return;
+          }
+          if (action === 'check_auth' || action === 'auth_status') {
+            res.statusCode = 200;
+            res.end(JSON.stringify({
+              ok: true,
+              message: 'cTrader credentials and API key authentication valid (local dev)',
+              accountId,
+              isDemo,
+              userId: authenticatedUserId,
+            }));
+            return;
+          }
           session = await openCtraderSessionDev(host, clientId, clientSecret, accountId, accessToken);
           if (isReadAction) {
             const reconcile = await session.send(PT_DEV.RECONCILE_REQ, { ctidTraderAccountId: accountId });
@@ -1281,6 +1343,26 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             const payload = { ctidTraderAccountId: accountId, symbolId, orderType, tradeSide, volume: volumeCents };
             if (body.limitPrice) payload.limitPrice = Number(body.limitPrice); if (body.stopPrice) payload.stopPrice = Number(body.stopPrice); if (body.stopLoss) payload.stopLoss = Number(body.stopLoss); if (body.takeProfit) payload.takeProfit = Number(body.takeProfit); if (body.comment) payload.comment = String(body.comment);
             const result = await session.send(PT_DEV.NEW_ORDER_REQ, payload); session.close(); res.statusCode = 200; res.end(JSON.stringify({ ok: true, message: 'Order submitted', accountId, isDemo, result })); return;
+          }
+          if (action === 'close_all') {
+            const rec = await session.send(PT_DEV.RECONCILE_REQ, { ctidTraderAccountId: accountId });
+            const positions = rec.position || [];
+            const closed = [];
+            const errors = [];
+            for (const pos of positions) {
+              const pId = Number(pos.positionId);
+              const vol = Number(pos?.tradeData?.volume || pos?.volume || 10000000);
+              try {
+                const resClose = await session.send(PT_DEV.CLOSE_POSITION_REQ, { ctidTraderAccountId: accountId, positionId: pId, volume: vol });
+                closed.push({ positionId: pId, result: resClose });
+              } catch (err) {
+                errors.push({ positionId: pId, error: err?.message || String(err) });
+              }
+            }
+            session.close();
+            res.statusCode = 200;
+            res.end(JSON.stringify({ ok: true, message: `Closed ${closed.length} position(s)`, closedCount: closed.length, closed, errors }));
+            return;
           }
           if (action === 'close' || action === 'close_position') {
             const positionId = Number(body.positionId); if (!positionId) { session.close(); res.statusCode = 400; res.end(JSON.stringify({ error: 'Missing positionId' })); return; }

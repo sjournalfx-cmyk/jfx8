@@ -560,36 +560,11 @@ canvas, svg {
 }
 
 .api-key-modal-card {
-  width: min(100%, 32rem);
-  max-height: calc(100vh - 2rem);
+  width: min(100%, 30rem);
+  max-height: calc(100vh - 2.5rem);
   overflow-y: auto;
-  border-radius: 1.5rem;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.52);
-}
-
-.api-key-modal-card h3 {
-  font-size: 1.25rem;
-  line-height: 1.35;
-}
-
-.api-key-modal-card p {
-  font-size: 0.9rem;
-  line-height: 1.55;
-}
-
-.api-key-modal-card label {
-  font-size: 0.875rem;
-}
-
-.api-key-modal-card input,
-.api-key-modal-card select {
-  min-height: 2.9rem;
-  font-size: 0.95rem;
-}
-
-.api-key-modal-card button {
-  min-height: 2.75rem;
-  font-size: 0.875rem;
+  border-radius: 1.25rem;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7);
 }
 
 /* AI Chat Demo Premium Animations */

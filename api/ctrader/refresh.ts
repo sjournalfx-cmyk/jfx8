@@ -11,46 +11,6 @@ function getCredentials() {
   };
 }
 
-async function updateStoredRefreshToken(
-  userId: string,
-  newRefreshToken: string,
-): Promise<void> {
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (!supabaseUrl || !serviceKey || !userId || !newRefreshToken) return;
-
-  try {
-    // Upsert first so a missing row is created (PATCH-only silently drops rotation).
-    await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
-        'Prefer': 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        refresh_token: newRefreshToken,
-        updated_at: new Date().toISOString(),
-      }),
-    }).catch(() => {});
-    await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({
-        refresh_token: newRefreshToken,
-        updated_at: new Date().toISOString(),
-      }),
-    });
-  } catch (err) {
-    console.error('[cTrader] Error updating stored refresh token:', err);
-  }
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -135,25 +95,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `${REFRESH_COOKIE}=${encodeURIComponent(String(newRefreshToken))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
       ]);
 
-      if (supabaseJwt) {
+      let userId: string | undefined;
+      if (typeof (req.body as any)?.user_id === 'string') userId = (req.body as any).user_id.trim();
+      if (!userId && typeof req.query?.user_id === 'string') userId = (req.query.user_id as string).trim();
+      if (!userId && supabaseJwt) {
         try {
           const [, payloadB64] = supabaseJwt.split('.');
           const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-          const userId = payload.sub as string | undefined;
-          if (userId) {
-            const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-            void updateStoredRefreshToken(userId, String(newRefreshToken));
-            // Upsert as well (PATCH-only silently drops rotation when the row
-            // is missing) and mirror service_config — same helper as trade.
-            void persistRotatedCtraderToken({
-              supabaseUrl,
-              serviceKey,
-              userId,
-              newRefreshToken: String(newRefreshToken),
-            });
-          }
+          userId = payload.sub as string | undefined;
         } catch {}
+      }
+
+      if (userId) {
+        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+        try {
+          await persistRotatedCtraderToken({
+            supabaseUrl,
+            serviceKey,
+            userId,
+            newRefreshToken: String(newRefreshToken),
+          });
+          console.log(`[cTrader] Refresh: persisted rotated token for user ${userId}`);
+        } catch (e: any) {
+          console.error('[cTrader] Refresh: failed to persist token', e?.message);
+        }
       }
     }
 

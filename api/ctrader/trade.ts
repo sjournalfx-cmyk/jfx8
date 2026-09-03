@@ -180,7 +180,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = (typeof req.body === 'object' && req.body !== null) ? req.body : {};
   const action = String(body.action || req.query.action || (req.method === 'GET' ? 'get_positions' : 'open')).toLowerCase();
-  const isReadAction = action === 'get_positions' || action === 'positions' || req.method === 'GET';
+  const isReadAction = action === 'get_positions' || action === 'positions' || action === 'get_accounts' || action === 'accounts' || action === 'check_auth' || action === 'auth_status' || req.method === 'GET';
 
   let accessToken = '';
   let authenticatedUserId: string | null = null;
@@ -395,11 +395,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Resolve the account demo/live-aware: prefer the requested/default id, but
     // self-heal when it lives on the other host (prevents "Cannot route request").
+    let accounts: Array<any> = [];
     try {
       const probe = await openCtraderSession(host, clientId, clientSecret, 0, accessToken);
       const accListRes = await probe.send(PT.GET_ACCOUNTS_BY_TOKEN_REQ, { accessToken });
       probe.close();
-      const accounts = (accListRes.ctidTraderAccount || []) as Array<{ ctidTraderAccountId: number; isLive?: boolean }>;
+      accounts = (accListRes.ctidTraderAccount || []) as Array<{ ctidTraderAccountId: number; isLive?: boolean; [k: string]: any }>;
       if (accounts.length === 0 && !accountId) {
         await auditLog(400);
         res.status(400).json(apiKeyError('no_ctrader_accounts', 'No cTrader accounts found for this user token.'));
@@ -418,9 +419,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Non-fatal: fall through and let the authenticated session surface the error.
     }
 
-    if (!accountId) {
-      await auditLog(400);
-      res.status(400).json(apiKeyError('no_ctrader_account', 'Could not resolve a cTrader account for this request.'));
+    if (action === 'get_accounts' || action === 'accounts') {
+      await auditLog(200);
+      res.status(200).json({
+        ok: true,
+        defaultAccountId: accountId,
+        isDemo,
+        accounts: accounts.map((a: any) => ({
+          accountId: Number(a.ctidTraderAccountId),
+          traderLogin: a.traderLogin ? Number(a.traderLogin) : undefined,
+          broker: a.brokerTitleShort || a.brokerName || a.server || undefined,
+          isLive: Boolean(a.isLive),
+          isDemo: !a.isLive,
+        })),
+      });
+      return;
+    }
+
+    if (action === 'check_auth' || action === 'auth_status') {
+      await auditLog(200);
+      res.status(200).json({
+        ok: true,
+        message: 'cTrader credentials and API key authentication valid',
+        accountId,
+        isDemo,
+        userId: authenticatedUserId,
+      });
       return;
     }
 
@@ -539,8 +563,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // -------------------------------------------------------------------------
-    // 3. CLOSE POSITION
+    // 3. CLOSE POSITION & CLOSE ALL
     // -------------------------------------------------------------------------
+    if (action === 'close_all') {
+      const rec = await session.send(PT.RECONCILE_REQ, { ctidTraderAccountId: accountId });
+      const positions = rec.position || [];
+      const closed: any[] = [];
+      const errors: any[] = [];
+      for (const pos of positions) {
+        const pId = Number(pos.positionId);
+        const vol = Number(pos?.tradeData?.volume || pos?.volume || 10000000);
+        try {
+          const closeRes = await session.send(PT.CLOSE_POSITION_REQ, {
+            ctidTraderAccountId: accountId,
+            positionId: pId,
+            volume: vol,
+          });
+          closed.push({ positionId: pId, result: closeRes });
+        } catch (err: any) {
+          errors.push({ positionId: pId, error: err?.message || String(err) });
+        }
+      }
+      session.close();
+      await auditLog(200);
+      res.status(200).json({ ok: true, message: `Closed ${closed.length} position(s)`, closedCount: closed.length, closed, errors });
+      return;
+    }
+
     if (action === 'close' || action === 'close_position') {
       const positionId = Number(body.positionId);
       if (!positionId) {
