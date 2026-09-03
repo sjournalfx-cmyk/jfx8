@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { persistRotatedCtraderToken } from '../_lib/jfxApiKey.js';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
@@ -105,9 +106,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const tokens = await tokenRes.json();
 
-    if (tokens.refresh_token) {
+    // cTrader answers HTTP 200 with an errorCode body on grant failures —
+    // surface it instead of returning empty tokens (which also silently
+    // burned the single-use refresh token with nothing persisted).
+    if (tokens.errorCode || tokens.error) {
+      console.error('cTrader refresh errorCode:', tokens.errorCode, tokens.description);
+      res.status(502).json({
+        error: tokens.description || tokens.error_description || tokens.errorCode || tokens.error || 'Token refresh failed',
+        errorCode: tokens.errorCode,
+      });
+      return;
+    }
+
+    // cTrader uses camelCase (accessToken/refreshToken/expiresIn). Accept
+    // snake_case too — the old code read only snake_case, so every web
+    // session restore minted (burning the single-use grant) and then
+    // persisted nothing, locking out both the web app and API-key trading.
+    const accessToken = tokens.accessToken || tokens.access_token;
+    const newRefreshToken = tokens.refreshToken || tokens.refresh_token;
+    const expiresIn = tokens.expiresIn || tokens.expires_in;
+    if (!accessToken) {
+      res.status(502).json({ error: 'cTrader refresh returned no access token' });
+      return;
+    }
+
+    if (newRefreshToken) {
       res.setHeader('Set-Cookie', [
-        `${REFRESH_COOKIE}=${encodeURIComponent(String(tokens.refresh_token))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
+        `${REFRESH_COOKIE}=${encodeURIComponent(String(newRefreshToken))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
       ]);
 
       if (supabaseJwt) {
@@ -116,15 +141,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
           const userId = payload.sub as string | undefined;
           if (userId) {
-            void updateStoredRefreshToken(userId, String(tokens.refresh_token));
+            const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+            void updateStoredRefreshToken(userId, String(newRefreshToken));
+            // Upsert as well (PATCH-only silently drops rotation when the row
+            // is missing) and mirror service_config — same helper as trade.
+            void persistRotatedCtraderToken({
+              supabaseUrl,
+              serviceKey,
+              userId,
+              newRefreshToken: String(newRefreshToken),
+            });
           }
         } catch {}
       }
     }
 
+    // Both casings so every client (and the dev mirror) reads the fields.
     res.json({
-      access_token: tokens.access_token,
-      expires_in: tokens.expires_in,
+      access_token: accessToken,
+      expires_in: expiresIn,
+      refresh_token: newRefreshToken,
+      accessToken,
+      expiresIn,
+      refreshToken: newRefreshToken,
     });
   } catch (err) {
     console.error('cTrader refresh error:', err);
