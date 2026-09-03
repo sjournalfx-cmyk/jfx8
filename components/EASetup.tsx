@@ -1843,16 +1843,23 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
 
     useEffect(() => {
         let cancelled = false;
-        import('../services/ctraderService').then(async ({ isAuthenticated, refreshToken, getCtidProfile }) => {
+        import('../services/ctraderService').then(async ({ isAuthenticated, refreshToken, getCtidProfile, clearStaleCtraderFlags }) => {
             // Memory tokens are lost on page reloads — silently re-mint them
             // from the server-side session (httpOnly refresh cookie) first.
             if (!isAuthenticated()) {
                 await refreshToken().catch(() => false);
             }
             if (cancelled) return;
-            // Always land back on the authenticated view once a session
-            // exists. A failed refresh does NOT log out here — exiting this
-            // screen requires an explicit "Disconnect from cTrader" click.
+            // Verify before claiming "connected": a stale local flag must not
+            // mask a dead server grant (that dead-end broke agent trading
+            // while the UI kept saying "Successfully authenticated").
+            if (!isAuthenticated()) {
+                try { clearStaleCtraderFlags(); } catch { /* ignore */ }
+                setAuthState('idle');
+                setErrorMsg('Your cTrader session has expired. Reconnect below — agent API keys start working again right after.');
+                setIsFetchingAccounts(false);
+                return;
+            }
             setAuthState('connected');
             if (isAuthenticated() && !fetchCalledRef.current) {
                 fetchCalledRef.current = true;

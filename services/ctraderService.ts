@@ -528,6 +528,16 @@ export function clearSelectedAccountId() {
   try { localStorage.removeItem(SELECTED_ACCOUNT_KEY); } catch { /* blocked */ }
 }
 
+/**
+ * Clear only the persisted "was connected" markers (local flag + dev token)
+ * without touching sockets. Used when a session is proven dead server-side
+ * so the UI stops showing a stale "connected" state.
+ */
+export function clearStaleCtraderFlags() {
+  try { localStorage.removeItem(SESSION_FLAG_KEY); } catch { /* blocked */ }
+  try { localStorage.removeItem(DEV_REFRESH_KEY); } catch { /* blocked */ }
+}
+
 export function logout() {
   memoryTokens = null;
   clearSelectedAccountId();
