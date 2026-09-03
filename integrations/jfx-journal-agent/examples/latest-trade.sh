@@ -3,7 +3,7 @@ set -euo pipefail
 
 : "${JFX_KEY:?Set JFX_KEY before running this script}"
 JFX_BASE="${JFX_BASE:-https://lwlikhjgwazyrahucatl.supabase.co/functions/v1/jfx-api}"
-JFX_CTRADER_TRADE_URL="${JFX_CTRADER_TRADE_URL:-https://jfxjournal.site/api/ctrader/trade}"
+JFX_CTRADER_TRADE_URL="${JFX_CTRADER_TRADE_URL:-https://www.jfxjournal.site/api/ctrader/trade}"
 
 echo "== Journal: latest trade =="
 curl --fail-with-body --silent --show-error \

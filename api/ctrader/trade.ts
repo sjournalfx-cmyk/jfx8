@@ -1,9 +1,20 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import WebSocket from 'ws';
 import { createHash } from 'crypto';
+import {
+  extractRawApiKey,
+  isJfxApiKey,
+  parseIsDemo,
+  hasTradeScope,
+  toVolumeCents,
+  chooseCtraderAccount,
+  findAltAccountForHost,
+  isFallbackWorthyCtraderError,
+  apiKeyError,
+  persistRotatedCtraderToken,
+} from '../_lib/jfxApiKey.js';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
-const TOKEN_PATTERN = /^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/;
 
 function getCredentials() {
   return {
@@ -27,16 +38,6 @@ const PT = {
   GET_ACCOUNTS_BY_TOKEN_REQ: 2149,
   ERROR_RES: 2142,
 };
-
-const CTRADER_VOLUME_CENTS_PER_LOT = 10000000;
-const CTRADER_VOLUME_CENTS_PER_UNIT = 100;
-
-function toVolumeCents(volume: number): number {
-  if (volume >= 500) {
-    return Math.round(volume * CTRADER_VOLUME_CENTS_PER_UNIT);
-  }
-  return Math.round(volume * CTRADER_VOLUME_CENTS_PER_LOT);
-}
 
 function hashToken(raw: string): string {
   try { return createHash('sha256').update(raw).digest('hex'); } catch (e: any) {
@@ -127,16 +128,14 @@ function openCtraderSession(
 }
 
 /**
- * Mint a fresh cTrader access token from the refresh token stored in DB or cookie.
+ * Mint a fresh cTrader access token from the refresh token stored in DB.
+ * Returns both tokens so callers can persist rotation via upsert (never PATCH-only).
  */
 async function mintAccessToken(
   clientId: string,
   clientSecret: string,
   refreshToken: string,
-  userId?: string,
-  supabaseUrl?: string,
-  serviceKey?: string,
-): Promise<string> {
+): Promise<{ accessToken: string; refreshToken: string | null }> {
   const tokenUrl = new URL(CTRADER_TOKEN_URL);
   tokenUrl.searchParams.set('grant_type', 'refresh_token');
   tokenUrl.searchParams.set('refresh_token', refreshToken);
@@ -153,23 +152,10 @@ async function mintAccessToken(
     throw new Error(msg);
   }
 
-  // Update rotated refresh token in DB if new one returned
-  if (body.refreshToken && userId && supabaseUrl && serviceKey) {
-    void fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({
-        refresh_token: String(body.refreshToken),
-        updated_at: new Date().toISOString(),
-      }),
-    }).catch(() => {});
-  }
-
-  return String(body.accessToken);
+  return {
+    accessToken: String(body.accessToken),
+    refreshToken: body.refreshToken ? String(body.refreshToken) : null,
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -190,8 +176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const authHeader = (req.headers['authorization'] || req.headers['x-api-key'] || req.headers['x-access-token'] || '') as string;
-  const rawKey = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const rawKey = extractRawApiKey(req.headers as Record<string, string | string[] | undefined>);
 
   const body = (typeof req.body === 'object' && req.body !== null) ? req.body : {};
   const action = String(body.action || req.query.action || (req.method === 'GET' ? 'get_positions' : 'open')).toLowerCase();
@@ -209,14 +194,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 2. Direct cTrader Access Token (Authorization: Bearer <raw_token>) -> BACKWARD COMPAT
   // ---------------------------------------------------------------------------
   try {
-  if (TOKEN_PATTERN.test(rawKey)) {
+  if (isJfxApiKey(rawKey)) {
     if (!supabaseUrl || !serviceKey) {
-      res.status(503).json({ error: 'Database service not configured' });
+      res.status(503).json(apiKeyError('service_unavailable', 'Database service not configured on server'));
       return;
     }
 
     let keyHash: string;
-    try { keyHash = hashToken(rawKey); } catch (e: any) { res.status(500).json({ error: 'hash_failed', message: e?.message || String(e) }); return; }
+    try { keyHash = hashToken(rawKey); } catch (e: any) { res.status(500).json(apiKeyError('hash_failed', e?.message || String(e))); return; }
     const keyQueryRes = await fetch(`${supabaseUrl}/rest/v1/api_keys?key_hash=eq.${keyHash}&select=id,user_id,scopes,expires_at`, {
       headers: {
         'apikey': serviceKey,
@@ -228,39 +213,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const apiKey = Array.isArray(keyRows) ? keyRows[0] : null;
 
     if (!apiKey) {
-      res.status(401).json({ error: 'invalid_api_key' });
+      res.status(401).json(apiKeyError('invalid_api_key', 'API key not recognised. Copy the full key from Settings → Developer Tools (it starts with jfx_pat_) and send it as X-API-Key or Authorization: Bearer.'));
       return;
     }
 
     if (apiKey.expires_at && new Date(apiKey.expires_at).getTime() <= Date.now()) {
-      res.status(401).json({ error: 'expired_api_key' });
+      res.status(401).json(apiKeyError('expired_api_key', 'This API key has expired. Create a new one in Settings → Developer Tools.'));
       return;
     }
 
     const scopes: string[] = apiKey.scopes || [];
     const requiredScope = isReadAction ? 'trades:read' : 'trades:write';
-    if (!scopes.includes(requiredScope) && !scopes.includes('trades:write')) {
-      res.status(403).json({ error: 'insufficient_scope', need: requiredScope, have: scopes, hint: requiredScope === 'trades:write' ? 'Recreate the key in Settings → Developer Tools with trades:write enabled' : 'Requires trades:read (or trades:write)' });
+    if (!hasTradeScope(scopes, requiredScope as 'trades:read' | 'trades:write')) {
+      res.status(403).json(apiKeyError('insufficient_scope', requiredScope === 'trades:write' ? 'This key lacks trades:write. Recreate it in Settings → Developer Tools with trades:write enabled.' : 'This key lacks trades:read (or trades:write).', { need: requiredScope, have: scopes, hint: requiredScope === 'trades:write' ? 'Recreate the key in Settings → Developer Tools with trades:write enabled' : 'Requires trades:read (or trades:write)' }));
       return;
     }
 
     authenticatedUserId = apiKey.user_id;
     keyId = apiKey.id;
 
-    // Rate limiting check via consume_api_key_rate_limit RPC
-    const rateLimitRes = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_api_key_rate_limit`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({ p_user_id: authenticatedUserId, p_key_id: keyId }),
-    });
-    const allowed = await rateLimitRes.json().catch(() => true);
-    if (allowed === false) {
-      res.setHeader('Retry-After', '60');
-      res.status(429).json({ error: 'rate_limited', retry_after: 60 });
+    // Rate limiting check via consume_api_key_rate_limit RPC.
+    // 429 only when the limiter explicitly denies; transport/RPC errors are 503
+    // so a missing migration is never misreported as "rate limited".
+    try {
+      const rateLimitRes = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_api_key_rate_limit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': serviceKey,
+          'Authorization': `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({ p_user_id: authenticatedUserId, p_key_id: keyId }),
+      });
+      if (!rateLimitRes.ok) {
+        res.status(503).json(apiKeyError('rate_limiter_unavailable', 'Rate-limiter check failed on the server. Try again shortly.'));
+        return;
+      }
+      const allowed = await rateLimitRes.json().catch(() => true);
+      if (allowed === false) {
+        res.setHeader('Retry-After', '60');
+        res.status(429).json(apiKeyError('rate_limited', 'Too many requests for this key. Wait 60s and retry.', { retry_after: 60 }));
+        return;
+      }
+    } catch {
+      res.status(503).json(apiKeyError('rate_limiter_unavailable', 'Rate-limiter check failed on the server. Try again shortly.'));
       return;
     }
 
@@ -289,7 +285,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (userTokens?.refresh_token) {
         userRefreshToken = userTokens.refresh_token;
         defaultAccountId = userTokens.default_account_id ? Number(userTokens.default_account_id) : null;
-        defaultIsDemo = userTokens.is_demo !== undefined ? Boolean(userTokens.is_demo) : true;
+        defaultIsDemo = userTokens.is_demo !== undefined ? parseIsDemo(userTokens.is_demo, true) : true;
       }
     }
 
@@ -317,51 +313,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    const mintAndPersist = async (refreshToken: string) => {
+      const minted = await mintAccessToken(clientId, clientSecret, refreshToken);
+      if (minted.refreshToken && authenticatedUserId) {
+        await persistRotatedCtraderToken({
+          supabaseUrl, serviceKey,
+          userId: authenticatedUserId,
+          newRefreshToken: minted.refreshToken,
+          previousToken: refreshToken,
+        });
+      }
+      return minted.accessToken;
+    };
+
     try {
-      accessToken = await mintAccessToken(clientId, clientSecret, userRefreshToken, authenticatedUserId, supabaseUrl, serviceKey);
+      accessToken = await mintAndPersist(userRefreshToken);
     } catch (err: any) {
       const msg = err?.message || '';
-      // If per-user token is stale/Access denied, try global service token as fallback (for demo account 47876400 shared)
-      if (msg.includes('Access denied') || msg.includes('ACCESS_DENIED')) {
+      // If per-user token is stale/expired/revoked, try global service token as fallback
+      if (isFallbackWorthyCtraderError(msg)) {
         try {
           const svcRes = await fetch(`${supabaseUrl}/rest/v1/service_config?key=eq.ctrader_service_refresh_token&select=value`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
           const svcRows: any = await svcRes.json().catch(() => []);
           const svcToken = Array.isArray(svcRows) ? svcRows[0]?.value : svcRows?.value;
           if (svcToken && svcToken !== userRefreshToken) {
             console.log('[trade] per-user token failed, trying service token fallback');
-            accessToken = await mintAccessToken(clientId, clientSecret, String(svcToken), authenticatedUserId, supabaseUrl, serviceKey);
+            accessToken = await mintAndPersist(String(svcToken));
           } else throw err;
         } catch (e2: any) {
-          res.status(502).json({
-            error: 'ctrader_auth_failed',
-            message: `Failed to authenticate with cTrader: ${msg || e2?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`,
-          });
+          res.status(502).json(apiKeyError('ctrader_auth_failed', `Failed to authenticate with cTrader: ${msg || e2?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`));
           return;
         }
       } else {
-        res.status(502).json({
-          error: 'ctrader_auth_failed',
-          message: `Failed to authenticate with cTrader: ${msg || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`,
-        });
+        res.status(502).json(apiKeyError('ctrader_auth_failed', `Failed to authenticate with cTrader: ${msg || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`));
         return;
       }
     }
   } else if (rawKey) {
-    // Direct cTrader access token
+    // Direct cTrader access token (backward compat for callers not on JFX keys)
     accessToken = rawKey;
   } else {
-    res.status(401).json({ error: 'Missing X-API-Key or Authorization header' });
+    res.status(401).json(apiKeyError('missing_api_key', 'Missing X-API-Key or Authorization header. Send X-API-Key: jfx_pat_... or Authorization: Bearer jfx_pat_...'));
     return;
   }
   } catch (e: any) {
     console.error('[trade] auth error', e);
-    if (!res.headersSent) res.status(500).json({ error: 'auth_failed', message: e?.message || String(e) });
+    if (!res.headersSent) res.status(500).json(apiKeyError('auth_failed', e?.message || String(e)));
     return;
   }
 
-  let accountId = Number(body.ctidTraderAccountId || req.query.ctidTraderAccountId || defaultAccountId);
-  const isDemo = body.isDemo !== undefined ? Boolean(body.isDemo) : (req.query.isDemo !== undefined ? req.query.isDemo === 'true' : defaultIsDemo);
+  const requestedAccountId = Number(body.ctidTraderAccountId || req.query.ctidTraderAccountId || defaultAccountId) || null;
+  // NB: parseIsDemo handles string "false" correctly (Boolean("false") === true bug fix).
+  const isDemo = parseIsDemo(body.isDemo !== undefined ? body.isDemo : req.query.isDemo, defaultIsDemo);
   const host = isDemo ? 'demo.ctraderapi.com' : 'live.ctraderapi.com';
+  let accountId: number | null = requestedAccountId;
 
   let session: WsSession | null = null;
 
@@ -388,19 +393,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   try {
-    // If accountId is not provided, query cTrader for the user's accounts
-    if (!accountId) {
-      session = await openCtraderSession(host, clientId, clientSecret, 0, accessToken);
-      const accListRes = await session.send(PT.GET_ACCOUNTS_BY_TOKEN_REQ, { accessToken });
-      const accounts = accListRes.ctidTraderAccount || [];
-      if (accounts.length === 0) {
-        session.close();
+    // Resolve the account demo/live-aware: prefer the requested/default id, but
+    // self-heal when it lives on the other host (prevents "Cannot route request").
+    try {
+      const probe = await openCtraderSession(host, clientId, clientSecret, 0, accessToken);
+      const accListRes = await probe.send(PT.GET_ACCOUNTS_BY_TOKEN_REQ, { accessToken });
+      probe.close();
+      const accounts = (accListRes.ctidTraderAccount || []) as Array<{ ctidTraderAccountId: number; isLive?: boolean }>;
+      if (accounts.length === 0 && !accountId) {
         await auditLog(400);
-        res.status(400).json({ error: 'No cTrader accounts found for this user' });
+        res.status(400).json(apiKeyError('no_ctrader_accounts', 'No cTrader accounts found for this user token.'));
         return;
       }
-      accountId = Number(accounts[0].ctidTraderAccountId);
-      session.close();
+      if (!accountId) {
+        accountId = chooseCtraderAccount(accounts, isDemo, null).accountId || null;
+      } else {
+        const target = accounts.find((a) => Number(a.ctidTraderAccountId) === Number(accountId));
+        if (target && typeof target.isLive === 'boolean' && (isDemo ? target.isLive : !target.isLive)) {
+          const alt = findAltAccountForHost(accounts, isDemo, Number(accountId));
+          if (alt) accountId = Number(alt.ctidTraderAccountId);
+        }
+      }
+    } catch {
+      // Non-fatal: fall through and let the authenticated session surface the error.
+    }
+
+    if (!accountId) {
+      await auditLog(400);
+      res.status(400).json(apiKeyError('no_ctrader_account', 'Could not resolve a cTrader account for this request.'));
+      return;
     }
 
     session = await openCtraderSession(host, clientId, clientSecret, accountId, accessToken);

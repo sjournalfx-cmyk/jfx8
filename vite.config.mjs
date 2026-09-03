@@ -1117,8 +1117,8 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           for (const [k, v] of qUrl.searchParams) if (!(k in body)) body[k] = v;
         } catch {}
 
-        const authHeader = (req.headers['authorization'] || req.headers['x-api-key'] || req.headers['x-access-token'] || '');
-        const rawKey = String(authHeader).replace(/^Bearer\s+/i, '').trim();
+        const authHeader = (req.headers['x-api-key'] || req.headers['authorization'] || req.headers['x-access-token'] || '');
+        const rawKey = String(authHeader).replace(/^(Bearer|Token|ApiKey|APIKey)\s+/i, '').trim();
         const action = String(body.action || (req.method === 'GET' ? 'get_positions' : 'open')).toLowerCase();
         const isReadAction = action === 'get_positions' || action === 'positions' || req.method === 'GET';
 
@@ -1144,20 +1144,21 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             const rows = await qr.json().catch(() => []);
             apiKey = Array.isArray(rows) ? rows[0] : null;
           } catch {}
-          if (!apiKey) { res.statusCode = 401; res.end(JSON.stringify({ error: 'invalid_api_key' })); return; }
-          if (apiKey.expires_at && new Date(apiKey.expires_at).getTime() <= Date.now()) { res.statusCode = 401; res.end(JSON.stringify({ error: 'expired_api_key' })); return; }
+          if (!apiKey) { res.statusCode = 401; res.end(JSON.stringify({ error: 'invalid_api_key', message: 'API key not recognised. Copy the full key from Settings → Developer Tools (it starts with jfx_pat_) and send it as X-API-Key or Authorization: Bearer.' })); return; }
+          if (apiKey.expires_at && new Date(apiKey.expires_at).getTime() <= Date.now()) { res.statusCode = 401; res.end(JSON.stringify({ error: 'expired_api_key', message: 'This API key has expired. Create a new one in Settings → Developer Tools.' })); return; }
           const scopes = apiKey.scopes || [];
           const requiredScope = isReadAction ? 'trades:read' : 'trades:write';
           if (!scopes.includes(requiredScope) && !scopes.includes('trades:write')) {
-            res.statusCode = 403; res.end(JSON.stringify({ error: 'insufficient_scope', need: requiredScope, have: scopes, hint: requiredScope === 'trades:write' ? 'Recreate the key in Settings → Developer Tools with trades:write enabled' : 'Requires trades:read (or trades:write)' })); return;
+            res.statusCode = 403; res.end(JSON.stringify({ error: 'insufficient_scope', need: requiredScope, have: scopes, message: requiredScope === 'trades:write' ? 'This key lacks trades:write. Recreate it in Settings → Developer Tools with trades:write enabled.' : 'This key lacks the required scope.', hint: requiredScope === 'trades:write' ? 'Recreate the key in Settings → Developer Tools with trades:write enabled' : 'Requires trades:read (or trades:write)' })); return;
           }
           authenticatedUserId = apiKey.user_id; keyId = apiKey.id;
-          // rate limit (best-effort)
+          // rate limit: 429 only on explicit deny; transport errors are 503 (never silent 429 confusion)
           try {
             const rl = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_api_key_rate_limit`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}` }, body: JSON.stringify({ p_user_id: authenticatedUserId, p_key_id: keyId }) });
+            if (!rl.ok) { res.statusCode = 503; res.end(JSON.stringify({ error: 'rate_limiter_unavailable', message: 'Rate-limiter check failed on the server. Try again shortly.' })); return; }
             const allowed = await rl.json().catch(() => true);
-            if (allowed === false) { res.setHeader('Retry-After', '60'); res.statusCode = 429; res.end(JSON.stringify({ error: 'rate_limited', retry_after: 60 })); return; }
-          } catch {}
+            if (allowed === false) { res.setHeader('Retry-After', '60'); res.statusCode = 429; res.end(JSON.stringify({ error: 'rate_limited', message: 'Too many requests for this key. Wait 60s and retry.', retry_after: 60 })); return; }
+          } catch { res.statusCode = 503; res.end(JSON.stringify({ error: 'rate_limiter_unavailable', message: 'Rate-limiter check failed on the server. Try again shortly.' })); return; }
           // lookup refresh token
           let userRefreshToken = '';
           try {
@@ -1165,7 +1166,7 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             if (tr.ok) {
               const rows = await tr.json().catch(() => []);
               const ut = Array.isArray(rows) ? rows[0] : null;
-              if (ut?.refresh_token) { userRefreshToken = ut.refresh_token; defaultAccountId = ut.default_account_id ? Number(ut.default_account_id) : null; defaultIsDemo = ut.is_demo !== undefined ? Boolean(ut.is_demo) : true; }
+              if (ut?.refresh_token) { userRefreshToken = ut.refresh_token; defaultAccountId = ut.default_account_id ? Number(ut.default_account_id) : null; defaultIsDemo = ut.is_demo !== undefined ? (String(ut.is_demo).toLowerCase() !== 'false' && Boolean(ut.is_demo)) : true; }
             }
           } catch {}
           if (!userRefreshToken) {
@@ -1197,15 +1198,35 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
               void fetch(`${supabaseUrl}/rest/v1/service_config`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: `ctrader_refresh_${authenticatedUserId}`, value: newTok }) }).catch(()=>{});
               void fetch(`${supabaseUrl}/rest/v1/service_config`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: 'ctrader_service_refresh_token', value: newTok }) }).catch(()=>{});
             }
-          } catch (err) { res.statusCode = 502; res.end(JSON.stringify({ error: 'ctrader_auth_failed', message: `Failed to authenticate with cTrader: ${err?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.` })); return; }
+          } catch (err) {
+            const _msg = String(err?.message || '');
+            const _retryable = /access denied|access_denied|invalid_grant|invalid grant|invalid_token|expired|revoked|ch_access_denied/i.test(_msg);
+            if (_retryable) {
+              try {
+                const svcRes = await fetch(`${supabaseUrl}/rest/v1/service_config?key=eq.ctrader_service_refresh_token&select=value`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
+                const svcRows = await svcRes.json().catch(() => []);
+                const svcToken = Array.isArray(svcRows) ? svcRows[0]?.value : svcRows?.value;
+                if (svcToken && svcToken !== userRefreshToken) {
+                  const retry = await mintAccessTokenDev(clientId, clientSecret, String(svcToken));
+                  accessToken = retry.accessToken;
+                  if (retry.refreshToken && retry.refreshToken !== String(svcToken)) {
+                    const nt = retry.refreshToken;
+                    void fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ user_id: authenticatedUserId, refresh_token: nt, updated_at: new Date().toISOString() }) }).catch(()=>{});
+                    void fetch(`${supabaseUrl}/rest/v1/service_config`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: `ctrader_refresh_${authenticatedUserId}`, value: nt }) }).catch(()=>{});
+                  }
+                } else throw err;
+              } catch (e2) { res.statusCode = 502; res.end(JSON.stringify({ error: 'ctrader_auth_failed', message: `Failed to authenticate with cTrader: ${_msg || e2?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.` })); return; }
+            } else { res.statusCode = 502; res.end(JSON.stringify({ error: 'ctrader_auth_failed', message: `Failed to authenticate with cTrader: ${_msg || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.` })); return; }
+          }
         } else if (rawKey) {
           accessToken = rawKey;
         } else {
-          res.statusCode = 401; res.end(JSON.stringify({ error: 'Missing X-API-Key or Authorization header' })); return;
+          res.statusCode = 401; res.end(JSON.stringify({ error: 'missing_api_key', message: 'Missing X-API-Key or Authorization header. Send X-API-Key: jfx_pat_... or Authorization: Bearer jfx_pat_...' })); return;
         }
 
         let accountId = Number(body.ctidTraderAccountId || defaultAccountId);
-        const isDemo = body.isDemo !== undefined ? Boolean(body.isDemo) && String(body.isDemo) !== 'false' : defaultIsDemo;
+        const _isDemoRaw = body.isDemo !== undefined ? body.isDemo : defaultIsDemo;
+        const isDemo = (() => { if (typeof _isDemoRaw === 'boolean') return _isDemoRaw; if (typeof _isDemoRaw === 'number') return _isDemoRaw !== 0; const s = String(_isDemoRaw).trim().toLowerCase(); if (['true','1','yes','y','demo','paper'].includes(s)) return true; if (['false','0','no','n','live','real'].includes(s)) return false; return Boolean(defaultIsDemo); })();
         const host = isDemo ? 'demo.ctraderapi.com' : 'live.ctraderapi.com';
         let session = null;
         try {

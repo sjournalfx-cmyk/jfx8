@@ -37,7 +37,10 @@ const scopeGroups: Array<{ label: string; items: Array<{ value: Scope; label: st
 
 const formatDate = (value: string | null) => value ? new Date(value).toLocaleDateString() : 'Never';
 const JFX_API_BASE = 'https://lwlikhjgwazyrahucatl.supabase.co/functions/v1/jfx-api';
-const JFX_CTRADER_TRADE_URL = 'https://jfxjournal.site/api/ctrader/trade';
+// Use www directly — the apex host 307-redirects to www and some browsers strip
+// auth headers on redirect, which surfaced as "Failed to fetch".
+const JFX_CTRADER_TRADE_URL = 'https://www.jfxjournal.site/api/ctrader/trade';
+const JFX_CTRADER_TRADE_URL_DEV = 'http://127.0.0.1:3000/api/ctrader/trade';
 const DEFAULT_SCOPES: Scope[] = ['trades:read', 'trades:write'];
 const agentSkill = `---
 name: jfx-journal
@@ -46,11 +49,11 @@ description: Use the JFX Journal and cTrader API to query journal data, analytic
 
 # JFX Journal & cTrader Agent Skill
 
-The API key is stored in the \`JFX_KEY\` environment variable. Never reveal the key or commit it to source control.
+The API key is stored in the \`JFX_KEY\` environment variable. Never reveal the key, include it in an answer, write it to source control, or put it in a URL.
 
 Base URLs:
 - Journal & Analytics API: ${JFX_API_BASE}
-- cTrader Execution API: ${JFX_CTRADER_TRADE_URL} (or /api/ctrader/trade)
+- cTrader Execution API: ${JFX_CTRADER_TRADE_URL} (local dev: ${JFX_CTRADER_TRADE_URL_DEV})
 
 Environment (.env downloaded from the key screen):
 \`\`\`
@@ -59,30 +62,41 @@ JFX_BASE=${JFX_API_BASE}
 JFX_CTRADER_TRADE_URL=${JFX_CTRADER_TRADE_URL}
 \`\`\`
 
+Auth headers (either works — do not mix a truncated key):
+- \`X-API-Key: $JFX_KEY\` (preferred)
+- \`Authorization: Bearer $JFX_KEY\`
+
+Copy the FULL key (starts with \`jfx_pat_\`). Do not trim, wrap, or URL-encode it.
+
 ---
 
 ## 1. Journal & Analytics Requests
-
-Header: \`X-API-Key: $JFX_KEY\`
 
 - Latest trade: \`GET /v1/trades?limit=1\`
 - Recent trades: \`GET /v1/trades?limit=20\`
 - Trade summary: \`GET /v1/analytics/summary\`
 - Monthly summary: \`GET /v1/analytics/summary?from=YYYY-MM-DD&to=YYYY-MM-DD\`
-- Notes: \`GET /v1/notes?limit=20\`
+- Notes: \`GET /v1/notes?limit=20\` — requires \`notes:read\` (\`notes:write\` implies read)
 - Bridge health: \`GET /v1/bridge/status\` — requires \`bridge:read\`
 - Open positions (MT5 bridge): \`GET /v1/positions\` — requires \`bridge:read\` or \`trades:read\`/\`trades:write\`
+- Me: \`GET /v1/me\` — requires \`me:read\`
 
-Scopes: \`trades:read\` for reads, \`trades:write\` for writes and cTrader execution (\`trades:write\` implies \`trades:read\`).
+Scopes: \`trades:read\` for reads, \`trades:write\` for journal writes and cTrader execution (\`trades:write\` implies \`trades:read\`).
+
+Quick test (requires \`trades:read\`):
+\`\`\`bash
+curl -sS -H "X-API-Key: $JFX_KEY" "$JFX_BASE/v1/trades?limit=1"
+\`\`\`
 
 ---
 
 ## 2. cTrader Live Trading (Open, Close, Modify)
 
 Endpoint: \`POST \${JFX_CTRADER_TRADE_URL:-${JFX_CTRADER_TRADE_URL}}\`
-Header: \`X-API-Key: $JFX_KEY\` (No broker access tokens needed — authenticated securely via your JFX key)
+Auth: \`X-API-Key: $JFX_KEY\` (or \`Authorization: Bearer $JFX_KEY\`). No broker access tokens needed — the server mints cTrader tokens from the stored OAuth grant.
 Scopes: any trade execution (\`open\`, \`close\`, \`modify_position\`, \`modify_order\`, \`cancel_order\`, also aliases \`buy\`/\`sell\` and fields \`pair\`/\`instrument\`/\`ticker\` as aliases for \`symbol\`) requires \`trades:write\`. Reading positions requires \`trades:read\` (or \`trades:write\`).
-If you get \`403 insufficient_scope need trades:write\`, tell the user to recreate the key with \`trades:write\` in Settings → Developer Tools. If you get \`400 ctrader_not_connected\`, instruct them to connect cTrader once in the web app on the **Connect & Import** page.
+\`isDemo\` accepts boolean or string (\`true\`/\`false\`); \`true\` = demo host, \`false\` = live host. When in doubt, omit it — the server falls back to your stored default.
+If you get \`403 insufficient_scope need trades:write\`, tell the user to recreate the key with \`trades:write\` in Settings → Developer Tools. If you get \`400 ctrader_not_connected\`, instruct them to connect cTrader once in the web app on the **Connect & Import** page. If you get \`502 ctrader_auth_failed\`, ask them to reconnect cTrader (stored grant expired).
 
 ### Get Open Positions & Pending Orders
 \`\`\`json
@@ -149,12 +163,19 @@ If you get \`403 insufficient_scope need trades:write\`, tell the user to recrea
 
 Only execute trading actions when explicitly requested or confirmed by the user.
 
+\`\`\`bash
+curl -sS -H "X-API-Key: $JFX_KEY" -H "Content-Type: application/json" \\
+  -d '{"action":"get_positions","isDemo":true}' \\
+  "\${JFX_CTRADER_TRADE_URL:-${JFX_CTRADER_TRADE_URL}}"
+\`\`\`
+
 ## 3. Error Handling
 
-- \`401\` — missing/malformed/expired/revoked key
+- \`401 missing_api_key / malformed_token / invalid_token / expired_token\` — key missing, truncated, revoked, or expired. Ask the user to press **Test connection** in Settings → Developer Tools, then recreate the key if needed.
 - \`403 insufficient_scope need trades:write\` — key lacks \`trades:write\`; ask user to recreate with trading scopes in Settings → Developer Tools
 - \`400 ctrader_not_connected\` — key valid but cTrader not linked; ask user to connect cTrader once on the **Connect & Import** page
-- \`429\` — rate limited; retry after \`Retry-After\` seconds
+- \`502 ctrader_auth_failed\` — stored cTrader grant expired/revoked; ask user to reconnect cTrader on the **Connect & Import** page, then retry
+- \`429 rate_limited\` — too many requests; retry after \`Retry-After\` seconds. \`503 rate_limiter_unavailable\` means the server limiter is down — retry shortly, do not recreate the key.
 `;
 
 export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
@@ -168,6 +189,9 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
   const [copied, setCopied] = useState(false);
   const [copiedGuide, setCopiedGuide] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testKeyInput, setTestKeyInput] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   const cardClass = isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white';
   const inputClass = isDarkMode ? 'border-white/[0.1] bg-white/[0.04] text-white' : 'border-slate-200 bg-white text-slate-900';
@@ -200,9 +224,53 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
     await load();
   };
   const toggleScope = (scope: Scope) => setScopes(previous => previous.includes(scope) ? previous.filter(item => item !== scope) : [...previous, scope]);
+  const testConnection = async (candidate?: string) => {
+    const keyToTest = (candidate ?? testKeyInput ?? '').trim() || rawKey || '';
+    if (!keyToTest) { setTestResult('Paste a key first (starts with jfx_pat_).'); return; }
+    if (!/^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/.test(keyToTest)) {
+      setTestResult('That does not look like a full key — it should match jfx_pat_<8>_<32>. Copy the full value; do not truncate or add spaces.');
+      return;
+    }
+    setTesting(true); setTestResult(null);
+    try {
+      const headers = { 'X-API-Key': keyToTest };
+      const meRes = await fetch(`${JFX_API_BASE}/v1/trades?limit=1`, { headers });
+      const meBody = await meRes.json().catch(() => ({}));
+      if (!meRes.ok) {
+        const hint = meRes.status === 403
+          ? 'Key works but lacks the needed scope — recreate with trades:read/trades:write.'
+          : meRes.status === 401
+            ? 'Key rejected (revoked/expired/truncated). Recreate it and copy the full value.'
+            : meRes.status === 429 ? 'Rate limited — wait 60s and retry.' : (meBody?.message || meBody?.error || '');
+        setTestResult(`Journal check failed (${meRes.status} ${meBody?.error || ''}): ${hint}`);
+        return;
+      }
+      const tradeRes = await fetch(JFX_CTRADER_TRADE_URL, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_positions', isDemo: true }),
+      });
+      const tradeBody = await tradeRes.json().catch(() => ({}));
+      if (!tradeRes.ok) {
+        if (tradeBody?.error === 'ctrader_not_connected') { setTestResult('Journal OK. cTrader not linked — connect once on Connect & Import, then re-test.'); return; }
+        if (tradeBody?.error === 'insufficient_scope') { setTestResult('Journal OK. Key lacks trades:write for trading — recreate with trades:write enabled.'); return; }
+        if (tradeBody?.error === 'ctrader_auth_failed') { setTestResult('Journal OK. cTrader grant expired — reconnect cTrader on Connect & Import, then re-test.'); return; }
+        setTestResult(`Journal OK. Trade check failed (${tradeRes.status} ${tradeBody?.error || ''}): ${tradeBody?.message || 'see response'}`);
+        return;
+      }
+      const n = Array.isArray(tradeBody?.positions) ? tradeBody.positions.length : 0;
+      setTestResult(`OK — journal reachable and cTrader demo host reachable (${n} open position(s) returned). Safe to hand this key to your agent.`);
+    } catch (e: unknown) {
+      const raw = e instanceof Error ? e.message : String(e);
+      const hint = /failed to fetch|networkerror|load failed|cors/i.test(raw)
+        ? 'The browser blocked the request (CORS/network). Your key is likely fine — verify with curl, check ad-blocker/VPN, and make sure the Edge function with the CORS preflight fix is deployed. Try again in a minute.'
+        : raw;
+      setTestResult(`Network error while testing: ${hint}`);
+    } finally { setTesting(false); }
+  };
   const downloadEnv = () => {
     if (!rawKey) return;
-    const content = `# JFX Journal Personal API Key\nJFX_KEY=${rawKey}\nJFX_BASE=${JFX_API_BASE}\nJFX_CTRADER_TRADE_URL=${JFX_CTRADER_TRADE_URL}\n`;
+    const content = `# JFX Journal Personal API Key (created ${new Date().toISOString()})\nJFX_KEY=${rawKey}\nJFX_BASE=${JFX_API_BASE}\nJFX_CTRADER_TRADE_URL=${JFX_CTRADER_TRADE_URL}\n# Local dev override:\n# JFX_CTRADER_TRADE_URL=${JFX_CTRADER_TRADE_URL_DEV}\n`;
     const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url; link.download = 'jfx-journal.env'; link.click();
@@ -234,11 +302,20 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
       <div className={`mt-3 flex items-center gap-2 rounded-lg px-2.5 py-2 text-[10px] ${isDarkMode ? 'bg-black/30' : 'bg-white'}`}><Terminal size={13} className="text-[#FF4F01]" /><code className="break-all">curl -H "X-API-Key: $JFX_KEY" "{JFX_API_BASE}/v1/trades?limit=1"</code></div>
     </section>
     {error && <p className="mt-4 rounded-xl bg-rose-500/10 px-3 py-2 text-xs text-rose-500">{error}</p>}
+    <section className={`mt-4 rounded-2xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-white/[0.02]' : 'border-slate-200 bg-slate-50'}`}>
+      <p className="text-xs font-black">Test a key before giving it to an agent</p>
+      <p className="mt-0.5 text-[11px] opacity-60">Paste the full key (starts with <code>jfx_pat_</code>). This checks journal access and cTrader demo reachability without opening a trade. Your key never leaves your browser except to call your own API.</p>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <input value={testKeyInput} onChange={e => setTestKeyInput(e.target.value)} placeholder="jfx_pat_…" spellCheck={false} className={`flex-1 rounded-xl border px-3 py-2 font-mono text-xs outline-none ${inputClass}`} />
+        <button onClick={() => void testConnection()} disabled={testing} className="flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-3 py-2 text-xs font-black text-white disabled:opacity-50"><RefreshCw size={14} className={testing ? 'animate-spin' : ''} />{testing ? 'Testing…' : 'Test connection'}</button>
+      </div>
+      {testResult && <p className={`mt-2 rounded-xl px-3 py-2 text-xs ${testResult.startsWith('OK') ? 'bg-emerald-500/10 text-emerald-600' : testResult.startsWith('Journal OK') ? 'bg-amber-500/10 text-amber-600' : 'bg-rose-500/10 text-rose-500'}`}>{testResult}</p>}
+    </section>
     <div className="mt-5 overflow-x-auto rounded-2xl border border-dashed">
       {loading ? <p className="p-4 text-xs opacity-50">Loading API keys…</p> : keys.length === 0 ? <p className="p-4 text-xs opacity-55">No API keys yet. Create a scoped key for an external tool.</p> : <div className="min-w-[720px]">
         <div className={`grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_0.7fr_40px] gap-3 border-b px-4 py-2 text-[9px] font-black uppercase tracking-[0.14em] opacity-45 ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}><span>Name / Key</span><span>Scopes</span><span>Created</span><span>Last Used</span><span>Status</span><span /></div>
         {keys.map(key => <div key={`${key.status}-${key.id}`} className={`grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_0.7fr_40px] items-center gap-3 px-4 py-3 text-xs ${isDarkMode ? 'border-white/[0.06] even:bg-white/[0.02]' : 'border-slate-100 even:bg-slate-50'}`}>
-          <div><p className="font-black">{key.name}</p><code className="mt-0.5 block text-[10px] text-[#FF4F01]">{key.key_prefix}_••••••••</code></div>
+          <div><p className="font-black">{key.name}</p><code className="mt-0.5 block text-[10px] text-[#FF4F01]">{key.key_prefix}_••••••••</code><code className="mt-0.5 block text-[9px] opacity-40">id {key.id.slice(0, 8)}…</code></div>
           <div className="flex flex-wrap gap-1">{key.scopes.map(scope => <span key={scope} className="rounded-md bg-[#FF4F01]/10 px-1.5 py-0.5 text-[9px] font-bold text-[#FF4F01]">{scope}</span>)}</div>
           <span className="opacity-60">{formatDate(key.created_at)}</span><span className="opacity-60">{formatDate(key.last_used_at)}</span>
           <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-wide ${key.status === 'revoked' ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'}`}>{key.status}</span>
@@ -286,9 +363,11 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
       <div className="mt-6 flex justify-end gap-2"><button onClick={() => setCreating(false)} className="rounded-xl px-3 py-2 text-xs font-bold opacity-70">Cancel</button><button onClick={() => void create()} className="rounded-xl bg-[#FF4F01] px-3 py-2 text-xs font-black text-white">Generate key</button></div>
     </div></div>, document.body)}
     {rawKey && createPortal(<div className="api-key-modal-layer bg-black/70 p-4"><div className={`api-key-modal-card border p-7 shadow-2xl ${isDarkMode ? 'border-white/10 bg-[#151515] text-white' : 'border-slate-200 bg-white text-slate-900'}`}>
-      <h3 className="text-lg font-black">Save your API key now</h3><p className="mt-1 text-xs text-amber-500">For security, it cannot be shown again.</p><code className={`mt-4 block break-all rounded-xl border p-3 text-xs ${inputClass}`}>{rawKey}</code>
+      <h3 className="text-lg font-black">Save your API key now</h3><p className="mt-1 text-xs text-amber-500">For security, it cannot be shown again.</p><code className={`mt-4 block break-all rounded-xl border p-3 font-mono text-xs ${inputClass}`}>{rawKey}</code>
       <div className="mt-3 grid grid-cols-2 gap-2"><button onClick={() => { navigator.clipboard.writeText(rawKey); setCopied(true); }} className="flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-3 py-2 text-xs font-black text-white">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? 'Copied' : 'Copy key'}</button><button onClick={downloadEnv} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-black ${inputClass}`}><Download size={15} />Download .env</button></div>
-      <label className="mt-4 flex items-center gap-2 text-xs"><input type="checkbox" checked={copied} onChange={event => setCopied(event.target.checked)} />I have saved this key securely.</label><button disabled={!copied} onClick={() => { setRawKey(null); setCopied(false); }} className="mt-4 w-full rounded-xl border px-3 py-2 text-xs font-bold disabled:opacity-40">Done</button>
+      <button onClick={() => void testConnection(rawKey)} disabled={testing} className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-black ${inputClass} disabled:opacity-50`}><RefreshCw size={14} className={testing ? 'animate-spin' : ''} />{testing ? 'Testing…' : 'Test this key now'}</button>
+      {testResult && <p className={`mt-2 rounded-xl px-3 py-2 text-xs ${testResult.startsWith('OK') ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>{testResult}</p>}
+      <label className="mt-4 flex items-center gap-2 text-xs"><input type="checkbox" checked={copied} onChange={event => setCopied(event.target.checked)} />I have saved this key securely.</label><button disabled={!copied} onClick={() => { setRawKey(null); setCopied(false); setTestResult(null); }} className="mt-4 w-full rounded-xl border px-3 py-2 text-xs font-bold disabled:opacity-40">Done</button>
     </div></div>, document.body)}
   </section>;
 }

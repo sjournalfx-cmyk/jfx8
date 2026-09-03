@@ -3,7 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const TOKEN_PATTERN = /^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/
-const APP_ORIGINS = new Set(['https://jfxjournal.site', 'https://www.jfxjournal.site', 'http://localhost:5173'])
+const APP_ORIGINS = new Set(['https://jfxjournal.site', 'https://www.jfxjournal.site', 'http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000'])
 
 type ApiKey = { id: string; user_id: string; scopes: string[]; expires_at: string | null }
 
@@ -12,16 +12,43 @@ const json = (body: unknown, status = 200, headers: HeadersInit = {}) => new Res
   headers: { 'content-type': 'application/json; charset=utf-8', ...headers },
 })
 
+const stripScheme = (v: string) => v.trim().replace(/^(Bearer|Token|ApiKey|APIKey)\s+/i, '').trim()
+
+const extractRawKey = (req: Request) => {
+  const fromHeader = req.headers.get('x-api-key')?.trim() ?? ''
+  if (fromHeader) return stripScheme(fromHeader)
+  // Accept Authorization: Bearer jfx_pat_... (harnesses vary; previously CORS-blocked)
+  const auth = req.headers.get('authorization')?.trim() ?? ''
+  if (auth) return stripScheme(auth)
+  const legacy = req.headers.get('x-access-token')?.trim() ?? ''
+  return stripScheme(legacy)
+}
+
+const CORS_ALLOW_HEADERS = 'content-type, x-api-key, authorization'
+const CORS_ALLOW_METHODS = 'GET, POST, PATCH, DELETE, OPTIONS'
+
 const cors = (req: Request) => {
   const origin = req.headers.get('origin') ?? ''
   if (APP_ORIGINS.has(origin)) {
-    return { 'access-control-allow-origin': origin, 'vary': 'Origin', 'access-control-allow-headers': 'content-type, x-api-key', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS' }
+    return { 'access-control-allow-origin': origin, 'vary': 'Origin', 'access-control-allow-headers': CORS_ALLOW_HEADERS, 'access-control-allow-methods': CORS_ALLOW_METHODS, 'access-control-max-age': '86400' }
   }
   // API-key routes are server-to-server (no Origin) or from arbitrary agent UIs.
   // Allow * for API consumers while keeping tight checks for browser cookie flows.
-  const hasApiKey = Boolean(req.headers.get('x-api-key')?.trim())
+  // NB: check Authorization too — previously only X-API-Key got `*`, so browser
+  // harnesses using `Authorization: Bearer jfx_pat_...` were CORS-blocked and
+  // looked like "auth failed".
+  const hasApiKey = Boolean(extractRawKey(req))
   if (!origin || hasApiKey) {
-    return { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, x-api-key, authorization', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS' }
+    return { 'access-control-allow-origin': '*', 'access-control-allow-headers': CORS_ALLOW_HEADERS, 'access-control-allow-methods': CORS_ALLOW_METHODS, 'access-control-max-age': '86400' }
+  }
+  // Preflight (OPTIONS) never carries the API key itself — it only advertises it
+  // via Access-Control-Request-Headers. Without this, browsers block the real
+  // request and fetch() throws "Failed to fetch" (what the in-app Test button saw).
+  if (req.method === 'OPTIONS') {
+    const requested = (req.headers.get('access-control-request-headers') ?? '').toLowerCase()
+    if (requested.includes('x-api-key') || requested.includes('authorization')) {
+      return { 'access-control-allow-origin': '*', 'access-control-allow-headers': CORS_ALLOW_HEADERS, 'access-control-allow-methods': CORS_ALLOW_METHODS, 'access-control-max-age': '86400' }
+    }
   }
   return {}
 }
@@ -52,7 +79,7 @@ Deno.serve(async (req) => {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: 'server_not_configured' }, 500, responseHeaders)
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } })
-  const rawToken = req.headers.get('x-api-key')?.trim() ?? ''
+  const rawToken = extractRawKey(req)
   const url = new URL(req.url)
   const routeIndex = url.pathname.indexOf('/v1/')
   const path = routeIndex >= 0 ? url.pathname.slice(routeIndex) : ''
@@ -71,15 +98,19 @@ Deno.serve(async (req) => {
     return json(body, status, { ...responseHeaders, ...extra })
   }
 
-  if (!TOKEN_PATTERN.test(rawToken)) return json({ error: 'malformed_token' }, 401, responseHeaders)
+  if (!rawToken) return json({ error: 'missing_api_key', message: 'Missing X-API-Key or Authorization header. Send X-API-Key: jfx_pat_... or Authorization: Bearer jfx_pat_...' }, 401, responseHeaders)
+  if (!TOKEN_PATTERN.test(rawToken)) return json({ error: 'malformed_token', message: 'Malformed API key. Copy the full key from Settings → Developer Tools (it starts with jfx_pat_); do not truncate or URL-encode it.' }, 401, responseHeaders)
   const keyHash = await fingerprint(rawToken)
   const { data: foundKey } = await admin.from('api_keys').select('id,user_id,scopes,expires_at').eq('key_hash', keyHash).maybeSingle()
   key = foundKey as ApiKey | null
-  if (!key) return json({ error: 'invalid_token' }, 401, responseHeaders)
-  if (key.expires_at && new Date(key.expires_at).getTime() <= Date.now()) return respond({ error: 'expired_token' }, 401)
+  if (!key) return json({ error: 'invalid_token', message: 'API key not recognised (revoked or never issued). Create a new one in Settings → Developer Tools.' }, 401, responseHeaders)
+  if (key.expires_at && new Date(key.expires_at).getTime() <= Date.now()) return respond({ error: 'expired_token', message: 'This API key has expired. Create a new one in Settings → Developer Tools.' }, 401)
 
+  // 429 only when the limiter explicitly denies; RPC/transport errors are 503
+  // so a missing migration is never misreported as "rate limited".
   const { data: allowed, error: rateError } = await admin.rpc('consume_api_key_rate_limit', { p_user_id: key.user_id, p_key_id: key.id })
-  if (rateError || !allowed) return respond({ error: 'rate_limited' }, 429, { 'retry-after': '60' })
+  if (rateError) return respond({ error: 'rate_limiter_unavailable', message: 'Rate-limiter check failed on the server. Try again shortly.' }, 503)
+  if (!allowed) return respond({ error: 'rate_limited', message: 'Too many requests for this key. Wait 60s and retry.', retry_after: 60 }, 429, { 'retry-after': '60' })
 
   const hasScope = (need: string) => {
     const scopes = key!.scopes || []
@@ -91,7 +122,7 @@ Deno.serve(async (req) => {
   }
   const requireScope = async (scope: string) => hasScope(scope)
     ? null
-    : respond({ error: 'insufficient_scope', need: scope, have: key!.scopes }, 403)
+    : respond({ error: 'insufficient_scope', need: scope, have: key!.scopes, message: scope === 'trades:write' ? 'This key lacks trades:write. Recreate it in Settings → Developer Tools with trades:write enabled.' : `This key lacks ${scope}. Recreate it with the required scope.`, hint: scope === 'trades:write' ? 'Recreate the key in Settings → Developer Tools with trades:write enabled' : `Requires ${scope}` }, 403)
   const touch = () => admin.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', key!.id)
 
   try {

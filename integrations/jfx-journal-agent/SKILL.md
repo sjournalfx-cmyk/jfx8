@@ -9,20 +9,24 @@ The API key is stored in the `JFX_KEY` environment variable. Never reveal the ke
 
 Base URLs:
 - Journal & Analytics API: https://lwlikhjgwazyrahucatl.supabase.co/functions/v1/jfx-api
-- cTrader Execution API: /api/ctrader/trade (or https://jfxjournal.site/api/ctrader/trade)
+- cTrader Execution API: https://www.jfxjournal.site/api/ctrader/trade (local dev: http://127.0.0.1:3000/api/ctrader/trade)
 
-Environment (.env):
+Environment (.env downloaded from Settings → Developer Tools):
 ```
 JFX_KEY=jfx_pat_...
 JFX_BASE=https://lwlikhjgwazyrahucatl.supabase.co/functions/v1/jfx-api
-JFX_CTRADER_TRADE_URL=https://jfxjournal.site/api/ctrader/trade
+JFX_CTRADER_TRADE_URL=https://www.jfxjournal.site/api/ctrader/trade
 ```
+
+Auth headers (either works — do not mix a truncated key):
+- `X-API-Key: $JFX_KEY` (preferred)
+- `Authorization: Bearer $JFX_KEY`
+
+Copy the FULL key (starts with `jfx_pat_`). Do not trim, wrap, or URL-encode it.
 
 ---
 
 ## 1. Journal & Analytics Requests
-
-Header: `X-API-Key: $JFX_KEY`
 
 - Latest trade: `GET /v1/trades?limit=1`
 - Recent trades: `GET /v1/trades?limit=20`
@@ -39,12 +43,13 @@ Scopes: `trades:read` for reads, `trades:write` for journal writes and cTrader e
 
 ## 2. cTrader Live Trading (Open, Close, Modify)
 
-Endpoint: `POST /api/ctrader/trade` (or `POST https://jfxjournal.site/api/ctrader/trade`)
-Header: `X-API-Key: $JFX_KEY` (No broker access tokens needed — authenticated securely via your JFX key)
+Endpoint: `POST https://www.jfxjournal.site/api/ctrader/trade` (local dev: `POST http://127.0.0.1:3000/api/ctrader/trade`)
+Auth: `X-API-Key: $JFX_KEY` (or `Authorization: Bearer $JFX_KEY`). No broker access tokens needed — the server mints cTrader tokens from the stored OAuth grant.
 
-Scopes: any trade execution (`open`, `close`, `modify_position`, `modify_order`, `cancel_order`) requires `trades:write`. Reading positions requires `trades:read` (or `trades:write`).
+Scopes: any trade execution (`open`, `close`, `modify_position`, `modify_order`, `cancel_order`, also aliases `buy`/`sell` and fields `pair`/`instrument`/`ticker` as aliases for `symbol`) requires `trades:write`. Reading positions requires `trades:read` (or `trades:write`).
+`isDemo` accepts boolean or string (`true`/`false`); `true` = demo host, `false` = live host. When in doubt, omit it — the server falls back to the stored default.
 
-If you get `400 ctrader_not_connected`, the user's key is valid but their cTrader account has not been linked yet — instruct them to connect cTrader once in the JFX web app on the **Connect & Import** page.
+If you get `400 ctrader_not_connected`, the user's key is valid but their cTrader account has not been linked yet — instruct them to connect cTrader once in the JFX web app on the **Connect & Import** page. If you get `502 ctrader_auth_failed`, ask them to reconnect cTrader (stored grant expired).
 
 ### Get Open Positions & Pending Orders
 ```json
@@ -58,7 +63,7 @@ If you get `400 ctrader_not_connected`, the user's key is valid but their cTrade
 curl -sS -H "X-API-Key: $JFX_KEY" \
   -H "Content-Type: application/json" \
   -d '{"action":"get_positions","isDemo":true}' \
-  "${JFX_CTRADER_TRADE_URL:-https://jfxjournal.site/api/ctrader/trade}"
+  "${JFX_CTRADER_TRADE_URL:-https://www.jfxjournal.site/api/ctrader/trade}"
 ```
 
 ### Open Market, Limit, or Stop Order
@@ -79,7 +84,7 @@ curl -sS -H "X-API-Key: $JFX_KEY" \
 ```bash
 curl -sS -H "X-API-Key: $JFX_KEY" -H "Content-Type: application/json" \
   -d '{"action":"open","symbol":"EURUSD","side":"buy","volume":0.01,"orderType":"market","isDemo":true}' \
-  "${JFX_CTRADER_TRADE_URL:-https://jfxjournal.site/api/ctrader/trade}"
+  "${JFX_CTRADER_TRADE_URL:-https://www.jfxjournal.site/api/ctrader/trade}"
 ```
 
 ### Close Position (Full or Partial)
@@ -130,10 +135,11 @@ Only execute trading actions when explicitly requested or confirmed by the user.
 
 Parse the JSON response and answer from the returned data. Never invent missing trades or metrics. Explain these responses plainly:
 
-- `401`: missing, malformed, expired, or revoked key
+- `401 missing_api_key / malformed_token / invalid_token / expired_token` → key missing, truncated, revoked, or expired. Ask the user to press **Test connection** in Settings → Developer Tools, then recreate the key if needed.
 - `403 insufficient_scope` → key lacks required scope (`trades:write` for buy/sell). Tell user to recreate key with correct scopes.
 - `400 ctrader_not_connected` → key ok, but cTrader not linked. Ask user to connect cTrader on the Connect & Import page.
+- `502 ctrader_auth_failed` → stored cTrader grant expired/revoked. Ask user to reconnect cTrader on the Connect & Import page, then retry.
 - `404`: the requested resource does not exist
-- `429`: the API rate limit was reached; retry after the indicated delay
+- `429 rate_limited` → retry after the indicated delay. `503 rate_limiter_unavailable` means the server limiter is down — retry shortly, do not recreate the key.
 
 When the user asks "What was my last trade?", call `GET /v1/trades?limit=1`, inspect the returned record, and summarize the pair, direction, entry/exit, result, P&L, and date when available.

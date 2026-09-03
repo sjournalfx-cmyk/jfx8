@@ -19,6 +19,21 @@ async function updateStoredRefreshToken(
   if (!supabaseUrl || !serviceKey || !userId || !newRefreshToken) return;
 
   try {
+    // Upsert first so a missing row is created (PATCH-only silently drops rotation).
+    await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`,
+        'Prefer': 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        refresh_token: newRefreshToken,
+        updated_at: new Date().toISOString(),
+      }),
+    }).catch(() => {});
     await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
       method: 'PATCH',
       headers: {
