@@ -147,9 +147,18 @@ async function refreshTokensFromCookie(): Promise<boolean> {
       if (devRefresh) payload.refresh_token = devRefresh;
     } catch { /* blocked */ }
 
+    // Send the Supabase JWT so the server can persist the rotated refresh
+    // token to user_ctrader_tokens — that's the row API-key trading mints
+    // from. Without it, web sessions heal via cookie while agent keys rot.
+    const refreshHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const sessionRes = await supabase.auth.getSession();
+      const jwt = sessionRes?.data?.session?.access_token;
+      if (jwt) refreshHeaders['Authorization'] = `Bearer ${jwt}`;
+    } catch { /* ignore — refresh still works via cookie, DB just won't update */ }
     const res = await fetch('/api/ctrader/refresh', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: refreshHeaders,
       body: JSON.stringify(payload),
     });
     if (!res.ok) return false;
