@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { Sunrise, Sun, Sunset, Activity, Clock, TrendingUp, TrendingDown, Target, BarChart2, HelpCircle } from 'lucide-react';
+import { Sunrise, Sun, Sunset, Activity, Clock, TrendingUp, TrendingDown, Target, HelpCircle } from 'lucide-react';
 import { 
   BarChart, 
   Bar, 
@@ -128,13 +128,12 @@ export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode,
 
   return (
     <div className={clsx(
-      "p-6 rounded-[32px] border h-full flex flex-col justify-between",
-      "bg-[#000000] border-zinc-900 shadow-xl"
+      "p-6 rounded-[32px] border-0 h-full flex flex-col justify-between",
+      "bg-[#0a0a0a] text-white"
     )}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
-          <h3 className="text-lg font-black tracking-tight italic flex items-center gap-2 uppercase">
-            <Sunrise size={20} className="text-brand" />
+          <h3 className="text-[15px] font-semibold tracking-tight text-left">
             Market Sessions
           </h3>
           <InfoTooltip content="Performance breakdown categorized by major global market trading sessions (Asian, London, London/New York Overlap, and New York)." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
@@ -269,13 +268,12 @@ export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkM
 
   return (
     <div className={clsx(
-      "p-6 rounded-[32px] border h-full flex flex-col justify-between",
-      "bg-[#000000] border-zinc-900 shadow-xl"
+      "p-6 rounded-[32px] border-0 h-full flex flex-col justify-between",
+      "bg-[#0a0a0a] text-white"
     )}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
-          <h3 className="text-lg font-black tracking-tight italic flex items-center gap-2 uppercase">
-            <Clock size={20} className="text-brand" />
+          <h3 className="text-[15px] font-semibold tracking-tight text-left">
             Hourly Performance
           </h3>
           <InfoTooltip content="Analysis of trade duration and performance structured by hour of day (SAST timezone)." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
@@ -481,13 +479,12 @@ export const DailyActivityHeatmap: React.FC<WidgetProps> = ({ trades, isDarkMode
 
   return (
     <div className={clsx(
-      "p-8 rounded-[32px] border h-full flex flex-col justify-between",
-      isDarkMode ? "bg-black border-zinc-900 shadow-2xl" : "bg-white border-slate-200 shadow-xl"
+      "p-8 rounded-[32px] border-0 h-full flex flex-col justify-between",
+      "bg-[#0a0a0a] text-white"
     )}>
       <div className="mb-4">
         <div className="flex items-center gap-3">
-          <h3 className="text-lg font-black tracking-tight italic flex items-center gap-3 uppercase">
-            <BarChart2 size={24} className="text-brand" />
+          <h3 className="text-[15px] font-semibold tracking-tight text-left">
             Day of Week
           </h3>
           <InfoTooltip content={tooltipContent} isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
