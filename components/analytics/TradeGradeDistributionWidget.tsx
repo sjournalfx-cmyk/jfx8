@@ -27,10 +27,9 @@ export const TradeGradeDistributionWidget: React.FC<TradeGradeDistributionProps>
     }, [trades]);
 
     return (
-        <div className={`p-6 rounded-[32px] border flex flex-col h-full ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200 shadow-sm'}`}>
+        <div className="p-6 rounded-[32px] border-0 flex flex-col h-full bg-[#0a0a0a] text-white">
             <div className="flex items-center gap-2 mb-6">
-                <Star size={16} className="text-amber-500 opacity-80" />
-                <h3 className="text-sm font-black uppercase tracking-widest opacity-80">Trade Grade Distribution</h3>
+                <h3 className="text-[15px] font-semibold tracking-tight text-left">Trade Grade Distribution</h3>
                 <Tooltip content="Distribution of your self-rated trade quality scores from 1 to 5 stars." isDarkMode={isDarkMode}>
                     <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
                 </Tooltip>

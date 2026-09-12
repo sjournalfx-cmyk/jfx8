@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Trade } from '../../types';
-import { TrendingUp, Activity } from 'lucide-react';
+import { Activity } from 'lucide-react';
 
 interface EquityCurveWidgetProps {
     trades: Trade[];
@@ -19,10 +19,10 @@ export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [
 
     if (isLoading) {
         return (
-            <div className="relative overflow-hidden rounded-2xl border h-full min-h-[320px] bg-[#000000] border-zinc-800/80">
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-                <div className="p-5">
-                    <div className="flex items-center gap-3 mb-5">
+            <div className="relative overflow-hidden rounded-2xl border-0 h-full min-h-[320px] bg-[#0a0a0a] text-white">
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+              <div className="p-5">
+                <div className="flex items-center gap-3 mb-5">
                         <div className="w-9 h-9 rounded-lg bg-black" />
                         <div className="space-y-2">
                             <div className="w-28 h-4 bg-black rounded" />
@@ -97,15 +97,12 @@ export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [
     const glowColor = isPositive ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)';
 
     return (
-        <div className="relative overflow-hidden rounded-2xl border h-full min-h-[320px] bg-[#000000] border-zinc-800/80">
+        <div className="relative overflow-hidden rounded-2xl border-0 h-full min-h-[320px] bg-[#0a0a0a] text-white">
             <div className="relative z-10 p-5">
                 <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-black' : 'bg-slate-100'}`}>
-                            <TrendingUp size={18} style={{ color: accentColor }} />
-                        </div>
                         <div>
-                            <h3 className="font-bold text-base tracking-tight text-white">Equity Curve</h3>
+                            <h3 className="text-[15px] font-semibold tracking-tight text-left text-white">Equity Curve</h3>
                             <p className={`text-[10px] font-medium tracking-wider mt-0.5 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
                                 Account Value Over Time
                             </p>

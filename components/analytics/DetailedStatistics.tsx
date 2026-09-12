@@ -80,7 +80,7 @@ export const DetailedStatistics: React.FC<DetailedStatisticsProps> = ({ stats, u
   ];
 
   return (
-    <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 w-full ${isDarkMode ? 'bg-black' : 'bg-white'} p-8 rounded-[32px] border ${isDarkMode ? 'border-zinc-800 shadow-2xl' : 'border-slate-200 shadow-xl'}`}>
+    <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 w-full ${isDarkMode ? 'bg-black' : 'bg-white'} py-8 px-0 rounded-[32px] ${isDarkMode ? 'shadow-2xl' : 'shadow-xl'}`}>
       {/* Currency badge so trader knows what denomination all values are in */}
       <div className="col-span-full flex items-center gap-2 mb-2">
         <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] ${isDarkMode ? 'bg-white/[0.05] text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>

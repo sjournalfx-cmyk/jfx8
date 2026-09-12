@@ -153,22 +153,15 @@ export function RevenueMatrixWidget({
 
   return (
     <div
-      className={`p-5 md:p-6 rounded-3xl border flex flex-col w-full overflow-visible relative transition-colors duration-200 ${
-        isDarkMode
-          ? 'bg-black border-zinc-800 text-zinc-100 shadow-md'
-          : 'bg-white border-slate-200 text-slate-900 shadow-md'
-      }`}
+      className="p-5 md:p-6 rounded-3xl border-0 flex flex-col w-full overflow-visible relative bg-[#0a0a0a] text-white"
     >
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 shrink-0">
         {/* Title Group */}
         <div className="flex items-center gap-2.5">
-          <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500">
-            <BarChart2 size={22} />
-          </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold tracking-tight uppercase">Gross Gains vs Gross Losses</h3>
+              <h3 className="text-[15px] font-semibold tracking-tight text-left">Gross Gains vs Gross Losses</h3>
               <Tooltip content="Gross gains from winning trades vs gross losses from losing trades over time." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
               </Tooltip>

@@ -5,7 +5,7 @@ import { calculateStats } from '../../lib/statsUtils';
 import { Select } from '../Select';
 import { Card } from '../ui/Card';
 import { 
-    Coins, Target, Clock, BarChart3, Crown, 
+    Coins, Target, Clock, Crown, 
     ArrowUpRight, ArrowDownRight, HelpCircle
 } from 'lucide-react';
 import { Tooltip as InfoTooltip } from '../ui/Tooltip';
@@ -338,14 +338,11 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isD
                             }
                         }
                     ].map((panel, idx) => (
-                        <Card key={idx} isDarkMode={isDarkMode} padding="lg" className={`relative rounded-[32px] !bg-[#000000] ${isDarkMode ? '!border-zinc-800' : '!border-slate-200'}`}>
+                        <Card key={idx} isDarkMode={isDarkMode} padding="lg" className="relative rounded-3xl !bg-[#0a0a0a] !border-0 text-white">
                             <div className="flex items-center justify-between mb-8">
                                 <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-xl ${panel.bg} ${panel.color}`}>
-                                        {compareMode === 'symbol' ? <BarChart3 size={20} /> : compareMode === 'strategy' ? <Target size={20} /> : <Clock size={20} />}
-                                    </div>
                                     <div>
-                                        <h3 className="text-xl font-bold">{panel.label || (compareMode === 'symbol' ? 'Select Symbol' : compareMode === 'strategy' ? 'Select Strategy' : 'Select Session')}</h3>
+                                        <h3 className="text-[15px] font-semibold tracking-tight text-left">{panel.label || (compareMode === 'symbol' ? 'Select Symbol' : compareMode === 'strategy' ? 'Select Strategy' : 'Select Session')}</h3>
                                         <p className="text-[10px] uppercase font-bold tracking-widest opacity-40">{dateRanges.find(r => r.value === panel.range)?.label}</p>
                                     </div>
                                 </div>
@@ -412,10 +409,10 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({ trades = [], isD
             </div>
 
 
-            <Card isDarkMode={isDarkMode} padding="lg" className={`rounded-[32px] !bg-[#000000] ${isDarkMode ? '!border-zinc-800' : '!border-slate-200'}`}>
+            <Card isDarkMode={isDarkMode} padding="lg" className="rounded-3xl !bg-[#0a0a0a] !border-0 text-white">
                 <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-2">
-                        <h3 className="text-xl font-bold tracking-tight">Comparative Equity Curve</h3>
+                        <h3 className="text-[15px] font-semibold tracking-tight text-left">Comparative Equity Curve</h3>
                         <InfoTooltip content="A direct overlay comparing the cumulative profit/loss progression over time for both selected metrics." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
                             <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
                         </InfoTooltip>

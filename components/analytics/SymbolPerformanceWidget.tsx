@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import { Trade } from '../../types';
-import { BarChart3 } from 'lucide-react';
 
 interface SymbolPerformanceWidgetProps {
     trades: Trade[];
@@ -43,14 +42,9 @@ export const SymbolPerformanceWidget: React.FC<SymbolPerformanceWidgetProps> = (
     ];
 
     return (
-        <div className={`py-4 px-0 sm:p-6 rounded-none sm:rounded-[24px] border h-full ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
-            <div className="flex items-center gap-3 mb-6">
-                <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-black' : 'bg-slate-100'} text-indigo-500`}>
-                    <BarChart3 size={20} />
-                </div>
-                <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-bold tracking-tight">Symbol Performance</h3>
-                </div>
+        <div className={`p-4 sm:p-6 rounded-2xl sm:rounded-[24px] border-0 h-full ${isDarkMode ? 'bg-black' : 'bg-white shadow-md'}`}>
+            <div className="mb-3 sm:mb-4 min-w-0">
+                <h3 className="text-[15px] font-semibold tracking-tight text-left">Symbol Performance</h3>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {cards.map((card, i) => (

@@ -68,10 +68,10 @@ export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ 
     const hoverY = hoverIndex !== null ? (drawdownData[hoverIndex].drawdown / maxY) * 200 : 0;
 
     return (
-        <div className={`py-4 px-0 sm:p-6 rounded-none sm:rounded-[24px] border flex flex-col min-h-[350px] relative h-full ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+        <div className="p-4 sm:p-6 rounded-2xl sm:rounded-[24px] border-0 flex flex-col min-h-[350px] relative h-full bg-[#0a0a0a] text-white">
             <div className="flex justify-between items-start mb-6">
                 <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-bold tracking-tight">Drawdown Over Time</h3>
+                    <h3 className="text-[15px] font-semibold tracking-tight text-left">Drawdown Over Time</h3>
                     <Tooltip content="Visualizes the percentage drop from your peak equity over the course of your trading history." isDarkMode={isDarkMode}>
                         <HelpCircle 
                             size={14}

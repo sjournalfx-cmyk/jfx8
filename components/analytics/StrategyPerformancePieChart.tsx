@@ -191,7 +191,7 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
 
   if (strategyData.length === 0) {
     return (
-      <Card className="flex h-[320px] flex-col items-center justify-center" isDarkMode={isDarkMode}>
+      <Card className="flex h-[320px] flex-col items-center justify-center !bg-[#0a0a0a] !border-0 text-white" isDarkMode={isDarkMode}>
         <CardHeader className="text-center">
           <CardTitle>Strategy Distribution</CardTitle>
           <CardDescription>No strategy data available. Tag your trades to see performance.</CardDescription>
@@ -201,11 +201,11 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
   }
 
   return (
-    <Card data-chart={id} className="flex h-full min-h-[320px] flex-col border border-zinc-900 bg-[#000000]" isDarkMode={isDarkMode}>
+    <Card data-chart={id} className="relative flex h-full min-h-[320px] flex-col !border-0 !bg-[#0a0a0a] !shadow-none text-white rounded-[20px] overflow-hidden" isDarkMode={isDarkMode}>
       <CardHeader className="flex-row items-start space-y-0 pb-0">
         <div className="grid gap-1">
           <div className="flex items-center gap-2">
-            <CardTitle>Strategy Distribution</CardTitle>
+            <CardTitle className="text-[15px] font-semibold tracking-tight text-left">Strategy Distribution</CardTitle>
             <Tooltip content="Breaks down your trade count and cumulative P/L by trading strategy tag. Click a slice or use the dropdown to focus." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
               <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
             </Tooltip>

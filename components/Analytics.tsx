@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Trade, UserProfile, EASession, CashTransaction } from '../types';
 import {
-    TrendingUp, Info, Activity,
-    Target, LineChart, Shield, X, Printer, Gauge, Zap, TrendingDown, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle
+    Info, Activity,
+    Target, LineChart, Shield, X, Printer, Gauge, Zap, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle
 } from 'lucide-react';
 import { Tooltip } from './ui/Tooltip';
 import { normalizePlan } from '../lib/constants';
@@ -440,10 +440,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     const renderPsychologyLayout = () => (
         <div className="space-y-6 pb-20">
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,2.05fr)]">
-                <section className="flex min-h-[380px] flex-col rounded-[20px] border border-[#1f1f1f] bg-[#000000] px-7 py-7 shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
+                <section className="flex min-h-[380px] flex-col rounded-[20px] border-0 bg-[#0a0a0a] text-white px-7 py-7">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <h2 className="text-[18px] font-bold text-white">{scoreToggled ? 'Performance Radar' : 'Tilt Score'}</h2>
+                            <h2 className="text-[15px] font-semibold tracking-tight text-left text-white">{scoreToggled ? 'Performance Radar' : 'Tilt Score'}</h2>
                             <Tooltip
                                 content={scoreToggled ? radarTooltipContent : 'Your discipline score based on plan adherence across all trades. Higher is better.'}
                                 isDarkMode={true}
@@ -533,10 +533,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     </div>
                 </section>
 
-                <section className="flex min-h-[380px] flex-col rounded-[14px] border border-[#1f1f1f] bg-[#000000] p-[18px] shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
+                <section className="flex min-h-[380px] flex-col rounded-[14px] border-0 bg-[#0a0a0a] text-white p-[18px]">
                     <div className="mb-3.5 flex items-start justify-between gap-4">
                         <div className="flex items-center gap-2">
-                            <h2 className="text-[18px] font-bold text-white">Key Insights & Warnings</h2>
+                            <h2 className="text-[15px] font-semibold tracking-tight text-left text-white">Key Insights & Warnings</h2>
                             <Tooltip content="AI-generated breakdown of your cognitive strengths, warning patterns, and suggested improvements based on your trade psychology." isDarkMode={true} onInfoClick={() => handleOpenHelp('psychSlip')}>
                                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                             </Tooltip>
@@ -620,36 +620,36 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     const renderWidget = (id: string) => {
         switch (id) {
             case 'winRate': return (
-                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                <div className="h-full p-6 rounded-[24px] border-0 flex flex-col justify-between bg-[#0a0a0a] text-white">
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
-                        <span className="flex items-center gap-2"><Target size={14} className="text-indigo-500" /> Win Rate</span>
+                        <span>Win Rate</span>
                         <Tooltip content="The percentage of closed trades that resulted in a profit." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('winRate')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black">{Number(stats.winRate).toFixed(1)}%</div>
                 </div>
             );
             case 'profitFactor': return (
-                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                <div className="h-full p-6 rounded-[24px] border-0 flex flex-col justify-between bg-[#0a0a0a] text-white">
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
-                        <span className="flex items-center gap-2"><Gauge size={14} className="text-indigo-500" /> Profit Factor</span>
+                        <span>Profit Factor</span>
                         <Tooltip content="Gross Profit divided by Gross Loss. A value above 1.0 means the system is profitable." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('profitFactor')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black">{Number(stats.profitFactor).toFixed(1)}</div>
                 </div>
             );
             case 'grossProfit': return (
-                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                <div className="h-full p-6 rounded-[24px] border-0 flex flex-col justify-between bg-[#0a0a0a] text-white">
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
-                        <span className="flex items-center gap-2"><TrendingUp size={14} className="text-emerald-500" /> Gross Profit</span>
+                        <span>Gross Profit</span>
                         <Tooltip content="Total profit summed from all winning closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('grossProfit')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black text-emerald-500">+{currencySymbol}{stats.grossProfit.toLocaleString()}</div>
                 </div>
             );
             case 'grossLoss': return (
-                <div className={`h-full p-6 rounded-[24px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                <div className="h-full p-6 rounded-[24px] border-0 flex flex-col justify-between bg-[#0a0a0a] text-white">
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
-                        <span className="flex items-center gap-2"><TrendingDown size={14} className="text-rose-500" /> Gross Loss</span>
+                        <span>Gross Loss</span>
                         <Tooltip content="Total loss summed from all losing closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('grossLoss')}><HelpCircle size={12} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                     </span>
                     <div className="text-2xl font-black text-rose-500">-{currencySymbol}{stats.grossLoss.toLocaleString()}</div>
@@ -692,18 +692,18 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     </div>
                 ))}
                 <div className="min-h-[90px]">
-                    <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                    <div className="h-full p-5 rounded-[20px] border-0 flex flex-col justify-between bg-[#0a0a0a] text-white">
                         <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
-                            <span className="flex items-center gap-1.5"><TrendingUp size={12} className="text-emerald-500" /> Total P&L</span>
+                            <span>Total P&L</span>
                             <Tooltip content="Net realized profit or loss from all closed trades." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('netProfit')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                         </span>
                         <div className="text-xl font-black text-emerald-500">{currencySymbol}{stats.netProfit.toLocaleString()}</div>
                     </div>
                 </div>
                 <div className="min-h-[90px]">
-                    <div className={`h-full p-5 rounded-[20px] border flex flex-col justify-between ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+                    <div className="h-full p-5 rounded-[20px] border-0 flex flex-col justify-between bg-[#0a0a0a] text-white">
                         <span className="text-[9px] font-bold uppercase tracking-widest opacity-40 flex items-center justify-between w-full">
-                            <span className="flex items-center gap-1.5"><Activity size={12} className="text-indigo-500" /> Risk/Reward</span>
+                            <span>Risk/Reward</span>
                             <Tooltip content="Average winning trade amount divided by average losing trade amount." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('riskReward')}><HelpCircle size={10} className="cursor-help hover:opacity-100 text-[#FF4F00]" /></Tooltip>
                         </span>
                         <div className="text-xl font-black">{stats.avgWin > 0 && stats.avgLoss < 0 ? (Math.abs(stats.avgWin) / Math.abs(stats.avgLoss)).toFixed(2) : '0.00'}</div>
@@ -745,7 +745,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             : 'bg-[#000000] text-zinc-200';
 
     return (
-        <div className={`w-full h-full overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-10 pb-nav font-sans ${pageBackgroundClass}`}>
+        <div className={`w-full h-full flex flex-col overflow-hidden p-4 sm:p-6 lg:p-10 pb-nav font-sans ${pageBackgroundClass}`}>
             <header className="mb-4 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                     <div>
@@ -763,7 +763,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             <nav
                 role="tablist"
                 aria-label="Analytics sections"
-                className={`sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x snap-mandatory gap-2 border-b backdrop-blur-xl ${pageIsLight ? 'bg-white/90 border-slate-200' : 'bg-black/80 border-zinc-800'}`}
+                className={`shrink-0 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x snap-mandatory gap-2 border-b ${pageIsLight ? 'bg-white border-slate-200' : 'bg-black border-zinc-800'}`}
             >
                 {tabDefinitions.map(tab => (
                     <button
@@ -781,6 +781,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 ))}
             </nav>
 
+            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
             {activeTab === 'overview' && renderOverviewLayout()}
             
             {activeTab === 'trades' && (
@@ -883,6 +884,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     />
                 </div>
             )}
+            </div>
 
             {/* Widget Details Help Drawer - rendered once at root so it appears above all content */}
             <WidgetHelpDrawer

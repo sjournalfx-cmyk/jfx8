@@ -80,7 +80,7 @@ export const MomentumStreakWidget: React.FC<MomentumStreakWidgetProps> = ({ trad
     }, [trades]);
 
     return (
-        <div className={`p-4 rounded-[20px] border h-full flex flex-col ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+        <div className="p-4 rounded-[20px] border-0 h-full flex flex-col bg-[#0a0a0a] text-white">
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Streak</span>

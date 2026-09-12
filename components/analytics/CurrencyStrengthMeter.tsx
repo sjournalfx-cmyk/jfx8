@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Trade } from '../../types';
-import { Coins, HelpCircle } from 'lucide-react';
+import { HelpCircle } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 
 interface CurrencyStrengthMeterProps {
@@ -95,11 +95,11 @@ export const CurrencyStrengthMeter: React.FC<CurrencyStrengthMeterProps> = ({ is
     return (
         <div 
             onMouseMove={handleMouseMove}
-            className={`p-4 rounded-[20px] border flex flex-col h-full relative ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}
+            className="p-4 rounded-[20px] border-0 flex flex-col h-full relative bg-[#0a0a0a] text-white"
         >
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold tracking-tight">Currency Strength</h3>
+                    <h3 className="text-[15px] font-semibold tracking-tight text-left">Currency Strength</h3>
                     <Tooltip content="Ranks currencies by their aggregate P/L impact across all your trades. Green = stronger, Red = weaker." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
                         <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
                     </Tooltip>
@@ -108,7 +108,6 @@ export const CurrencyStrengthMeter: React.FC<CurrencyStrengthMeterProps> = ({ is
 
             {strengths.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-center">
-                    <Coins size={32} className="mb-3" />
                     <p className="text-sm">No currency data available</p>
                     <p className="text-xs mt-2 max-w-[200px]">Add trades with standard pairs (e.g. EURUSD) to see data.</p>
                 </div>

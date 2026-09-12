@@ -544,8 +544,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
     return (
       <div
         className={clsx(
-          "p-5 rounded-[24px] border flex flex-col gap-4 min-h-[122px]",
-          isDarkMode ? "bg-black/40 border-zinc-800/50 backdrop-blur-md" : "bg-white border-slate-200 shadow-lg"
+          "p-5 rounded-[24px] border-0 flex flex-col gap-4 min-h-[122px] bg-[#0a0a0a] text-white"
         )}
       >
         <div className="flex items-start justify-between gap-3">
@@ -584,7 +583,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-black tracking-tight">Cash Transactions</h2>
+            <h2 className="text-[15px] font-semibold tracking-tight text-left">Cash Transactions</h2>
             <InfoTooltip content="A log of non-trade capital events that impact your overall trading account balance." isDarkMode={isDarkMode} onInfoClick={onCashTransactionsInfoClick}>
               <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
             </InfoTooltip>
@@ -613,10 +612,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
       </div>
 
       {/* Filter Bar */}
-      <div className={clsx(
-        "flex flex-wrap items-center gap-4 p-4 rounded-2xl border",
-        isDarkMode ? "bg-black/40 border-zinc-800/50" : "bg-white border-slate-200"
-      )}>
+      <div className="flex flex-wrap items-center gap-4 p-4 rounded-2xl border-0 bg-[#0a0a0a] text-white">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-800/50 bg-black/20">
           <Calendar size={14} className="opacity-40" />
           <span className="text-xs font-bold opacity-60">Date:</span>
@@ -867,8 +863,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
 
             {/* Chart Section */}
             <div className={clsx(
-              "p-6 md:p-8 rounded-[32px] border",
-              isDarkMode ? "bg-black border-zinc-800 shadow-2xl" : "bg-white border-slate-200 shadow-xl"
+              "p-6 md:p-8 rounded-[32px] border-0 bg-[#0a0a0a] text-white",
             )}>
               <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between mb-6">
                 <div>
@@ -1015,8 +1010,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
           <div 
             key="transactions"
             className={clsx(
-              "rounded-[32px] border overflow-hidden min-w-0",
-              isDarkMode ? "bg-black border-zinc-800 shadow-2xl" : "bg-white border-slate-200 shadow-xl"
+              "rounded-[32px] border-0 overflow-hidden min-w-0 bg-[#0a0a0a] text-white",
             )}
           >
             <div className={clsx(
@@ -1025,7 +1019,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
             )}>
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-bold opacity-60 uppercase tracking-widest">All Transactions</h3>
+                  <h3 className="text-[15px] font-semibold tracking-tight text-left">All Transactions</h3>
                   <p className="text-[11px] font-semibold opacity-35">
                     Saved to your account{isCtraderLinked ? ' • deposits & withdrawals import automatically from cTrader' : ''}.
                   </p>

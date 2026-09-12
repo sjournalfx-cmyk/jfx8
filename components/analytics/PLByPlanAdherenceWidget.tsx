@@ -39,9 +39,9 @@ export const PLByPlanAdherenceWidget: React.FC<PLByPlanAdherenceWidgetProps> = (
     );
 
     return (
-        <div className="bg-[#000000] rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.35)] p-6 border border-[#1f1f1f] flex flex-col pt-[20px]">
+        <div className="bg-[#0a0a0a] text-white rounded-[14px] p-6 border-0 flex flex-col pt-[20px]">
             <div className="flex items-center gap-2 mb-6">
-                <h2 className="text-[18px] font-bold text-white">P/L by Plan Adherence</h2>
+                <h2 className="text-[15px] font-semibold tracking-tight text-left text-white">P/L by Plan Adherence</h2>
                 <Tooltip content="Compares profitability across different levels of trading plan adherence." isDarkMode={true} onInfoClick={onInfoClick}>
                     <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                 </Tooltip>

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, LineChart as LineIcon, TriangleAlert, HelpCircle } from "lucide-react"
+import { AlertTriangle, TriangleAlert, HelpCircle } from "lucide-react"
 import { Line, LineChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { Trade } from "../../types"
 
@@ -169,18 +169,15 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
   return (
     <Card
       data-chart="trading-mistakes-bar"
-      className={`relative flex h-full min-h-[320px] flex-col overflow-hidden border shadow-sm ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white'}`}
+      className="relative flex h-full min-h-[320px] flex-col overflow-hidden !border-0 !bg-[#0a0a0a] !shadow-none text-white rounded-[20px]"
       isDarkMode={isDarkMode}
     >
       <ChartStyle id="trading-mistakes-bar" config={chartConfig} />
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-rose-500/50 to-transparent" />
       <CardHeader className="flex-row items-start gap-3 space-y-0 pb-2">
-        <div className={`flex h-8 w-8 items-center justify-center rounded-2xl border ${isDarkMode ? 'border-rose-500/20 bg-rose-500/10' : 'border-rose-500/15 bg-rose-50'}`}>
-          <LineIcon size={16} className="text-rose-500" />
-        </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <CardTitle className="text-base tracking-tight">Trading Mistakes</CardTitle>
+            <CardTitle className="text-[15px] font-semibold tracking-tight text-left">Trading Mistakes</CardTitle>
             <Tooltip content="Tracks the frequency and accumulation of self-reported trading mistakes over time. Click legend items to toggle lines." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
               <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100" />
             </Tooltip>
