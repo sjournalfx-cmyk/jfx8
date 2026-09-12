@@ -746,7 +746,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
 
     return (
         <div className={`w-full h-full flex flex-col overflow-hidden p-4 sm:p-6 lg:p-10 pb-nav font-sans ${pageBackgroundClass}`}>
-            <header className="mb-4 flex flex-col gap-4">
+            <header className="mb-1 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-2 mb-2">
@@ -763,7 +763,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             <nav
                 role="tablist"
                 aria-label="Analytics sections"
-                className={`shrink-0 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x snap-mandatory gap-2 border-b ${pageIsLight ? 'bg-white border-slate-200' : 'bg-black border-zinc-800'}`}
+                className={`shrink-0 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x gap-2 bg-[#0a0a0a]`}
             >
                 {tabDefinitions.map(tab => (
                     <button
@@ -771,9 +771,9 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         role="tab"
                         aria-selected={activeTab === tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
-                        className={`shrink-0 snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 min-h-[44px] ${activeTab === tab.id
-                            ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-[#FF4F00] text-white shadow-lg')
-                            : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
+                        className={`flex-1 min-w-[110px] snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 min-h-[44px] ${activeTab === tab.id
+                            ? 'bg-[#FF4F00] text-white shadow-lg'
+                            : 'text-zinc-500 hover:text-zinc-300'}`}
                     >
                         <tab.icon size={14} />
                         {tab.label}
@@ -781,7 +781,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 ))}
             </nav>
 
-            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar pt-3">
             {activeTab === 'overview' && renderOverviewLayout()}
             
             {activeTab === 'trades' && (
