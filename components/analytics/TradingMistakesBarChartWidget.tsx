@@ -50,16 +50,7 @@ const isNonMistakeLabel = (value: string) =>
   /^(none|n\/a|na|no mistake|no mistakes|none recorded|clean)$/i.test(value.trim())
 
 export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoClick }: TradingMistakesBarChartWidgetProps) {
-  // Track visibility of each mistake type on the chart
-  const [activeMistakes, setActiveMistakes] = React.useState<Record<string, boolean>>({})
-
-  // Toggle mistake visibility on the line chart
-  const toggleMistakeVisibility = (mistakeName: string) => {
-    setActiveMistakes((prev) => ({
-      ...prev,
-      [mistakeName]: prev[mistakeName] === false ? true : false,
-    }))
-  }
+  // All mistake lines render together (Top mistakes footer removed).
 
   // Sort trades chronologically to build the line chart timeline (Optimized & Stable)
   const chronologicalTrades = React.useMemo(() => {
@@ -136,8 +127,6 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
     [mistakeData]
   )
 
-  const topMistakes = React.useMemo(() => mistakeData.slice(0, 5), [mistakeData])
-
   const mostCommonMistake = mistakeData[0]
 
   const tooltipContent = React.useCallback(({ active, payload, label }: any) => {
@@ -147,7 +136,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
     const dateStr = tradeData.date ? ` (${tradeData.date})` : ""
 
     return (
-      <div className={`rounded-2xl border p-4 shadow-2xl backdrop-blur ${isDarkMode ? 'bg-[#111114] border-zinc-800 text-zinc-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+      <div className={`rounded-2xl border p-4 shadow-2xl backdrop-blur ${isDarkMode ? 'bg-[#000000] border-zinc-800 text-zinc-100' : 'bg-white border-slate-200 text-slate-900'}`}>
         <div className="flex items-center gap-2 pb-2 mb-2 border-b border-zinc-500/10">
           <span className="text-[11px] font-black uppercase tracking-[0.18em]">{label}{dateStr}</span>
         </div>
@@ -173,7 +162,6 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
       isDarkMode={isDarkMode}
     >
       <ChartStyle id="trading-mistakes-bar" config={chartConfig} />
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-rose-500/50 to-transparent" />
       <CardHeader className="flex-row items-start gap-3 space-y-0 pb-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -198,15 +186,15 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-2 pt-0 pb-0">
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-slate-50'}`}>
+          <div className="rounded-xl border-0 p-1.5 px-3 bg-white/[0.06]">
             <div className="text-[9px] font-black uppercase tracking-widest opacity-50">Total mistakes</div>
             <div className="mt-0.5 text-base font-black">{totalMistakes}</div>
           </div>
-          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-slate-50'}`}>
+          <div className="rounded-xl border-0 p-1.5 px-3 bg-white/[0.06]">
             <div className="text-[9px] font-black uppercase tracking-widest opacity-50">Unique types</div>
             <div className="mt-0.5 text-base font-black">{mistakeData.length}</div>
           </div>
-          <div className={`rounded-xl border p-1.5 px-3 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-slate-50'}`}>
+          <div className="rounded-xl border-0 p-1.5 px-3 bg-white/[0.06]">
             <div className="text-[9px] font-black uppercase tracking-widest opacity-50">Most common</div>
             <div className="flex items-baseline justify-between gap-2 mt-0.5">
               <div className="truncate text-xs font-black">{mostCommonMistake?.mistake || 'None'}</div>
@@ -235,8 +223,8 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
               accessibilityLayer
               data={lineChartData}
               margin={{
-                left: 12,
-                right: 12,
+                left: 0,
+                right: 8,
                 top: 10,
                 bottom: 5,
               }}
@@ -250,6 +238,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
               />
               <YAxis
                 allowDecimals={false}
+                width={32}
                 tickLine={false}
                 axisLine={false}
                 tick={{ fill: isDarkMode ? '#a1a1aa' : '#475569', fontSize: 10, fontWeight: 700 }}
@@ -260,8 +249,6 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
               />
               {mistakeTypes.map((type, idx) => {
                 const color = MISTAKE_COLORS[idx % MISTAKE_COLORS.length]
-                const isVisible = activeMistakes[type] !== false
-                if (!isVisible) return null
 
                 return (
                   <Line
@@ -279,45 +266,6 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
           </ChartContainer>
         )}
       </CardContent>
-      <div className="mt-auto border-t border-zinc-500/10 p-3 pt-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-[10px] font-black uppercase tracking-widest opacity-50">
-            Top mistakes
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {topMistakes.length > 0 ? topMistakes.map((item) => {
-              const typeIdx = mistakeTypes.indexOf(item.mistake)
-              const color = typeIdx !== -1 ? MISTAKE_COLORS[typeIdx % MISTAKE_COLORS.length] : "#f43f5e"
-              const isVisible = activeMistakes[item.mistake] !== false
-
-              return (
-                <button
-                  key={item.mistake}
-                  onClick={() => toggleMistakeVisibility(item.mistake)}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest transition-all duration-200 hover:scale-105 active:scale-95 ${
-                    isVisible
-                      ? isDarkMode
-                        ? 'border-zinc-800 bg-white/5 text-zinc-200'
-                        : 'border-slate-200 bg-slate-50 text-slate-700'
-                      : 'opacity-40 border-dashed border-zinc-500/30 line-through decoration-rose-500/40 text-zinc-500'
-                  }`}
-                  title={isVisible ? "Click to hide from chart" : "Click to show on chart"}
-                >
-                  <div 
-                    className={`h-2 w-2 rounded-full ${isVisible ? 'animate-pulse' : ''}`} 
-                    style={{ backgroundColor: color }} 
-                  />
-                  <span>{item.mistake}</span>
-                  <span className="opacity-50">({item.count})</span>
-                </button>
-              )
-            }) : (
-              <div className="text-[10px] font-black uppercase tracking-widest opacity-40">No breakdown yet</div>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-rose-500/30 to-transparent" />
     </Card>
   )
 }
