@@ -11,6 +11,11 @@
 const ALLOWED_ORIGINS = new Set([
   'https://jfxjournal.site',
   'https://www.jfxjournal.site',
+  // Capacitor native shells (Android uses https://localhost with androidScheme=https)
+  'https://localhost',
+  'http://localhost',
+  'capacitor://localhost',
+  'ionic://localhost',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
