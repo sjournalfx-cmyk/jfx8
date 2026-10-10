@@ -9,9 +9,6 @@
   "functions": {
     "api/**/*.ts": {
       "includeFiles": "node_modules/ws/**"
-    },
-    "api/candles/harvest.ts": {
-      "maxDuration": 60
     }
   },
   "headers": [
