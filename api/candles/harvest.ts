@@ -62,8 +62,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
   if (!authorized(req)) { res.status(401).json({ error: 'Unauthorized' }); return; }
 
-  const supabaseUrl = process.env.SUPABASE_URL || '';
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const supabaseUrl = (process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+  const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   if (!supabaseUrl || !supabaseKey) {
     res.status(503).json({ error: 'Supabase service credentials not configured' });
     return;

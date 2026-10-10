@@ -186,11 +186,16 @@ export async function persistRotatedCtraderToken(args: {
   if (!supabaseUrl || !serviceKey || !userId || !newRefreshToken) {
     throw new Error('Cannot persist cTrader token: database configuration or token is missing.');
   }
-  const base = supabaseUrl.replace(/\/$/, '');
+  // Defensive trim: a stray whitespace in the stored env value (seen in
+  // production: trailing space in SUPABASE_URL) otherwise builds an invalid
+  // fetch URL like "https://xxx.supabase.co /rest/..." and every persist
+  // throws. trade.ts already trims for the same reason.
+  const base = supabaseUrl.trim().replace(/\/$/, '');
+  const key = serviceKey.trim();
   const headers = {
     'Content-Type': 'application/json',
-    apikey: serviceKey,
-    Authorization: `Bearer ${serviceKey}`,
+    apikey: key,
+    Authorization: `Bearer ${key}`,
   };
   const tokenRecord = {
     user_id: userId,

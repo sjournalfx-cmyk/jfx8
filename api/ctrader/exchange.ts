@@ -92,8 +92,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // code exchanged with cTrader first and only then discovered the DB was
   // unreachable, surfacing as "Could not securely save the cTrader
   // connection" and forcing the user to re-authorize from scratch.
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim().replace(/\/$/, '');
+  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   if (!supabaseUrl || !serviceKey) {
     const missing = [!supabaseUrl && 'SUPABASE_URL', !serviceKey && 'SUPABASE_SERVICE_ROLE_KEY']
       .filter(Boolean);

@@ -27,8 +27,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL || '';
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+  const supabaseUrl = (process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+  const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
   if (!supabaseUrl || !supabaseKey) {
     res.status(503).json({ error: 'Supabase credentials not configured' });
     return;
