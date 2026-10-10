@@ -5,9 +5,7 @@ import LogTrade from './components/LogTrade';
 import Dashboard from './components/Dashboard';
 import Journal from './components/Journal';
 import Auth from './components/Auth';
-import AuthCallback from './components/AuthCallback';
 import BetaSplash from './components/BetaSplash';
-import PublicHome from './components/PublicHome';
 import { PrivacyPolicy, TermsOfService } from './components/LegalPages';
 
 import { Trade, Note, DailyBias, UserProfile } from './types';
@@ -63,8 +61,6 @@ const AppContent: React.FC = () => {
   });
 
   const [currentMigrationVersion] = useState('v20250201.1');
-  // Logged-out visitors see the public landing page first; auth form on demand.
-  const [showAuth, setShowAuth] = useState(false);
 
   // Public paths: no login, no splash, no mobile blocker, no onboarding.
   // (Canonical /privacy + /terms are static HTML via vercel rewrites; these
@@ -1090,29 +1086,11 @@ const onLogout = async () => {
   }
 
   if (isAuthCallbackPath) {
-    return (
-      <AuthCallback
-        onSuccess={async () => {
-          setIsInitialLoading(true);
-          try {
-            const user = await authService.getCurrentUser();
-            if (user) {
-              setUserId(user.id);
-              setUserEmail(user.email || '');
-              await loadUserData(user.id);
-              setIsAuthenticated(true);
-              posthog.identify(user.id, { email: user.email || '' });
-            }
-          } catch (error) {
-            console.error('OAuth login data load failed:', error);
-          } finally {
-            setCurrentPath('/');
-            window.history.replaceState({}, '', '/');
-            setIsInitialLoading(false);
-          }
-        }}
-      />
-    );
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, '', '/');
+    }
+    setCurrentPath('/');
+    return <BrandedLoader />;
   }
 
   if (isInitialLoading) {
@@ -1120,9 +1098,6 @@ const onLogout = async () => {
   }
 
   if (!isAuthenticated) {
-    if (!showAuth) {
-      return <PublicHome onSignUp={() => setShowAuth(true)} onLogIn={() => setShowAuth(true)} />;
-    }
     return (
       <Auth
         isDarkMode={isDarkMode}
