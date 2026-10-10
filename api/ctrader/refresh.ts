@@ -16,6 +16,27 @@ function getCredentials() {
   };
 }
 
+/** Native-app fallback: resolve the server-stored refresh token for the verified user. */
+async function getStoredRefreshTokenForUser(
+  supabaseUrl: string,
+  serviceKey: string,
+  userId: string,
+): Promise<string> {
+  if (!userId || !supabaseUrl || !serviceKey) return '';
+  try {
+    const r = await fetch(
+      `${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${encodeURIComponent(userId)}&select=refresh_token`,
+      { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
+    );
+    if (!r.ok) return '';
+    const rows = await r.json().catch(() => []);
+    const tok = Array.isArray(rows) ? rows[0]?.refresh_token : (rows as any)?.refresh_token;
+    return typeof tok === 'string' ? tok : '';
+  } catch {
+    return '';
+  }
+}
+
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -37,22 +58,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const refreshToken = (req.cookies?.[REFRESH_COOKIE] || '') as string;
-  if (!refreshToken) {
-    res.status(401).json({ error: 'Missing cTrader session' });
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim().replace(/\/$/, '');
+  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!supabaseUrl || !serviceKey) {
+    res.status(503).json({ error: 'Database service is required to refresh cTrader securely' });
     return;
+  }
+
+  // Serve the cached access token while valid. Refresh tokens are
+  // single-use: minting on every call (each app boot, each session restore,
+  // each reconnect) churns the grant for no benefit and loses races between
+  // concurrent clients. Mirrors the cache semantics of trade.ts.
+  const dbHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+  try {
+    const cachedRes = await fetch(
+      `${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${auth.userId}&select=access_token,access_token_expires_at`,
+      { headers: dbHeaders },
+    );
+    if (cachedRes.ok) {
+      const rows = await cachedRes.json().catch(() => []);
+      const row = Array.isArray(rows) ? rows[0] : null;
+      const expiresAt = row?.access_token_expires_at ? Date.parse(row.access_token_expires_at) : Number.NaN;
+      if (row?.access_token && Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
+        res.json({
+          ok: true,
+          access_token: String(row.access_token),
+          expires_in: Math.floor((expiresAt - Date.now()) / 1000),
+        });
+        return;
+      }
+    }
+  } catch { /* fall through to mint */ }
+
+  let refreshToken = (req.cookies?.[REFRESH_COOKIE] || '') as string;
+  if (!refreshToken) {
+    // Native-app fallback: the Capacitor shell cannot send httpOnly cookies,
+    // so resolve the server-stored refresh token for the verified user
+    // instead of failing every native session restore with 401.
+    refreshToken = await getStoredRefreshTokenForUser(supabaseUrl, serviceKey, auth.userId);
+    if (!refreshToken) {
+      res.status(401).json({ error: 'Missing cTrader session' });
+      return;
+    }
   }
 
   const { clientId, clientSecret } = getCredentials();
   if (!clientId || !clientSecret) {
     res.status(503).json({ error: 'cTrader OAuth credentials are not configured for this deployment' });
-    return;
-  }
-
-  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim().replace(/\/$/, '');
-  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-  if (!supabaseUrl || !serviceKey) {
-    res.status(503).json({ error: 'Database service is required to refresh cTrader securely' });
     return;
   }
 
