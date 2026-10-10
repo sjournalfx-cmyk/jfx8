@@ -10,10 +10,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // PKCE is required for the Google OAuth code-exchange flow
-    // (supabase.auth.exchangeCodeForSession in AuthCallback).
+    // PKCE is required for the Google OAuth code-exchange flow.
+    // detectSessionInUrl is set to false because AuthCallback manually exchanges
+    // the code and verifies the session without race conditions.
     flowType: 'pkce',
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,
     persistSession: true,
     autoRefreshToken: true,
   },

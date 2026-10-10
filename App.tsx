@@ -68,9 +68,9 @@ const AppContent: React.FC = () => {
 
   // Public paths: no login, no splash, no mobile blocker, no onboarding.
   // (Canonical /privacy + /terms are static HTML via vercel rewrites; these
-  // in-app views cover client-side navigation and non-rewritten hosts.)
-  const publicPath = typeof window !== 'undefined' ? window.location.pathname : '/';
-  const isAuthCallbackPath = publicPath === '/auth/callback';
+  const [currentPath, setCurrentPath] = useState(() => (typeof window !== 'undefined' ? window.location.pathname : '/'));
+  const publicPath = currentPath;
+  const isAuthCallbackPath = currentPath === '/auth/callback';
 
   useEffect(() => {
     if (publicPath === '/privacy') {
@@ -1106,6 +1106,7 @@ const onLogout = async () => {
           } catch (error) {
             console.error('OAuth login data load failed:', error);
           } finally {
+            setCurrentPath('/');
             window.history.replaceState({}, '', '/');
             setIsInitialLoading(false);
           }

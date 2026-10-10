@@ -109,6 +109,24 @@ export const useAuth = () => {
 
   useEffect(() => {
     initApp();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
+        setUserId(session.user.id);
+        setUserEmail(session.user.email || '');
+        setIsAuthenticated(true);
+        void loadUserData(session.user.id);
+      } else if (event === 'SIGNED_OUT') {
+        setIsAuthenticated(false);
+        setUserProfile(null);
+        setUserId(null);
+        setUserEmail('');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
