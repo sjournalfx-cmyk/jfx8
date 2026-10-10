@@ -14,7 +14,7 @@ export const useMT5Bridge = (initialSymbol: string, initialTimeframe: string) =>
         const activeTF = overrideTimeframe || timeframe;
         try {
             const response = await fetch(`${MT5_BRIDGE_URL}/data?symbol=${activeSymbol}&tf=${activeTF}&count=1000`).catch(() => {
-                throw new Error('MT5 Bridge disconnected. Please launch and start the JournalFX Bridge app.');
+                throw new Error('MT5 Bridge disconnected. Please launch and start the JFX-JOURNAL Bridge app.');
             });
             if (!response.ok) throw new Error('Bridge returned an error. Ensure MT5 is open.');
             

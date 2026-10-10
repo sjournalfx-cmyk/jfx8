@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trade, UserProfile, DailyBias, EASession, Note } from '../types';
-import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary } from '../services/nvidiaAiService';
+import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary, describeAiError } from '../services/nvidiaAiService';
 import { browserSpeechService } from '../services/voiceInputService';
 import { calculateStats } from '../lib/statsUtils';
 import { buildAnalyticsAiSnapshot } from '../lib/analyticsAiSnapshot';
@@ -27,6 +27,11 @@ const authedFetch = async (url: string): Promise<Response> => {
 
 // --- Utilities ---
 const DAILY_CREDIT_MAX = 10;
+// Longest single message accepted. Keeps payloads far below the proxy's
+// 512KB cap and bounds model latency for everyone sharing the quota.
+const MAX_INPUT_CHARS = 6000;
+// Cap persisted history so power users can never blow the localStorage quota.
+const MAX_STORED_MESSAGES = 150;
 
 type DailyCreditState = {
   date: string;
@@ -284,7 +289,11 @@ const useSessionMessages = (storageKey: string): [Message[], React.Dispatch<Reac
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(stripAudioForStorage(messages)));
+      const capped = stripAudioForStorage(messages);
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify(capped.length > MAX_STORED_MESSAGES ? capped.slice(-MAX_STORED_MESSAGES) : capped)
+      );
     } catch (error) {
       console.warn(`Error saving chat history key "${storageKey}":`, error);
     }
@@ -580,6 +589,16 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
                     title={message.contextSummary.promptScope}
                   >
                     {modeLabel}
+                  </span>
+                )}
+                {!isUser && message.contextSummary?.fellBack && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                      isDarkMode ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-700'
+                    }`}
+                    title={`Primary model unavailable — answered by backup model${message.contextSummary.modelUsed ? ` (${message.contextSummary.modelUsed})` : ''}.`}
+                  >
+                    BACKUP
                   </span>
                 )}
                 {message.kind === 'strategy' && (
@@ -1019,6 +1038,10 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Streaming bookkeeping: the placeholder message id plus the latest partial
+  // text, so abort/stop can finalize (or discard) exactly the right bubble.
+  const streamIdRef = useRef<string | null>(null);
+  const streamedTextRef = useRef('');
   const inputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef(false);
   useEffect(() => {
@@ -1143,6 +1166,9 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
 
   const handleModelSwitch = useCallback((nextModel: ModalModelType) => {
     if (nextModel === selectedModel) return;
+    // Never let an in-flight answer land in the wrong mode's history.
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setShowForgeMenu(false);
     setShowFeaturesMenu(false);
     if (getAssistantMode(nextModel) === 'research') {
@@ -1153,6 +1179,9 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   }, [selectedModel, setSelectedModel]);
 
   const handleNewChat = useCallback(() => {
+    // Abort first so a late completion can't resurrect into the fresh chat.
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setMessages([]);
   }, [setMessages]);
 
@@ -1537,7 +1566,15 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     }
 
     const hasAudioAttachment = Boolean(nextAudioAttachment);
-    const normalizedInput = finalInput.trim();
+    let normalizedInput = finalInput.trim();
+    if (normalizedInput.length > MAX_INPUT_CHARS) {
+      normalizedInput = normalizedInput.slice(0, MAX_INPUT_CHARS);
+      addToast({
+        type: 'info',
+        title: 'Message shortened',
+        message: `Kept the first ${MAX_INPUT_CHARS} characters so the request stays fast and within service limits.`,
+      });
+    }
     if ((!normalizedInput && !hasAudioAttachment) || isGenerating) return;
 
     const activeCreditMode: 'research' | 'mentor' = isResearchMode ? 'research' : 'mentor';
@@ -1631,7 +1668,20 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
 
     try {
       consumeDailyCredit(activeCreditMode);
-      const res = await modalResearchService.generateResponse(
+      // Streaming placeholder: tokens render as they arrive (fast perceived
+      // response) and the finished answer swaps into the same bubble.
+      const streamId = `stream-${Date.now()}`;
+      streamIdRef.current = streamId;
+      streamedTextRef.current = '';
+      setMessages(prev => [...prev, {
+        id: streamId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        isStreaming: true,
+        contextSummary,
+      }]);
+      const res = await modalResearchService.generateResponseWithMeta(
         normalizedInput || 'Analyze and respond to this attached voice recording.',
         requestContext.trades,
         requestContext.userProfile,
@@ -1641,26 +1691,39 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
         requestHistory,
         selectedModel,
         isPlanMode,
-        undefined,
+        (partial) => {
+          streamedTextRef.current = partial;
+          setMessages(prev => prev.map(m => m.id === streamId ? { ...m, content: partial } : m));
+        },
         abortControllerRef.current.signal
       );
-      processResponse(res, (Date.now() + 1).toString(), { contextSummary });
+      processResponse(res.text, (Date.now() + 1).toString(), {
+        replaceId: streamId,
+        contextSummary: { ...contextSummary, modelUsed: res.modelId, fellBack: res.fellBack },
+      });
     } catch (error: any) {
+      const streamId = streamIdRef.current;
+      const partial = streamedTextRef.current.trim();
       // Give the credit back — it was only spent on a successful answer.
       refundDailyCredit(activeCreditMode);
-      if (error?.message === "Generation aborted") return;
+      if (error?.message === "Generation aborted") {
+        // Stopped by the user: keep what had already streamed (if anything)
+        // instead of leaving an empty bubble behind.
+        if (streamId && partial) {
+          processResponse(partial, (Date.now() + 1).toString(), { replaceId: streamId, contextSummary });
+        } else if (streamId) {
+          removeMessage(streamId);
+        }
+        return;
+      }
+      if (streamId) {
+        removeMessage(streamId);
+      }
       console.error("AI Error:", error);
-      const errorMessage = error?.message?.includes('API_KEY')
-        ? 'AI not configured. Please add the NVIDIA API key to the service.'
-        : error?.message?.includes('timeout')
-        ? 'The AI service took too long to respond. Try a shorter prompt.'
-        : error?.message?.includes('quota')
-        ? 'API quota exceeded. Please try again later.'
-        : error?.message?.includes('rate')
-        ? 'Rate limit hit. Please wait a moment.'
-        : 'Failed to generate response. Please try again.';
-      addToast({ type: 'error', title: 'AI Error', message: errorMessage });
+      addToast({ type: 'error', title: 'AI Error', message: describeAiError(error) });
     } finally {
+      streamIdRef.current = null;
+      streamedTextRef.current = '';
       setIsGenerating(false);
       abortControllerRef.current = null;
       isProcessingRef.current = false;
@@ -1813,9 +1876,10 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       scalingSnapshot?: Message['scalingSnapshot'];
       strategyProfile?: Message['strategyProfile'];
       contextSummary?: AssistantContextSummary;
+      replaceId?: string;
     } = {}
   ) => {
-    const { isDeepAnalysis = false, kind = isDeepAnalysis ? 'analysis' : 'chat', psychologySnapshot, scalingSnapshot, strategyProfile, contextSummary } = options;
+    const { isDeepAnalysis = false, kind = isDeepAnalysis ? 'analysis' : 'chat', psychologySnapshot, scalingSnapshot, strategyProfile, contextSummary, replaceId } = options;
     let cleanContent = cleanAssistantResponse(fullResponse).replace(/\n\n\n+/g, '\n\n').trim();
     if (!cleanContent) {
       cleanContent = 'I couldn\'t prepare a safe final response. Please try again.';
@@ -1830,9 +1894,18 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       cleanContent = cleanContent.replace(/\[SECTION:([A-Z_]+)\]([\s\S]*?)(?=\[SECTION:[A-Z_]+\]|$)/g, '').trim();
     }
 
-    setMessages(prev => [...prev, { id: messageId, role: 'assistant', content: cleanContent, timestamp: new Date(), sections, isDeepAnalysis, kind, psychologySnapshot, scalingSnapshot, strategyProfile, contextSummary }]);
+    const node: Message = { id: messageId, role: 'assistant', content: cleanContent, timestamp: new Date(), sections, isDeepAnalysis, kind, psychologySnapshot, scalingSnapshot, strategyProfile, contextSummary };
+    // Streaming flow swaps the live placeholder for the finished bubble so
+    // the message keeps its position and history stays coherent.
+    setMessages(prev => replaceId
+      ? prev.map(m => m.id === replaceId ? { ...node, id: replaceId } : m)
+      : [...prev, node]);
     playEarcon(kind === 'chat' ? 'thinking-done' : 'task-complete');
   };
+
+  const removeMessage = useCallback((id: string) => {
+    setMessages(prev => prev.filter(m => m.id !== id));
+  }, [setMessages]);
 
   const handleFeatureRequest = async (mode: 'psychology' | 'scaling', userRequest: string) => {
     if (isGenerating) return;
@@ -1841,6 +1914,17 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
         type: 'info',
         title: 'Mentor Only',
         message: 'Switch to Mentor mode for psychology and scaling analysis based on your private trading data.',
+      });
+      return;
+    }
+
+    // Check credits BEFORE mutating anything so a rejection leaves no ghost
+    // user message and no stuck generation spinner.
+    if (dailyCredits.mentorRemaining <= 0) {
+      addToast({
+        type: 'error',
+        title: 'Daily credits used up',
+        message: 'You have used all mentor credits for today. Try again tomorrow.',
       });
       return;
     }
@@ -1894,20 +1978,11 @@ FORMAT REQUIREMENTS
 - SCALING_ROADMAP must be plain Markdown bullets grouped by phase.
 - CAPITAL_RULES and TARGETS must be concise plain Markdown bullets.
 
-User request: ${userRequest}`;
-
-    if (dailyCredits.mentorRemaining <= 0) {
-      addToast({
-        type: 'error',
-        title: 'Daily credits used up',
-        message: 'You have used all mentor credits for today. Try again tomorrow.',
-      });
-      return;
-    }
+ User request: ${userRequest}`;
 
     try {
       consumeDailyCredit('mentor');
-      const res = await modalResearchService.generateResponse(
+      const res = await modalResearchService.generateResponseWithMeta(
         prompt,
         trades,
         userProfile,
@@ -1920,7 +1995,13 @@ User request: ${userRequest}`;
         undefined,
         abortControllerRef.current.signal
       );
-      processResponse(res, (Date.now() + 1).toString(), { isDeepAnalysis: true, kind: mode, psychologySnapshot, scalingSnapshot, contextSummary });
+      processResponse(res.text, (Date.now() + 1).toString(), {
+        isDeepAnalysis: true,
+        kind: mode,
+        psychologySnapshot,
+        scalingSnapshot,
+        contextSummary: { ...contextSummary, modelUsed: res.modelId, fellBack: res.fellBack },
+      });
     } catch (error: any) {
       // Refund the credit — it is only spent on a successful answer.
       refundDailyCredit('mentor');
@@ -1928,9 +2009,7 @@ User request: ${userRequest}`;
       addToast({
         type: 'error',
         title: `${mode === 'psychology' ? 'Psychology' : 'Scaling'} Error`,
-        message: error?.message?.includes('timeout')
-          ? 'The AI service took too long to respond. Try again with a shorter prompt.'
-          : `Failed to generate ${mode} plan. Please try again.`,
+        message: describeAiError(error),
       });
     } finally {
       setIsGenerating(false);
@@ -2074,7 +2153,7 @@ ${strategyProfile.whyITrade}`;
 
     try {
       consumeDailyCredit('mentor');
-      const res = await modalResearchService.generateResponse(
+      const res = await modalResearchService.generateResponseWithMeta(
         prompt,
         trades,
         userProfile,
@@ -2087,7 +2166,12 @@ ${strategyProfile.whyITrade}`;
         undefined,
         abortControllerRef.current.signal
       );
-      processResponse(res, Date.now().toString(), { isDeepAnalysis: true, kind: 'trading-plan', strategyProfile, contextSummary });
+      processResponse(res.text, Date.now().toString(), {
+        isDeepAnalysis: true,
+        kind: 'trading-plan',
+        strategyProfile,
+        contextSummary: { ...contextSummary, modelUsed: res.modelId, fellBack: res.fellBack },
+      });
     } catch (error: any) {
       // Refund the credit — it is only spent on a successful answer.
       refundDailyCredit('mentor');
@@ -2096,9 +2180,7 @@ ${strategyProfile.whyITrade}`;
       addToast({
         type: 'error',
         title: 'Plan Error',
-        message: error?.message?.includes('timeout')
-          ? 'The AI service took too long to respond. Try again with a shorter prompt.'
-          : 'Failed to architect trading plan.',
+        message: describeAiError(error),
       });
     } finally {
       setIsGenerating(false);
@@ -2970,12 +3052,7 @@ ${strategyProfile.whyITrade}`;
               animate={{ opacity: 1, y: 0 }}
               className="flex items-center gap-2 px-4 py-2"
             >
-              <div className="flex items-center gap-4 max-w-4xl mx-auto w-full">
-                <div className="shrink-0 mt-1">
-                  <div className="w-8 h-8 rounded-full bg-black dark:bg-black flex items-center justify-center">
-                    <AssistantIcon size={16} className="text-white" />
-                  </div>
-                </div>
+              <div className="flex items-center gap-4 max-w-4xl mx-auto w-full pl-12">
                 <div className="flex items-center gap-2">
                 <div className="flex gap-1">
                     {[0, 1, 2].map(i => (

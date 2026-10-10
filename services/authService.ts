@@ -23,6 +23,22 @@ export const authService = {
     return { data, error };
   },
 
+  /**
+   * Start Google OAuth. The caller passes redirectTo so web uses the
+   * current origin (works on apex + www) and native passes its deep link.
+   * With skipBrowserRedirect the raw URL is returned for Custom Tab open.
+   */
+  async signInWithGoogle(redirectTo: string, skipBrowserRedirect = false) {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        skipBrowserRedirect,
+      },
+    });
+    return { data, error };
+  },
+
   async signOut() {
     const { error } = await supabase.auth.signOut();
     return { error };

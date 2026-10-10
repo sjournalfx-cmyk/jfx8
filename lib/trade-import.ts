@@ -138,6 +138,12 @@ export const parseMTTradeCSV = (text: string): Trade[] => {
     if (headerIndex === -1) return [];
 
     const headers = parseDelimitedLine(lines[headerIndex], delimiter).map(normalizeHeader);
+    // MT4/MT5 history exports repeat the bare "Price" header for open and
+    // close prices. A header→value map would let the close overwrite the
+    // open, and neither openPrice/closePrice alias list contains generic
+    // "price", so both parsed as 0. Track positional duplicates instead.
+    const barePriceIdxs: number[] = [];
+    headers.forEach((h, i) => { if (h === 'price') barePriceIdxs.push(i); });
     const importedTrades: Trade[] = [];
 
     lines.slice(headerIndex + 1).forEach((line, rowIndex) => {
@@ -158,8 +164,16 @@ export const parseMTTradeCSV = (text: string): Trade[] => {
         const pnl = profit + commission + swap + fees;
         const open = parseDateTime(readField(row, aliases.openTime));
         const close = parseDateTime(readField(row, aliases.closeTime) || readField(row, aliases.openTime));
-        const openPrice = parseNumber(readField(row, aliases.openPrice));
-        const closePrice = parseNumber(readField(row, aliases.closePrice));
+        let openPriceRaw = readField(row, aliases.openPrice);
+        let closePriceRaw = readField(row, aliases.closePrice);
+        if (barePriceIdxs.length >= 2) {
+            openPriceRaw = values[barePriceIdxs[0]] || openPriceRaw;
+            closePriceRaw = values[barePriceIdxs[1]] || closePriceRaw;
+        } else if (barePriceIdxs.length === 1 && !openPriceRaw) {
+            openPriceRaw = values[barePriceIdxs[0]];
+        }
+        const openPrice = parseNumber(openPriceRaw);
+        const closePrice = parseNumber(closePriceRaw);
         const stopLoss = parseNumber(readField(row, aliases.stopLoss));
         const takeProfit = parseNumber(readField(row, aliases.takeProfit));
         const ticket = readField(row, aliases.ticket) || `row-${rowIndex + 1}`;

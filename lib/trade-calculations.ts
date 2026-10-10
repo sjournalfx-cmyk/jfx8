@@ -34,6 +34,34 @@ const getForexPipInfo = (pair?: string): { pipSize: number; pipValuePerLot: numb
 };
 
 /**
+ * Returns the price increment that counts as "1 pip" for a given trade.
+ * Forex:   JPY-quoted = 0.01, everything else = 0.0001
+ * Gold:    0.1  (XAUUSD quotes move in cents)
+ * Silver:  0.01 (XAGUSD)
+ * Energy:  0.01 (oil / gas)
+ * Indices / Crypto / Stocks: 1 point (whole index or coin tick)
+ * Honors an explicit trade.contractSize-style broker override for the quote unit
+ * via trade.pair conventions only — contractSize scales PnL, not pip size.
+ */
+export const getPipSize = (assetType?: string, pair?: string): number => {
+  const sym = (pair || '').toUpperCase().replace('/', '').replace('_', '');
+
+  if (assetType === 'Forex' || (!assetType && /^[A-Z]{6}$/.test(sym))) {
+    const { pipSize } = getForexPipInfo(sym);
+    return pipSize;
+  }
+
+  if (assetType === 'Commodities') {
+    if (sym.includes('XAU') || sym.includes('GOLD')) return 0.1;
+    if (sym.includes('XAG') || sym.includes('SILVER')) return 0.01;
+    return 0.01; // oil, gas and other energy quotes
+  }
+
+  // Indices, Crypto and Stocks are quoted in whole points/units.
+  return 1;
+};
+
+/**
  * Returns the standard contract multiplier for non-Forex assets.
  * This is the number of units (oz, barrels, contracts) per 1 lot.
  * Traders can override this per-trade via trade.contractSize for non-standard brokers.

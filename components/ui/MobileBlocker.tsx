@@ -208,7 +208,7 @@ export const MobileBlocker: React.FC<MobileBlockerProps> = ({ isDarkMode = true 
       <footer className="relative z-10 flex flex-col items-center gap-2 pt-4 border-t border-dashed border-zinc-900 max-w-lg mx-auto w-full">
 
         <p className="text-zinc-600 text-[9px] font-bold tracking-widest uppercase">
-          © {new Date().getFullYear()} JournalFX. All Rights Reserved.
+          © {new Date().getFullYear()} JFX-JOURNAL. All Rights Reserved.
         </p>
       </footer>
     </div>

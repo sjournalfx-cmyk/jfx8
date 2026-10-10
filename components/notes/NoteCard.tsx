@@ -60,18 +60,22 @@ const NoteCard: React.FC<NoteCardProps> = ({
     if (note.tableData && note.tableData.rows.length > 0) {
       const maxRows = 3;
       const visibleRows = note.tableData.rows.slice(0, maxRows);
-      
+      // Size the preview to the real column count so cells line up instead
+      // of always forcing three columns.
+      const maxCols = Math.max(1, ...note.tableData.rows.map(row => row.length));
+
       return (
         <div className="mt-2 overflow-hidden border border-[var(--notebook-divider)] rounded text-[0.7rem] pointer-events-none">
           <table className="w-full border-collapse">
             <tbody>
               {visibleRows.map((row, i) => (
                 <tr key={i} className="border-b border-[var(--notebook-divider)] last:border-0">
-                  {row.slice(0, 3).map((cell, j) => {
-                    const cellData = typeof cell === 'string' ? { text: cell } : cell;
+                  {Array.from({ length: maxCols }).map((_, j) => {
+                    const cell = row[j];
+                    const cellData = cell === undefined ? undefined : typeof cell === 'string' ? { text: cell } : cell;
                     return (
-                      <td key={j} className={`p-1 border-r border-[var(--notebook-divider)] last:border-0 truncate max-w-[60px] text-[var(--notebook-text)] opacity-80 ${cellData.color ? ColorStyles[cellData.color] : ''}`}>
-                        {cellData.text}
+                      <td key={j} className={`p-1 border-r border-[var(--notebook-divider)] last:border-0 truncate max-w-[60px] text-[var(--notebook-text)] opacity-80 ${cellData?.color ? ColorStyles[cellData.color] : ''}`}>
+                        {cellData?.text ?? ''}
                       </td>
                     );
                   })}
@@ -109,7 +113,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
         <button
           {...(dragHandleProps || {})}
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-2 right-10 z-10 p-1 rounded-full text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] transition-all duration-150 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing"
+          className={`absolute top-2 right-10 z-10 p-1 rounded-full text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] transition-all duration-150 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100`}
           title="Drag to reorder"
           aria-label="Drag to reorder"
         >
@@ -136,7 +140,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
                 e.stopPropagation();
                 onPin(e, note);
               }}
-              className={`text-[var(--notebook-text)] p-1.5 -mr-1 -mt-1 rounded-full hover:bg-[var(--notebook-hover)] transition-all duration-150 pointer-events-auto ${isHovered || note.isPinned ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}
+              className={`text-[var(--notebook-text)] p-1.5 -mr-1 -mt-1 rounded-full hover:bg-[var(--notebook-hover)] transition-all duration-150 pointer-events-auto opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 pointer-coarse:opacity-100 pointer-coarse:scale-100 ${note.isPinned ? 'opacity-100 scale-100' : ''}`}
               title={note.isPinned ? "Unpin note" : "Pin note"}
               aria-label={note.isPinned ? "Unpin note" : "Pin note"}
             >
@@ -158,7 +162,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
         )}
       </div>
 
-      <div className={`h-[32px] flex items-center justify-between px-2 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+      <div className={`h-[32px] flex items-center justify-between px-2 transition-opacity duration-200 focus-within:opacity-100 pointer-coarse:opacity-100 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
          <div className="flex items-center gap-1">
              {note.isTrashed ? (
                <>

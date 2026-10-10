@@ -54,7 +54,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Per-user rate limit (Finnhub free tier allows 60 req/min).
-  const rl = rateLimit(`finnhub:${auth.userId}`, 30, 60_000);
+  const rl = await rateLimit(`finnhub:${auth.userId}`, 30, 60_000);
+  if (rl.unavailable) {
+    res.status(503).json({ error: 'Rate limiter is temporarily unavailable. Please try again shortly.' });
+    return;
+  }
   if (!rl.allowed) {
     res.setHeader('Retry-After', String(Math.ceil((rl.retryAfterMs ?? 0) / 1000)));
     res.status(429).json({ error: 'Rate limit exceeded. Please slow down and try again in a moment.' });

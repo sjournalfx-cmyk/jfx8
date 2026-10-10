@@ -170,7 +170,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
         <div className="flex-1 flex flex-col">
           {step === 1 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-2xl">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Welcome to JournalFX</h1>
+              <h1 className="text-5xl font-bold tracking-tight mb-4">Welcome to JFX-JOURNAL</h1>
               <p className={`text-lg mb-12 ${subTextColor}`}>Let's start with your identity and country to tailor the regional experience.</p>
 
               <div className="space-y-8">
@@ -253,7 +253,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
                 <div className={`p-8 rounded-xl border h-80 overflow-y-auto custom-scrollbar leading-relaxed text-sm ${isDarkMode ? 'bg-[#111] border-zinc-800 text-zinc-400' : 'bg-white border-zinc-200 text-zinc-600'}`} ref={scrollRef} onScroll={handleScroll}>
                   <h3 className="font-bold text-zinc-800 dark:text-zinc-200 mb-4 uppercase text-xs tracking-widest">Terms of Use / Service Agreement</h3>
                   <p className="mb-4">Date of last revision: October 24, 2024</p>
-                  <p className="mb-6">This agreement is between JournalFX Technologies ("the Company") and the user. By using this software, you acknowledge that trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors.</p>
+                  <p className="mb-6">This agreement is between JFX-JOURNAL Technologies ("the Company") and the user. By using this software, you acknowledge that trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors.</p>
                   <p className="mb-4 font-bold uppercase text-zinc-800 dark:text-zinc-200">1. RISK DISCLOSURE</p>
                   <p className="mb-6">The high degree of leverage can work against you as well as for you. Before deciding to invest in foreign exchange you should carefully consider your investment objectives, level of experience, and risk appetite.</p>
                   <div className="h-20" />
@@ -261,7 +261,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
                 <div className="space-y-4 pt-2">
                   <div className="flex items-center justify-between py-4 border-b border-zinc-200 dark:border-zinc-800">
-                    <span className="text-sm font-bold opacity-80">I agree to JournalFX's <span className="underline cursor-pointer">Terms of Service</span> and <span className="underline cursor-pointer">Privacy Policy</span>.</span>
+                    <span className="text-sm font-bold opacity-80">I agree to JFX-JOURNAL's <span className="underline cursor-pointer">Terms of Service</span> and <span className="underline cursor-pointer">Privacy Policy</span>.</span>
                     <div className="flex items-center gap-4">
                       {!isAtBottom && <span className="text-[10px] font-black uppercase tracking-widest opacity-40 mr-2">Scroll to bottom</span>}
                       <button
@@ -516,7 +516,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
                   className={`flex items-center gap-2 px-6 py-4 rounded-xl font-bold text-sm border transition-all ${
                     isDarkMode ? 'border-zinc-700 text-zinc-300 hover:border-zinc-500' : 'border-slate-300 text-slate-600 hover:border-slate-400'
                   }`}
-                  title="Look around JournalFX with realistic sample data — your real journal stays empty until you log trades"
+                  title="Look around JFX-JOURNAL with realistic sample data — your real journal stays empty until you log trades"
                 >
                   Explore with Demo Data
                 </button>

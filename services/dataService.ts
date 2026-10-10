@@ -25,6 +25,25 @@ const sanitizeTimestamp = (value: unknown): string | null => {
   return new Date(timestamp).toISOString();
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (value: unknown): value is string => typeof value === 'string' && UUID_PATTERN.test(value);
+const isUniqueViolation = (error: any) => error?.code === '23505' || /duplicate key/i.test(String(error?.message || ''));
+
+const TRADE_LIST_COLUMNS = [
+  'id', 'ticket_id', 'pair', 'asset_type', 'date', 'time', 'session', 'direction',
+  'entry_price', 'exit_price', 'stop_loss', 'take_profit', 'lots', 'result', 'pnl',
+  'commissions', 'fees', 'swap', 'rr', 'rating', 'tags', 'notes', 'emotions',
+  'plan_adherence', 'trading_mistake', 'mindset', 'exit_comment', 'voice_note',
+  'open_time', 'close_time', 'before_screenshot', 'after_screenshot', 'setup_id',
+  'setup_name', 'deleted_at', 'chart_timeframe', 'updated_at',
+].join(',');
+// Discipline engine columns (migration 20260921). Appended last so the
+// pre-migration fallback in getTrades can strip exactly these.
+const DISCIPLINE_COLUMNS = [
+  'checklist_template_id', 'checklist_checks', 'adherence_rate', 'execution_grade', 'behavior_tags',
+];
+const TRADE_LIST_COLUMNS_WITH_DISCIPLINE = [...TRADE_LIST_COLUMNS.split(','), ...DISCIPLINE_COLUMNS].join(',');
+
 export const extractMissingColumnName = (error: any): string | null => {
   if (!error) return null;
   const message = String(error.message || error.details || error.hint || '');
@@ -42,6 +61,10 @@ export const extractMissingColumnName = (error: any): string | null => {
   if (!isColumnError) return null;
 
   const patterns = [
+    // Postgres 42703 passthrough: `column trades.commissions does not exist`
+    // (optionally quoted, optionally table-prefixed) — must come before the
+    // generic catch-alls below so we get the column, not the table name.
+    /column\s+(.+?)\s+does not exist/i,
     /Could not find the '([^']+)' column/i,
     /column "([^"]+)" of relation/i,
     /column "([^"]+)" does not exist/i,
@@ -54,7 +77,9 @@ export const extractMissingColumnName = (error: any): string | null => {
   for (const pattern of patterns) {
     const match = message.match(pattern);
     if (match && match[1]) {
-      return match[1].replace(/["']/g, '').trim();
+      // Normalize `"trades"."commissions"` / `trades.commissions` → `commissions`
+      // so callers can compare against bare snake_case column keys.
+      return match[1].replace(/["']/g, '').trim().split('.').pop() || null;
     }
   }
 
@@ -64,6 +89,7 @@ export const extractMissingColumnName = (error: any): string | null => {
 // Helper to map DB Trade to App Trade
 export const mapTradeFromDB = (dbTrade: DBTrade): Trade => normalizeTrade({
   id: dbTrade.id,
+  updatedAt: dbTrade.updated_at,
   ticketId: dbTrade.ticket_id || undefined,
   pair: dbTrade.pair || '',
   assetType: dbTrade.asset_type || 'Forex',
@@ -100,6 +126,32 @@ export const mapTradeFromDB = (dbTrade: DBTrade): Trade => normalizeTrade({
   deletedAt: dbTrade.deleted_at,
   chartCandles: dbTrade.chart_candles || undefined,
   chartTimeframe: dbTrade.chart_timeframe || undefined,
+  checklistTemplateId: (dbTrade as DBTrade).checklist_template_id || undefined,
+  checklistChecks: ((dbTrade as DBTrade).checklist_checks && typeof (dbTrade as DBTrade).checklist_checks === 'object'
+    ? (dbTrade as DBTrade).checklist_checks as Record<string, boolean>
+    : undefined),
+  adherenceRate: typeof (dbTrade as DBTrade).adherence_rate === 'number' && Number.isFinite((dbTrade as DBTrade).adherence_rate as number)
+    ? (dbTrade as DBTrade).adherence_rate as number
+    : undefined,
+  executionGrade: ['A', 'B', 'C', 'D', 'F'].includes((dbTrade as DBTrade).execution_grade as string)
+    ? (dbTrade as DBTrade).execution_grade as Trade['executionGrade']
+    : undefined,
+  behaviorTags: Array.isArray((dbTrade as DBTrade).behavior_tags)
+    ? ((dbTrade as DBTrade).behavior_tags as unknown[]).map(t => String(t)).filter(Boolean)
+    : undefined,
+});
+
+const mapNoteFromDB = (note: any): Note => ({
+  ...note,
+  isPinned: note.is_pinned,
+  isArchived: note.is_archived,
+  isTrashed: note.is_trashed,
+  isList: note.is_list,
+  listItems: note.list_items,
+  tableData: note.table_data,
+  date: note.date || note.created_at,
+  position: note.position,
+  updatedAt: note.updated_at,
 });
 
 // Helper to map App Trade to DB Trade
@@ -114,6 +166,7 @@ const buildTradeDbPayload = (trade: Partial<Trade>, userId: string, fallback: Pa
   );
 
   return {
+    ...(isUuid(merged.id) ? { id: merged.id } : {}),
     user_id: userId,
     ticket_id: merged.ticketId,
     pair: merged.pair,
@@ -149,8 +202,30 @@ const buildTradeDbPayload = (trade: Partial<Trade>, userId: string, fallback: Pa
     setup_id: merged.setupId || null,
     setup_name: merged.setupName || null,
     deleted_at: merged.deletedAt,
-    chart_candles: merged.chartCandles || null,
-    chart_timeframe: merged.chartTimeframe || null,
+    ...(Object.prototype.hasOwnProperty.call(trade, 'chartCandles')
+      ? { chart_candles: merged.chartCandles || null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(trade, 'chartTimeframe')
+      ? { chart_timeframe: merged.chartTimeframe || null }
+      : {}),
+    // Discipline engine snapshot — only sent when the trade carries it, so
+    // pre-migration servers keep working (extractMissingColumnName strips the
+    // rest on column errors, same as chart columns).
+    ...(Object.prototype.hasOwnProperty.call(trade, 'checklistTemplateId')
+      ? { checklist_template_id: merged.checklistTemplateId || null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(trade, 'checklistChecks')
+      ? { checklist_checks: merged.checklistChecks && Object.keys(merged.checklistChecks).length ? merged.checklistChecks : null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(trade, 'adherenceRate')
+      ? { adherence_rate: typeof merged.adherenceRate === 'number' && Number.isFinite(merged.adherenceRate) ? merged.adherenceRate : null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(trade, 'executionGrade')
+      ? { execution_grade: merged.executionGrade || null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(trade, 'behaviorTags')
+      ? { behavior_tags: merged.behaviorTags && merged.behaviorTags.length ? merged.behaviorTags : null }
+      : {}),
   };
 };
 
@@ -372,7 +447,10 @@ const flushUnsyncedCashTransactions = async (userId: string): Promise<void> => {
   const stillUnsynced: CashTransaction[] = [];
   for (const tx of queued) {
     try {
-      await supabase.from('cash_transactions').insert(mapCashTransactionToDB(tx, userId));
+      const { error } = await supabase
+        .from('cash_transactions')
+        .upsert(mapCashTransactionToDB(tx, userId), { onConflict: 'id' });
+      if (error) throw error;
     } catch (error: any) {
       if (isMissingCashTransactionsTableError(error)) throw error;
       stillUnsynced.push(tx); // keep for next attempt (e.g. duplicate → drop silently)
@@ -464,6 +542,7 @@ const isMissingCashTransactionsTableError = (error: any) => {
 
 // Helper to map App Cash Transaction to DB Cash Transaction
 const mapCashTransactionToDB = (tx: CashTransaction, userId: string): Partial<DBCashTransaction> => ({
+  id: tx.id,
   user_id: userId,
   type: tx.type,
   amount: normalizeCashTransactionAmount(tx),
@@ -688,6 +767,32 @@ const deleteVoiceNoteFile = async (voiceUrl: string | undefined) => {
   }
 };
 
+const findExistingTrade = async (userId: string, dbTrade: Partial<DBTrade>): Promise<DBTrade | null> => {
+  let query = supabase.from('trades').select('*').eq('user_id', userId).is('deleted_at', null);
+  if (dbTrade.ticket_id) {
+    query = query.eq('ticket_id', dbTrade.ticket_id);
+  } else if (dbTrade.id) {
+    query = query.eq('id', dbTrade.id);
+  } else {
+    return null;
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return data as DBTrade | null;
+};
+
+const cleanupNewTradeMedia = async (current: Partial<DBTrade> | undefined, urls: Array<string | undefined>) => {
+  const previous = new Set([
+    current?.before_screenshot,
+    current?.after_screenshot,
+    current?.voice_note,
+  ].filter((url): url is string => Boolean(url)));
+  await Promise.allSettled(urls
+    .filter((url): url is string => Boolean(url && url.includes('trade-images') && !previous.has(url)))
+    .map((url) => deleteImageFile(url)));
+};
+
 export const dataService = {
   // --- Audit Logs ---
   async logActivity(action: string, details: Record<string, any>) {
@@ -709,15 +814,56 @@ export const dataService = {
 
   // --- Trades ---
   async getTrades(userId: string) {
-    const { data, error } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('user_id', userId)
-      .is('deleted_at', null)
-      .order('date', { ascending: false });
+    // Schema-drift armor: the live table may lack columns this client
+    // selects (migrations not yet applied). Strip each missing column the
+    // server names and retry — History can never go empty over schema drift.
+    // Missing fields read back as undefined and normalizeTrade defaults
+    // cover them, so older schemas simply show less detail.
+    let columns = TRADE_LIST_COLUMNS_WITH_DISCIPLINE;
+    let data: any = null;
+    let error: any = null;
+    // Cap is generous on purpose: one request per missing column, worst case.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const res = await supabase
+        .from('trades')
+        .select(columns)
+        .eq('user_id', userId)
+        .is('deleted_at', null)
+        .order('date', { ascending: false });
+      data = res.data;
+      error = res.error;
+      if (!error) break;
+      const missing = extractMissingColumnName(error);
+      const list = columns.split(',');
+      if (!missing || !list.includes(missing)) break;
+      console.warn(`getTrades: column ${missing} missing, retrying without it`);
+      columns = list.filter((c) => c !== missing).join(',');
+    }
 
     if (error) throw error;
     return (data || []).map(mapTradeFromDB);
+  },
+
+  async getTradeChartCandles(tradeId: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
+    const { data, error } = await supabase
+      .from('trades')
+      .select('chart_candles,chart_timeframe')
+      .eq('id', tradeId)
+      .eq('user_id', user.id)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (error) {
+      // Schema drift: chart columns may not exist yet — the chart tab shows
+      // its empty state instead of breaking the whole trade view.
+      if (extractMissingColumnName(error)) return null;
+      throw error;
+    }
+    return data && Array.isArray(data.chart_candles)
+      ? { candles: data.chart_candles as Trade['chartCandles'], timeframe: data.chart_timeframe || undefined }
+      : null;
   },
 
   async getMonthlyTradeCount(userId: string, year: number, month: number) {
@@ -758,23 +904,11 @@ export const dataService = {
 
     const dbTrade = buildTradeDbPayload(tradeToSave, user.id);
 
-    if (dbTrade.ticket_id) {
-      const { data: existing } = await supabase
-        .from('trades')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('ticket_id', dbTrade.ticket_id)
-        .maybeSingle();
-
-      if (existing) {
-        console.warn(`Trade with ticket ${dbTrade.ticket_id} already exists. Skipping.`);
-        const { data } = await supabase
-          .from('trades')
-          .select('*')
-          .eq('id', existing.id)
-          .single();
-        return mapTradeFromDB(data);
-      }
+    const existingTrade = await findExistingTrade(user.id, dbTrade);
+    if (existingTrade) {
+      console.warn(`Trade ${dbTrade.ticket_id || dbTrade.id} already exists. Skipping.`);
+      await cleanupNewTradeMedia(existingTrade, [beforeUrl, afterUrl, voiceUrl]);
+      return mapTradeFromDB(existingTrade);
     }
 
     const performInsert = async (data: Partial<DBTrade>): Promise<DBTrade> => {
@@ -785,6 +919,10 @@ export const dataService = {
         .single();
 
       if (error) {
+        if (isUniqueViolation(error)) {
+          const existing = await findExistingTrade(user.id, data);
+          if (existing) return existing;
+        }
         const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
         if (missingField && missingField in data) {
           console.warn(`Column ${missingField} missing in trades table. Retrying insert without it.`);
@@ -796,8 +934,13 @@ export const dataService = {
       return insertedRow as DBTrade;
     };
 
-    const data = await performInsert(dbTrade);
-    return mapTradeFromDB(data);
+    try {
+      const data = await performInsert(dbTrade);
+      return mapTradeFromDB(data);
+    } catch (error) {
+      await cleanupNewTradeMedia(undefined, [beforeUrl, afterUrl, voiceUrl]);
+      throw error;
+    }
   },
 
   async batchAddTrades(trades: Trade[]) {
@@ -816,7 +959,8 @@ export const dataService = {
         .from('trades')
         .select('ticket_id')
         .eq('user_id', user.id)
-        .in('ticket_id', ticketIds);
+        .in('ticket_id', ticketIds)
+        .is('deleted_at', null);
       
       existingTicketIds = new Set(existing?.map(t => t.ticket_id) || []);
     }
@@ -827,40 +971,62 @@ export const dataService = {
 
     if (tradesToSave.length === 0) return [];
 
-    const performBatchInsert = async (records: Partial<DBTrade>[]): Promise<DBTrade[]> => {
+    const insertOne = async (record: Partial<DBTrade>): Promise<DBTrade | null> => {
       const { data, error } = await supabase
         .from('trades')
-        .insert(records)
-        .select();
+        .insert(record)
+        .select()
+        .single();
+      if (!error) return data as DBTrade;
 
-      if (error) {
-        const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
-        if (missingField) {
-          console.warn(`Column ${missingField} missing in trades table. Retrying batch insert without it.`);
-          const safeRecords = records.map(r => {
-            const { [missingField]: _, ...rest } = r;
-            return rest;
-          });
-          return performBatchInsert(safeRecords);
-        }
-        throw error;
+      if (isUniqueViolation(error)) {
+        return findExistingTrade(user.id, record);
       }
-      return (data || []) as DBTrade[];
+      const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
+      if (missingField && missingField in record) {
+        const { [missingField]: _, ...safeRecord } = record;
+        return insertOne(safeRecord);
+      }
+      throw error;
     };
 
-    const data = await performBatchInsert(tradesToSave);
-    return (data || []).map(mapTradeFromDB);
+    // Small concurrent batches preserve import speed without firing thousands
+    // of writes at once or letting one duplicate abort the whole import.
+    const saved: DBTrade[] = [];
+    for (let index = 0; index < tradesToSave.length; index += 20) {
+      const rows = await Promise.all(tradesToSave.slice(index, index + 20).map(insertOne));
+      saved.push(...rows.filter((row): row is DBTrade => row !== null));
+    }
+    return saved.map(mapTradeFromDB);
   },
 
   async updateTrade(trade: Trade): Promise<Trade> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    const { data: currentTradeRow } = await supabase
+    // Light pre-read: only columns the guard/freeze/cleanup need. Retries
+    // without voice_note on schema drift so the guard keeps working.
+    const preread = async (columns: string) => supabase
       .from('trades')
-      .select('*')
+      .select(columns)
       .eq('id', trade.id)
+      .eq('user_id', user.id)
       .single();
+    let currentTradeRow: any = null;
+    {
+      const first = await preread('id,updated_at,ticket_id,tags,date,time,entry_price,exit_price,result,before_screenshot,after_screenshot,voice_note');
+      if (first.error && extractMissingColumnName(first.error)) {
+        console.warn('updateTrade pre-read: column missing, retrying without voice_note');
+        const second = await preread('id,updated_at,ticket_id,tags,date,time,entry_price,exit_price,result,before_screenshot,after_screenshot');
+        currentTradeRow = second.data;
+      } else {
+        currentTradeRow = first.data;
+      }
+    }
+
+    if (trade.updatedAt && currentTradeRow?.updated_at && trade.updatedAt !== currentTradeRow.updated_at) {
+      throw new Error('This trade was updated in another tab. Reload it before saving your changes.');
+    }
 
     const currentTrade = currentTradeRow ? mapTradeFromDB(currentTradeRow as DBTrade) : undefined;
     const isBridgeManagedTrade = Boolean(
@@ -890,24 +1056,12 @@ export const dataService = {
       { preserveProvidedPnl: true }
     );
 
-    const deletePromises: Promise<void>[] = [];
-    if (currentTradeRow) {
-      if (currentTradeRow.before_screenshot && (!normalizedInput.beforeScreenshot || normalizedInput.beforeScreenshot.startsWith('data:'))) {
-        deletePromises.push(deleteImageFile(currentTradeRow.before_screenshot));
-      }
-      if (currentTradeRow.after_screenshot && (!normalizedInput.afterScreenshot || normalizedInput.afterScreenshot.startsWith('data:'))) {
-        deletePromises.push(deleteImageFile(currentTradeRow.after_screenshot));
-      }
-      if (currentTradeRow.voice_note && (!normalizedInput.voiceNote || normalizedInput.voiceNote.startsWith('data:') || normalizedInput.voiceNote !== currentTradeRow.voice_note)) {
-        deletePromises.push(deleteVoiceNoteFile(currentTradeRow.voice_note));
-      }
-    }
-
+    // Upload first. The old object remains reachable until the database row
+    // points at the replacement, so a failed update cannot leave a broken UI.
     const [beforeUrl, afterUrl, voiceUrl] = await Promise.all([
       uploadImage(user.id, normalizedInput.beforeScreenshot, 'before'),
       uploadImage(user.id, normalizedInput.afterScreenshot, 'after'),
       uploadVoiceNote(user.id, normalizedInput.voiceNote),
-      ...deletePromises,
     ]);
 
     const tradeToUpdate = {
@@ -929,13 +1083,13 @@ export const dataService = {
     }
     
     const performUpdate = async (data: Partial<DBTrade>): Promise<DBTrade> => {
-      const { data: updatedRow, error } = await supabase
+      let query = supabase
         .from('trades')
         .update(data)
         .eq('id', trade.id)
-        .eq('user_id', user.id)
-        .select('*')
-        .single();
+        .eq('user_id', user.id);
+      if (currentTradeRow?.updated_at) query = query.eq('updated_at', currentTradeRow.updated_at);
+      const { data: updatedRow, error } = await query.select('*').single();
       
       if (error) {
         const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
@@ -949,8 +1103,27 @@ export const dataService = {
       return updatedRow as DBTrade;
     };
 
-    const refreshedTrade = await performUpdate(updateData);
-    return mapTradeFromDB(refreshedTrade);
+    try {
+      const refreshedTrade = await performUpdate(updateData);
+
+      const previousMediaToDelete: Promise<void>[] = [];
+      if (currentTradeRow?.before_screenshot && currentTradeRow.before_screenshot !== beforeUrl) {
+        previousMediaToDelete.push(deleteImageFile(currentTradeRow.before_screenshot));
+      }
+      if (currentTradeRow?.after_screenshot && currentTradeRow.after_screenshot !== afterUrl) {
+        previousMediaToDelete.push(deleteImageFile(currentTradeRow.after_screenshot));
+      }
+      if (currentTradeRow?.voice_note && currentTradeRow.voice_note !== voiceUrl) {
+        previousMediaToDelete.push(deleteVoiceNoteFile(currentTradeRow.voice_note));
+      }
+      await Promise.allSettled(previousMediaToDelete);
+      return mapTradeFromDB(refreshedTrade);
+    } catch (error) {
+      // The row was not changed, so remove only newly uploaded replacement
+      // files and leave the existing media untouched.
+      await cleanupNewTradeMedia(currentTradeRow as Partial<DBTrade> | undefined, [beforeUrl, afterUrl, voiceUrl]);
+      throw error;
+    }
   },
 
   async updateTradeComments(tradeId: string, notes: string | undefined, exitComment: string | undefined): Promise<Trade> {
@@ -969,29 +1142,71 @@ export const dataService = {
     return mapTradeFromDB(data as DBTrade);
   },
 
+  /**
+   * Light fast-path for small metadata edits (notes, rating, tags…).
+   * Single UPDATE, no pre-read, no media pipeline — ~1 hop vs 3–8.
+   */
+  async updateTradeFields(tradeId: string, fields: { notes?: string; exitComment?: string; rating?: number; tags?: string[] }): Promise<Trade> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
+    const payload: Record<string, unknown> = {};
+    if ('notes' in fields) payload.notes = fields.notes || null;
+    if ('exitComment' in fields) payload.exit_comment = fields.exitComment || null;
+    if ('rating' in fields) payload.rating = Number.isFinite(Number(fields.rating)) ? Number(fields.rating) : 0;
+    if ('tags' in fields) payload.tags = Array.isArray(fields.tags) ? fields.tags : [];
+    if (Object.keys(payload).length === 0) throw new Error('No editable fields provided');
+
+    const performLight = async (data: Record<string, unknown>): Promise<DBTrade> => {
+      const { data: row, error } = await supabase
+        .from('trades')
+        .update(data)
+        .eq('id', tradeId)
+        .eq('user_id', user.id)
+        .select('*')
+        .single();
+      if (error) {
+        const missingField = extractMissingColumnName(error) as keyof DBTrade | null;
+        if (missingField && missingField in data) {
+          const { [missingField]: _, ...safe } = data;
+          return performLight(safe);
+        }
+        throw error;
+      }
+      return row as DBTrade;
+    };
+
+    return mapTradeFromDB(await performLight(payload));
+  },
+
   async batchUpdateTrades(trades: Trade[]) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
+    // Bounded concurrency: 25 writes per chunk, chunks sequential.
+    const BATCH_CHUNK = 25;
     const performBatch = async (dataList: { id: string, data: Partial<DBTrade> }[]): Promise<void> => {
-      const promises = dataList.map(item => 
-        supabase.from('trades').update(item.data).eq('id', item.id).eq('user_id', user.id)
-      );
+      for (let i = 0; i < dataList.length; i += BATCH_CHUNK) {
+        const slice = dataList.slice(i, i + BATCH_CHUNK);
+        const promises = slice.map(item =>
+          supabase.from('trades').update(item.data).eq('id', item.id).eq('user_id', user.id)
+        );
 
-      const results = await Promise.all(promises);
-      const failedResult = results.find(r => r.error);
-      
-      if (failedResult && failedResult.error) {
-        const missingField = extractMissingColumnName(failedResult.error) as keyof DBTrade | null;
-        if (missingField) {
-          console.warn(`Batch: Column ${missingField} missing. Stripping and retrying.`);
-          const nextDataList = dataList.map(item => {
-            const { [missingField]: _, ...safeData } = item.data;
-            return { id: item.id, data: safeData };
-          });
-          return performBatch(nextDataList);
+        const results = await Promise.all(promises);
+        const failedResult = results.find(r => r.error);
+
+        if (failedResult && failedResult.error) {
+          const missingField = extractMissingColumnName(failedResult.error) as keyof DBTrade | null;
+          if (missingField) {
+            console.warn(`Batch: Column ${missingField} missing. Stripping and retrying.`);
+            const nextDataList = dataList.map(item => {
+              const { [missingField]: _, ...safeData } = item.data;
+              return { id: item.id, data: safeData };
+            });
+            return performBatch(nextDataList);
+          }
+          throw failedResult.error;
         }
-        throw failedResult.error;
       }
     };
 
@@ -1010,26 +1225,33 @@ export const dataService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    const { error } = await supabase
-      .from('trades')
-      .update({ deleted_at: new Date().toISOString() })
-      .in('id', tradeIds)
-      .eq('user_id', user.id);
+    // Chunked: PostgREST URL/param limits break bulk deletes of 100s of ids.
+    const CHUNK = 200;
+    for (let i = 0; i < tradeIds.length; i += CHUNK) {
+      const { error } = await supabase
+        .from('trades')
+        .update({ deleted_at: new Date().toISOString() })
+        .in('id', tradeIds.slice(i, i + CHUNK))
+        .eq('user_id', user.id);
 
-    if (error) throw error;
+      if (error) throw error;
+    }
   },
 
   async restoreTrades(tradeIds: string[]) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    const { error } = await supabase
-      .from('trades')
-      .update({ deleted_at: null })
-      .in('id', tradeIds)
-      .eq('user_id', user.id);
+    const CHUNK = 200;
+    for (let i = 0; i < tradeIds.length; i += CHUNK) {
+      const { error } = await supabase
+        .from('trades')
+        .update({ deleted_at: null })
+        .in('id', tradeIds.slice(i, i + CHUNK))
+        .eq('user_id', user.id);
 
-    if (error) throw error;
+      if (error) throw error;
+    }
   },
 
   async deduplicateManualTrades() {
@@ -1038,7 +1260,7 @@ export const dataService = {
 
     const { data: manualTrades, error } = await supabase
       .from('trades')
-      .select('id, pair, date, entry_price, direction, lots')
+      .select('id, pair, date, time, entry_price, exit_price, direction, lots, pnl')
       .eq('user_id', user.id)
       .is('ticket_id', null)
       .is('deleted_at', null);
@@ -1050,7 +1272,16 @@ export const dataService = {
     const duplicateIds: string[] = [];
 
     manualTrades.forEach(trade => {
-      const key = `${trade.date}-${trade.pair}-${trade.direction}-${trade.entry_price}-${trade.lots}`;
+      const key = [
+        trade.date,
+        trade.time || '',
+        trade.pair,
+        trade.direction,
+        trade.entry_price,
+        trade.exit_price ?? '',
+        trade.lots,
+        trade.pnl,
+      ].join('|');
       if (seen.has(key)) {
         duplicateIds.push(trade.id);
       } else {
@@ -1074,16 +1305,7 @@ export const dataService = {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return data.map((note: any) => ({
-      ...note,
-      isPinned: note.is_pinned,
-      isArchived: note.is_archived,
-      isTrashed: note.is_trashed,
-      isList: note.is_list,
-      listItems: note.list_items,
-      tableData: note.table_data,
-      position: note.position
-    }));
+    return data.map(mapNoteFromDB);
   },
 
   async addNote(note: Note) {
@@ -1131,20 +1353,10 @@ export const dataService = {
 
     const data = await performInsert(insertData);
     
-    return {
-      ...data,
-      isPinned: data.is_pinned,
-      isArchived: data.is_archived,
-      isTrashed: data.is_trashed,
-      isList: data.is_list,
-      listItems: data.list_items,
-      tableData: data.table_data,
-      date: data.date || data.created_at,
-      position: data.position
-    };
+    return mapNoteFromDB(data);
   },
 
-  async updateNote(note: Partial<Note> & { id: string }) {
+  async updateNote(note: Partial<Note> & { id: string }): Promise<Note> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
@@ -1157,10 +1369,6 @@ export const dataService = {
       .eq('id', note.id)
       .eq('user_id', user.id)
       .single();
-
-    if (imageProvided && currentNote?.image && currentNote.image !== nextImage) {
-      await deleteImageFile(currentNote.image);
-    }
 
     const updateData: any = {};
     if (note.title !== undefined) updateData.title = note.title;
@@ -1179,12 +1387,14 @@ export const dataService = {
     if (note.date !== undefined) updateData.date = note.date;
     if (note.position !== undefined) updateData.position = note.position;
 
-    const performUpdate = async (data: any): Promise<void> => {
-      const { error } = await supabase
+    const performUpdate = async (data: any): Promise<any> => {
+      let query = supabase
         .from('notes')
         .update(data)
         .eq('id', note.id)
         .eq('user_id', user.id);
+      if (note.updatedAt) query = query.eq('updated_at', note.updatedAt);
+      const { error, data: updatedRows } = await query.select('*');
 
       if (error) {
         console.error("Supabase updateNote error:", error);
@@ -1201,9 +1411,66 @@ export const dataService = {
         }
         throw error;
       }
+      if (note.updatedAt && (!updatedRows || updatedRows.length === 0)) {
+        throw new Error('This note was updated in another tab. Reload it before saving your changes.');
+      }
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error('Note no longer exists or you no longer have access to it.');
+      }
+      return updatedRows[0];
     };
 
-    await performUpdate(updateData);
+    let savedNote: any;
+    try {
+      savedNote = await performUpdate(updateData);
+    } catch (error) {
+      if (imageProvided && nextImage && nextImage !== currentNote?.image) {
+        await deleteImageFile(nextImage);
+      }
+      throw error;
+    }
+
+    if (imageProvided && currentNote?.image && currentNote.image !== nextImage) {
+      await deleteImageFile(currentNote.image);
+    }
+    return mapNoteFromDB(savedNote);
+  },
+
+  /**
+   * Reorder-only write. `updateNote` re-reads the row (image etc.) on every
+   * call, which made dragging a page of notes fire hundreds of round trips —
+   * this issues one bare UPDATE per row, in bounded parallel chunks.
+   */
+  async updateNotePositions(
+    positions: { id: string; position: number }[]
+  ): Promise<{ id: string; updated_at: string }[]> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+    if (!positions.length) return [];
+
+    const saved: { id: string; updated_at: string }[] = [];
+    const CHUNK = 25;
+    for (let i = 0; i < positions.length; i += CHUNK) {
+      const slice = positions.slice(i, i + CHUNK);
+      const results = await Promise.all(
+        slice.map(item =>
+          supabase
+            .from('notes')
+            .update({ position: item.position })
+            .eq('id', item.id)
+            .eq('user_id', user.id)
+            .select('id, updated_at')
+        )
+      );
+      const failed = results.find(r => r.error);
+      if (failed?.error) throw failed.error;
+      results.forEach(r => {
+        if (Array.isArray(r.data)) saved.push(...(r.data as { id: string; updated_at: string }[]));
+      });
+    }
+    // `updated_at` moves with every write; callers need the new revisions or the
+    // next optimistic-concurrency check would reject the note as "changed elsewhere".
+    return saved;
   },
 
   async deleteNote(noteId: string) {
@@ -1605,7 +1872,7 @@ export const dataService = {
     try {
       const { data, error } = await supabase
         .from('cash_transactions')
-        .insert(mapCashTransactionToDB(saved, user.id))
+        .upsert(mapCashTransactionToDB(saved, user.id), { onConflict: 'id' })
         .select()
         .single();
 

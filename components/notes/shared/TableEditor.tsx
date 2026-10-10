@@ -97,7 +97,7 @@ export const TableEditor: React.FC<TableEditorProps> = ({ tableData, onChange, r
                   />
                   {!readOnly && (
                     <>
-                      <div className="absolute top-1 right-1 opacity-0 group-cell/hover:opacity-100 flex gap-1 z-10">
+                      <div className="absolute top-1 right-1 opacity-0 group-hover/cell:opacity-100 pointer-coarse:opacity-100 flex gap-1 z-10">
                         <button
                           type="button"
                           onClick={() => {
@@ -118,7 +118,7 @@ export const TableEditor: React.FC<TableEditorProps> = ({ tableData, onChange, r
                         <button
                           type="button"
                           onClick={() => onChange({ rows: removeTableColumn(rows, cIdx) })}
-                          className="absolute -top-3 left-1/2 -translate-x-1/2 opacity-0 group-cell/hover:opacity-100 text-[var(--notebook-muted)] hover:text-red-400 z-10 bg-[var(--note-default-bg)] rounded-full transition-opacity"
+                          className="absolute -top-3 left-1/2 -translate-x-1/2 opacity-0 group-hover/cell:opacity-100 pointer-coarse:opacity-100 text-[var(--notebook-muted)] hover:text-red-400 z-10 bg-[var(--note-default-bg)] rounded-full transition-opacity"
                           title={`Remove column ${cIdx + 1}`}
                           aria-label={`Remove column ${cIdx + 1}`}
                         >
@@ -129,7 +129,7 @@ export const TableEditor: React.FC<TableEditorProps> = ({ tableData, onChange, r
                         <button
                           type="button"
                           onClick={() => onChange({ rows: removeTableRow(rows, rIdx) })}
-                          className="absolute top-1/2 -left-4 -translate-y-1/2 opacity-0 group-cell/hover:opacity-100 text-[var(--notebook-muted)] hover:text-red-400 z-10 bg-[var(--note-default-bg)] rounded-full transition-opacity"
+                          className="absolute top-1/2 -left-4 -translate-y-1/2 opacity-0 group-hover/cell:opacity-100 pointer-coarse:opacity-100 text-[var(--notebook-muted)] hover:text-red-400 z-10 bg-[var(--note-default-bg)] rounded-full transition-opacity"
                           title={`Remove row ${rIdx + 1}`}
                           aria-label={`Remove row ${rIdx + 1}`}
                         >

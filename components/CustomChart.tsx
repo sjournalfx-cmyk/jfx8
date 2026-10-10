@@ -20,6 +20,9 @@ interface CustomChartProps {
   initialViewState?: any;
   isSelectBarMode?: boolean;
   disablePan?: boolean;
+  // When true (Trade History chart), the viewport auto-fits once per
+  // dataset so entry/exit markers start on-screen instead of clipped left.
+  autoFitTrades?: boolean;
   children?: React.ReactNode;
 }
 
@@ -70,6 +73,51 @@ const formatTimeLabel = (time: number, intervalSec: number, prevTime?: number): 
     return `${hh}:${mm}`;
 };
 
+/** Parse trade timestamps (ISO strings, epoch seconds/ms, Date) to seconds. Null when missing/invalid. */
+const parseTradeTimeSec = (value: unknown): number | null => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value) || value <= 0) return null;
+        return value > 1e11 ? Math.floor(value / 1000) : Math.floor(value);
+    }
+    if (value instanceof Date) {
+        const ms = value.getTime();
+        return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        // Try as-is first (ISO with millis, e.g. cTrader toISOString()).
+        // Fall back to MT4/MT5 "2026.01.05 09:15:00" dot format.
+        let ms = Date.parse(trimmed);
+        if (!Number.isFinite(ms)) ms = Date.parse(trimmed.replace(/\./g, '/'));
+        if (!Number.isFinite(ms)) return null;
+        return Math.floor(ms / 1000);
+    }
+    return null;
+};
+
+const findClosestCandleIndex = (candles: { time: number }[], targetSec: number | null): number => {
+    if (targetSec === null || candles.length === 0) return -1;
+    let best = -1;
+    let minDiff = Infinity;
+    for (let i = 0; i < candles.length; i++) {
+        const t = candles[i].time;
+        if (!Number.isFinite(t)) continue;
+        const diff = Math.abs(t - targetSec);
+        if (diff < minDiff) {
+            minDiff = diff;
+            best = i;
+        }
+    }
+    return best;
+};
+
+const clampY = (y: number, chartHeight: number): number => {
+    if (!Number.isFinite(y)) return chartHeight / 2;
+    return Math.max(4, Math.min(chartHeight - 4, y));
+};
+
 const CustomChart: React.FC<CustomChartProps> = ({
   data,
   trades,
@@ -86,6 +134,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
   initialViewState,
   isSelectBarMode,
   disablePan,
+  autoFitTrades = false,
   children
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -113,6 +162,12 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
   // TradingView-style crosshair position (screen coords inside the canvas).
   const crosshairRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Trade History auto-fit: fit the entry→exit window once per dataset so
+  // markers start on-screen. Reset whenever the dataset signature changes;
+  // any manual pan/zoom disables it until the next dataset.
+  const autoFitSigRef = useRef<string | null>(null);
+  const userInteractedRef = useRef(false);
 
   const [chartRevision, setChartRevision] = useState(0);
   // Stable ref so onCoordinatesChange never depends on mockApi identity
@@ -301,11 +356,56 @@ const CustomChart: React.FC<CustomChartProps> = ({
   // Keep the ref in sync without causing re-renders
   useEffect(() => { mockApiRef.current = mockApi; }, [mockApi]);
 
+  // Auto-fit the trade window once per dataset (Trade History only). Fits
+  // entry→exit plus context so markers are on-screen on first paint without
+  // fighting manual pan/zoom afterwards. Runs inside draw() so container
+  // width is always known (effects can fire before ResizeObserver sets it).
+  const maybeAutoFitTradeWindow = useCallback(() => {
+    if (!autoFitTrades || data.length < 2 || !trades || trades.length === 0) return;
+    if (viewState.current.width <= 0) return;
+    const sigParts: string[] = [String(data.length), String(data[0]?.time ?? ''), String(data[data.length - 1]?.time ?? '')];
+    for (const t of trades) {
+      sigParts.push(`${(t as any)?.id ?? ''}:${(t as any)?.openTime ?? ''}:${(t as any)?.closeTime ?? ''}`);
+    }
+    const sig = sigParts.join('|');
+    if (autoFitSigRef.current === sig) return;
+    if (userInteractedRef.current && autoFitSigRef.current !== null) return;
+
+    let minIdx = Infinity;
+    let maxIdx = -Infinity;
+    for (const t of trades) {
+      if (!t) continue;
+      const eSec = parseTradeTimeSec((t as any).openTime ?? (t as any).open_time ?? (t as any).time);
+      const xSec = parseTradeTimeSec((t as any).closeTime ?? (t as any).close_time);
+      const ei = findClosestCandleIndex(data, eSec);
+      const xi = findClosestCandleIndex(data, xSec);
+      if (ei >= 0) { minIdx = Math.min(minIdx, ei); maxIdx = Math.max(maxIdx, ei); }
+      if (xi >= 0) { minIdx = Math.min(minIdx, xi); maxIdx = Math.max(maxIdx, xi); }
+    }
+    if (!Number.isFinite(minIdx) || !Number.isFinite(maxIdx)) return;
+
+    const chartWidth = viewState.current.width - PADDING_RIGHT;
+    if (chartWidth <= 0) return;
+    const CONTEXT = 8;
+    const fromIdx = Math.max(0, Math.floor(minIdx) - CONTEXT);
+    const toIdx = Math.min(data.length - 1, Math.ceil(maxIdx) + CONTEXT);
+    const span = Math.max(1, toIdx - fromIdx + 1);
+    // Fit the window, keeping bars readable (same 0.5–200 bounds as zoom).
+    const fittedScaleX = Math.max(0.5, Math.min(200, chartWidth / span));
+    viewState.current.scaleX = fittedScaleX;
+    // Anchor so toIdx sits at the right edge: getX(toIdx) = chartWidth.
+    viewState.current.offsetX = (data.length - 1 - toIdx) * fittedScaleX * -1;
+    autoFitSigRef.current = sig;
+    userInteractedRef.current = false;
+  }, [autoFitTrades, data, trades]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || data.length === 0) return;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
+
+    maybeAutoFitTradeWindow();
 
     const { width, height, scaleX, offsetX, isManualPriceRange, manualMinPrice, manualMaxPrice } = viewState.current;
     const chartWidth = width - PADDING_RIGHT;
@@ -347,6 +447,25 @@ const CustomChart: React.FC<CustomChartProps> = ({
       // Fallback if no valid data in view
       dataMin = 0;
       dataMax = 100;
+    }
+
+    // Keep trade entry/exit prices inside the auto range so marker tips are
+    // never projected outside the plot and clipped away. Manual ranges are
+    // left alone (user explicitly zoomed the price scale).
+    if (!isManualPriceRange && trades && trades.length > 0) {
+      for (const t of trades) {
+        if (!t) continue;
+        const ep = Number((t as any).entryPrice ?? (t as any).entry ?? (t as any).price);
+        const xp = Number((t as any).exitPrice ?? (t as any).exit);
+        if (Number.isFinite(ep) && ep > 0) {
+          if (ep < dataMin) dataMin = ep;
+          if (ep > dataMax) dataMax = ep;
+        }
+        if (Number.isFinite(xp) && xp > 0) {
+          if (xp < dataMin) dataMin = xp;
+          if (xp > dataMax) dataMax = xp;
+        }
+      }
     }
 
     if (!isManualPriceRange) {
@@ -433,7 +552,13 @@ const CustomChart: React.FC<CustomChartProps> = ({
       }
     }
 
-    // 5. Drawings (Canvas Layer) — Full visual rendering (SVG is hit-area only)
+    // 5. Drawings (Canvas Layer) — Full visual rendering (SVG is hit-area only).
+    // Clipped to the plot (full height, chart width): no drawing — lines,
+    // boxes, fills — may ever paint over the price scale.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, chartWidth, height);
+    ctx.clip();
     drawings.forEach(d => {
       // Calculate coords
       let x1: number, x2: number;
@@ -649,17 +774,18 @@ const CustomChart: React.FC<CustomChartProps> = ({
     });
     ctx.setLineDash([]); // Reset
 
-    // 5. Trade Entry & Exit Markers & Arrows
+    // 5. Trade Entry & Exit Markers — MT5-style solid arrows + dashed entry→exit connector
     if (trades && trades.length > 0) {
-      const drawUpArrow = (centerX: number, tipY: number, color: string, label: string) => {
-        const arrowW = 12;
-        const arrowH = 10;
+      const MT5_BUY = '#2E9BFF';
+      const MT5_SELL = '#F23645';
+      // MT5-style solid arrow pointing UP: tip at (centerX, tipY), body below it.
+      const drawUpArrow = (centerX: number, tipY: number, color: string) => {
+        const arrowW = 11;
+        const arrowH = 9;
         ctx.save();
         ctx.fillStyle = color;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-
-        // Draw Triangle pointing UP
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(centerX, tipY);
         ctx.lineTo(centerX - arrowW / 2, tipY + arrowH);
@@ -667,40 +793,17 @@ const CustomChart: React.FC<CustomChartProps> = ({
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
-
-        // Draw Badge Label
-        ctx.font = 'bold 9px sans-serif';
-        const labelW = ctx.measureText(label).width + 8;
-        const badgeH = 14;
-        const badgeY = tipY + arrowH + 2;
-        ctx.fillStyle = isDarkMode ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.95)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (typeof ctx.roundRect === 'function') {
-          ctx.roundRect(centerX - labelW / 2, badgeY, labelW, badgeH, 3);
-        } else {
-          ctx.rect(centerX - labelW / 2, badgeY, labelW, badgeH);
-        }
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, centerX, badgeY + badgeH / 2);
         ctx.restore();
       };
 
-      const drawDownArrow = (centerX: number, tipY: number, color: string, label: string) => {
-        const arrowW = 12;
-        const arrowH = 10;
+      // MT5-style solid arrow pointing DOWN: tip at (centerX, tipY), body above it.
+      const drawDownArrow = (centerX: number, tipY: number, color: string) => {
+        const arrowW = 11;
+        const arrowH = 9;
         ctx.save();
         ctx.fillStyle = color;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-
-        // Draw Triangle pointing DOWN
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(centerX, tipY);
         ctx.lineTo(centerX - arrowW / 2, tipY - arrowH);
@@ -708,28 +811,6 @@ const CustomChart: React.FC<CustomChartProps> = ({
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
-
-        // Draw Badge Label
-        ctx.font = 'bold 9px sans-serif';
-        const labelW = ctx.measureText(label).width + 8;
-        const badgeH = 14;
-        const badgeY = tipY - arrowH - badgeH - 2;
-        ctx.fillStyle = isDarkMode ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.95)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (typeof ctx.roundRect === 'function') {
-          ctx.roundRect(centerX - labelW / 2, badgeY, labelW, badgeH, 3);
-        } else {
-          ctx.rect(centerX - labelW / 2, badgeY, labelW, badgeH);
-        }
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, centerX, badgeY + badgeH / 2);
         ctx.restore();
       };
 
@@ -739,87 +820,85 @@ const CustomChart: React.FC<CustomChartProps> = ({
         const entryPrice = trade.entryPrice ?? (trade as any).entry ?? (trade as any).price;
         const exitPrice = trade.exitPrice ?? (trade as any).exit;
 
-        // Resolve entry time in seconds
-        let entrySec: number | null = null;
-        if (trade.openTime) {
-          entrySec = Math.floor(new Date(trade.openTime).getTime() / 1000);
-        } else if ((trade as any).time) {
-          const t = (trade as any).time;
-          entrySec = t > 1e11 ? Math.floor(t / 1000) : t;
-        }
+        // Resolve entry/exit times in seconds. Invalid dates yield null so a
+        // bad closeTime can't erase a good entry arrow (and vice versa).
+        const entrySec = parseTradeTimeSec(
+          (trade as any).openTime ?? (trade as any).open_time ?? (trade as any).time ?? (trade as any).entry_time
+        );
+        const exitSec = parseTradeTimeSec(
+          (trade as any).closeTime ?? (trade as any).close_time ?? (trade as any).exit_time
+        );
 
-        // Resolve exit time in seconds
-        let exitSec: number | null = null;
-        if (trade.closeTime) {
-          exitSec = Math.floor(new Date(trade.closeTime).getTime() / 1000);
-        }
-
-        // Find closest candle index for entry
-        let entryIdx = -1;
-        if (entrySec !== null) {
-          let minDiff = Infinity;
-          for (let i = 0; i < data.length; i++) {
-            const diff = Math.abs(data[i].time - entrySec);
-            if (diff < minDiff) {
-              minDiff = diff;
-              entryIdx = i;
-            }
-          }
-        }
-
-        // Find closest candle index for exit
-        let exitIdx = -1;
-        if (exitSec !== null) {
-          let minDiff = Infinity;
-          for (let i = 0; i < data.length; i++) {
-            const diff = Math.abs(data[i].time - exitSec);
-            if (diff < minDiff) {
-              minDiff = diff;
-              exitIdx = i;
-            }
-          }
-        }
+        // Closest candle index for entry / exit.
+        const entryIdx = findClosestCandleIndex(data, entrySec);
+        const exitIdx = findClosestCandleIndex(data, exitSec);
 
         const hasEntryPrice = Number.isFinite(Number(entryPrice)) && Number(entryPrice) > 0;
         const hasExitPrice = Number.isFinite(Number(exitPrice)) && Number(exitPrice) > 0;
 
-        // Render Entry Arrow on entry candlestick, tipped at the actual fill price when known
+        // MT5 entry arrow, tipped at the fill price when known, otherwise just
+        // outside the wick so it never hides inside the candle body.
+        let entryTip: { x: number; y: number; up: boolean; color: string } | null = null;
         if (entryIdx >= 0) {
           const candle = data[entryIdx];
-          const candleX = getX(entryIdx);
-          const entryColor = isBuy ? '#10b981' : '#ef4444';
-          const entryLabel = isBuy ? 'BUY' : 'SELL';
+          const sameBar = entryIdx === exitIdx && exitIdx >= 0;
+          const candleX = getX(entryIdx) + (sameBar ? -7 : 0);
 
           if (isBuy) {
-            // Long entry -> arrow pointing UP at entry price (candle low fallback)
-            const tipY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.low) + 4;
-            drawUpArrow(candleX, tipY, entryColor, entryLabel);
+            // Long entry (buy) -> blue arrow pointing UP
+            const rawY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.low) + 10;
+            const tipY = clampY(rawY, chartHeight);
+            entryTip = { x: candleX, y: tipY, up: true, color: MT5_BUY };
           } else {
-            // Short entry -> arrow pointing DOWN at entry price (candle high fallback)
-            const tipY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.high) - 4;
-            drawDownArrow(candleX, tipY, entryColor, entryLabel);
+            // Short entry (sell) -> red arrow pointing DOWN
+            const rawY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.high) - 10;
+            const tipY = clampY(rawY, chartHeight);
+            entryTip = { x: candleX, y: tipY, up: false, color: MT5_SELL };
           }
         }
 
-        // Render Exit Arrow on exit candlestick, tipped at the actual fill price when known
+        // MT5 exit arrow + dashed entry→exit connector (connector under the arrows).
+        let exitTip: { x: number; y: number; up: boolean; color: string } | null = null;
         if (exitIdx >= 0) {
           const candle = data[exitIdx];
-          const exitX = getX(exitIdx);
-          const exitColor = '#f59e0b'; // amber for exit
-          const exitLabel = 'EXIT';
+          const sameBar = entryIdx === exitIdx && entryIdx >= 0;
+          const exitX = getX(exitIdx) + (sameBar ? 7 : 0);
 
           if (isBuy) {
-            // Long exit -> arrow pointing DOWN at exit price (candle high fallback)
-            const tipY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.high) - 4;
-            drawDownArrow(exitX, tipY, exitColor, exitLabel);
+            // Long exit (sell) -> red arrow pointing DOWN
+            const rawY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.high) - 10;
+            const tipY = clampY(rawY, chartHeight);
+            exitTip = { x: exitX, y: tipY, up: false, color: MT5_SELL };
           } else {
-            // Short exit -> arrow pointing UP at exit price (candle low fallback)
-            const tipY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.low) + 4;
-            drawUpArrow(exitX, tipY, exitColor, exitLabel);
+            // Short exit (buy) -> blue arrow pointing UP
+            const rawY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.low) + 10;
+            const tipY = clampY(rawY, chartHeight);
+            exitTip = { x: exitX, y: tipY, up: true, color: MT5_BUY };
           }
+        }
+
+        if (entryTip && exitTip) {
+          ctx.save();
+          ctx.strokeStyle = isDarkMode ? 'rgba(129,140,248,0.7)' : 'rgba(71,85,171,0.6)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(entryTip.x, entryTip.y);
+          ctx.lineTo(exitTip.x, exitTip.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+        if (entryTip) {
+          if (entryTip.up) drawUpArrow(entryTip.x, entryTip.y, entryTip.color);
+          else drawDownArrow(entryTip.x, entryTip.y, entryTip.color);
+        }
+        if (exitTip) {
+          if (exitTip.up) drawUpArrow(exitTip.x, exitTip.y, exitTip.color);
+          else drawDownArrow(exitTip.x, exitTip.y, exitTip.color);
         }
       });
     }
+    ctx.restore(); // End plot clip — axes/scale paint after this.
 
     // 5b. TradingView-style symbol + timeframe watermark
     if (tradingView && symbol) {
@@ -1010,7 +1089,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
         }
       }
     }
-  }, [data, isDarkMode, getX, getY, getPriceFromY, getIndexFromX, getInterval, drawings, trades, tradingView, symbol, timeframe]);
+  }, [data, isDarkMode, getX, getY, getPriceFromY, getIndexFromX, getInterval, drawings, trades, tradingView, symbol, timeframe, maybeAutoFitTradeWindow]);
 
   // Sync API with parent whenever mockApi changes or onCoordinatesChange updates
   useEffect(() => {
@@ -1042,6 +1121,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
     else if (!disablePan) dragType = 'PAN';
 
     mouse.current = { ...mouse.current, isDown: true, lastX: x, lastY: y, dragType };
+    if (dragType !== 'NONE') userInteractedRef.current = true;
 
     if (containerRef.current) {
       if (dragType === 'PRICE_SCALE') containerRef.current.style.cursor = 'ns-resize';
@@ -1163,6 +1243,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
+    userInteractedRef.current = true;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;

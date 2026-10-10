@@ -1,8 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { access_token: 'mock_session_jwt', user: { id: 'user-1' } } },
+      }),
+    },
+  },
+}));
+
 import * as ctraderService from '../services/ctraderService';
 
 vi.stubEnv('VITE_CTRADER_CLIENT_ID', 'test_client_id');
-vi.stubEnv('VITE_CTRADER_CLIENT_SECRET', 'test_client_secret');
 
 class MockWebSocket {
   url: string;
@@ -68,13 +78,24 @@ const PT = {
 
 describe('ctraderService - WebSocket API integration', () => {
   beforeEach(() => {
-    ctraderService.__setTokensForTesting({
-      accessToken: 'mock_access_token',
-      expiresAt: Date.now() + 60000,
-    });
     MockWebSocket.lastInstance = null;
     MockWebSocket.mockResponses = {};
     MockWebSocket.onSendCallback = null;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      if (request.action === 'get_accounts') {
+        return {
+          ok: true,
+          json: async () => ({
+            accounts: [{ accountId: 1001, traderLogin: 123, isDemo: true, broker: 'demoServer' }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ ok: true, result: MockWebSocket.mockResponses[request.payloadType] || {} }),
+      };
+    }));
   });
 
   afterEach(() => {
@@ -87,48 +108,20 @@ describe('ctraderService - WebSocket API integration', () => {
     expect(ctraderService.isAuthenticated()).toBe(false);
   });
 
-  it('getAccounts fetches accounts through the server endpoint', async () => {
-    const accountsPayload = {
-      accounts: [
-        {
-          ctidTraderAccountId: 1001,
-          login: 'login123',
-          server: 'demoServer',
-          isDemo: true,
-          currency: 'USD',
-          balance: 500000,
-          equity: 501000,
-          profit: 1000,
-          margin: 200,
-          freeMargin: 500800,
-          name: 'Demo Account',
-          depositAssetId: 1,
-        },
-      ],
-    };
-
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => accountsPayload,
-    });
-    const originalFetch = globalThis.fetch;
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('getAccounts fetches accounts through the authenticated server proxy', async () => {
     const accounts = await ctraderService.getAccounts();
     expect(accounts).toHaveLength(1);
     expect(accounts[0].ctidTraderAccountId).toBe(1001);
-    expect(accounts[0].login).toBe('login123');
-    expect(accounts[0].balance).toBe(500000);
+    expect(accounts[0].login).toBe('123');
 
-    // The Authorization header must carry the access token.
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('/api/ctrader/accounts');
-    expect((init?.headers as any)?.Authorization).toBe('Bearer mock_access_token');
-
-    vi.stubGlobal('fetch', originalFetch);
+    expect(url).toBe('/api/ctrader/trade');
+    expect((init?.headers as any)?.Authorization).toBe('Bearer mock_session_jwt');
+    expect(JSON.parse(String(init?.body))).toEqual({ action: 'get_accounts' });
   });
 
-  it('getPositions correctly authenticates account and fetches positions', async () => {
+  it('getPositions sends its cTrader request through the server proxy', async () => {
     MockWebSocket.mockResponses = {
       [PT.APPLICATION_AUTH_REQ]: {}, // APPLICATION_AUTH_REQ -> RES
       [PT.ACCOUNT_AUTH_REQ]: {},     // ACCOUNT_AUTH_REQ -> RES
@@ -163,6 +156,10 @@ describe('ctraderService - WebSocket API integration', () => {
     expect(positions[0].tradeSide).toBe('buy');
     expect(positions[0].openPrice).toBe(1.0850);
     expect(positions[0].profit).toBe(20);
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      action: 'proxy', ctidTraderAccountId: 1001, payloadType: PT.RECONCILE_REQ,
+    });
   });
 
   it('getClosedDeals correctly fetches deals and maps them', async () => {
@@ -215,32 +212,10 @@ describe('ctraderService - WebSocket API integration', () => {
     expect(deals[0].profit).toBe(-15);
   });
 
-  it('handles WebSocket binary blob decoding correctly', async () => {
-    MockWebSocket.onSendCallback = (msgStr: string, wsInstance: MockWebSocket) => {
-      const msg = JSON.parse(msgStr);
-      const payloadType = msg.payloadType;
-      const clientMsgId = msg.clientMsgId;
-
-      let resPayload = {};
-      if (payloadType === PT.RECONCILE_REQ) {
-        resPayload = { position: [] };
-      }
-
-      const resObj = {
-        clientMsgId,
-        payloadType: payloadType + 1,
-        payload: resPayload,
-      };
-
-      const blob = new Blob([JSON.stringify(resObj)], { type: 'application/json' });
-      setTimeout(() => {
-        if (wsInstance.onmessage) {
-          wsInstance.onmessage({ data: blob } as any);
-        }
-      }, 1);
-    };
-
+  it('does not open a browser WebSocket for broker requests', async () => {
+    MockWebSocket.mockResponses = { [PT.RECONCILE_REQ]: { position: [] } };
     const positions = await ctraderService.getPositions(1001);
     expect(positions).toEqual([]);
+    expect(MockWebSocket.lastInstance).toBeNull();
   });
 });

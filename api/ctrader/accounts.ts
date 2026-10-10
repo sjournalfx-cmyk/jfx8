@@ -1,13 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import WebSocket from 'ws';
 
-// Match the exchange route during the VITE_* → server-only variable migration.
-// New deployments should use CTRADER_*, but existing Vercel projects may only
-// have the legacy VITE_CTRADER_* variables configured.
 function getCredentials() {
   return {
-    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
-    clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '',
+    clientId: process.env.CTRADER_CLIENT_ID || '',
+    clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
   };
 }
 

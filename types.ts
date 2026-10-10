@@ -92,6 +92,8 @@ export type AssetType = 'Forex' | 'Indices' | 'Commodities' | 'Crypto' | 'Stocks
 
 export interface Trade {
   id: string;
+  /** Server revision used to prevent a stale editor overwriting newer data. */
+  updatedAt?: string;
   ticketId?: string;
   pair: string;
   assetType: AssetType;
@@ -129,10 +131,18 @@ export interface Trade {
   deletedAt?: string;
   chartCandles?: Candle[];
   chartTimeframe?: string;
+  /** Discipline engine: snapshot of the active checklist at log/edit time. */
+  checklistTemplateId?: string;
+  checklistChecks?: Record<string, boolean>;
+  adherenceRate?: number; // 0-100, computed from checklistChecks
+  executionGrade?: 'A' | 'B' | 'C' | 'D' | 'F';
+  behaviorTags?: string[];
 }
 
 export interface Note {
   id: string;
+  /** Server revision used to prevent a stale editor overwriting newer data. */
+  updatedAt?: string;
   title: string;
   content: string;
   date: string;
@@ -268,6 +278,24 @@ export interface StrategyDiagram {
   updatedAt: string;
 }
 
+// --- Discipline Checklist Engine ---
+export type ChecklistPhase = 'pre-entry' | 'in-trade' | 'post-trade';
+
+export interface ChecklistTemplateItem {
+  id: string;
+  text: string;
+  phase: ChecklistPhase;
+}
+
+export interface ChecklistTemplate {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  items: ChecklistTemplateItem[];
+}
+
 export interface EAAccountData {
   balance: number;
   equity: number;
@@ -364,6 +392,13 @@ export interface DBTrade {
   deleted_at?: string;
   chart_candles?: Candle[] | null;
   chart_timeframe?: string | null;
+  updated_at?: string;
+  portfolio_id?: string | null;
+  checklist_template_id?: string | null;
+  checklist_checks?: Record<string, boolean> | null;
+  adherence_rate?: number | null;
+  execution_grade?: 'A' | 'B' | 'C' | 'D' | 'F' | null;
+  behavior_tags?: string[] | null;
 }
 
 export interface DBGoal {
@@ -514,4 +549,3 @@ export interface FirehoseEvent {
   seen: boolean;
   createdAt: string;
 }
-

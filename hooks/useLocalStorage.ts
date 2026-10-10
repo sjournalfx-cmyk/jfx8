@@ -24,11 +24,20 @@ export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T 
     try {
       setStoredValue((prevStoredValue) => {
         const valueToStore = value instanceof Function ? value(prevStoredValue) : value;
-        
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(key, JSON.stringify(valueToStore));
+
+        // NOTE: this runs inside the state updater (React may invoke it during
+        // dispatch, outside the outer try/catch), so storage failures must be
+        // guarded here — otherwise blocked storage (private mode, quota,
+        // missing localStorage) crashes the render instead of degrading to
+        // in-memory state.
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(key, JSON.stringify(valueToStore));
+          }
+        } catch (storageError) {
+          console.warn(`Error persisting localStorage key "${key}":`, storageError);
         }
-        
+
         return valueToStore;
       });
     } catch (error) {

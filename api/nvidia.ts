@@ -39,15 +39,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Require an authenticated Supabase user so this paid proxy cannot be abused.
   const auth = await requireUser(req.headers);
   if (!auth.ok) {
-    res.status(auth.status).json({ error: auth.error });
+    res.status(auth.status).json({ error: auth.error, code: 'auth_required' });
     return;
   }
 
   // Per-user rate limit so one account cannot burn the paid NVIDIA quota.
-  const rl = rateLimit(`nvidia:${auth.userId}`, 60, 60_000);
+  // Shared across instances via Supabase RPC; degrades to a per-instance
+  // guard (not a 503) if Supabase is unreachable, so concurrent users keep
+  // working through an outage.
+  const rl = await rateLimit(`nvidia:${auth.userId}`, 60, 60_000);
+  if (rl.unavailable) {
+    res.status(503).json({ error: 'Rate limiter is temporarily unavailable. Please try again shortly.', code: 'rate_limiter_unavailable' });
+    return;
+  }
+  if (rl.degraded) {
+    res.setHeader('x-jfx-ratelimit', 'degraded');
+  }
   if (!rl.allowed) {
     res.setHeader('Retry-After', String(Math.ceil((rl.retryAfterMs ?? 0) / 1000)));
-    res.status(429).json({ error: 'Rate limit exceeded. Please slow down and try again in a moment.' });
+    res.status(429).json({ error: 'Rate limit exceeded. Please slow down and try again in a moment.', code: 'rate_limited' });
     return;
   }
 
@@ -55,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // get inlined into the client bundle.
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: 'NVIDIA API key is not configured on the server' });
+    res.status(500).json({ error: 'NVIDIA API key is not configured on the server', code: 'ai_not_configured' });
     return;
   }
 
@@ -67,9 +77,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const contentLength = Number(req.headers['content-length'] || 0);
   if (contentLength > 512 * 1024) {
-    res.status(413).json({ error: 'Request body too large' });
+    res.status(413).json({ error: 'Request body too large', code: 'request_too_large' });
     return;
   }
+
+  const isStream = Boolean(body.stream);
 
   try {
     const upstream = await fetch(NVIDIA_CHAT_URL, {
@@ -79,6 +91,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
+      // Bound non-streaming upstreams so one hung request cannot wedge a
+      // serverless instance while many users are active. Streams are governed
+      // by client timeouts (first-token watchdog + extended totals) and the
+      // platform's own maxDuration instead.
+      ...(!isStream ? { signal: AbortSignal.timeout(50000) } : {}),
     });
 
     res.status(upstream.status);
@@ -106,8 +123,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.send(text);
   } catch (error) {
     console.error('NVIDIA proxy error:', error);
-    res.status(500).json({
-      error: 'Failed to proxy request to NVIDIA',
+    const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    res.status(timedOut ? 504 : 500).json({
+      error: timedOut ? 'The AI upstream took too long to respond' : 'Failed to proxy request to NVIDIA',
+      code: timedOut ? 'upstream_timeout' : 'proxy_failed',
       details: error instanceof Error ? error.message : String(error),
     });
   }

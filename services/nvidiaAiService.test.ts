@@ -1,6 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { buildAiRequestPayload, getAssistantMode } from './nvidiaAiService';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  AiRequestError,
+  MODAL_MODELS,
+  NVIDIA_CHAT_MODEL_ID,
+  NVIDIA_FALLBACK_MODEL_ID,
+  buildAiRequestPayload,
+  classifyAiError,
+  describeAiError,
+  getAssistantMode,
+  modalResearchService,
+} from './nvidiaAiService';
 import type { Trade, UserProfile } from '../types';
+
+vi.mock('../lib/supabase', () => ({
+  getSessionToken: async () => 'test-token',
+}));
 
 const sampleTrade: Trade = {
   id: 'trade-1',
@@ -126,5 +140,265 @@ describe('nvidiaAiService payload builder', () => {
     expect(systemPrompt).toContain('"startingBalance": 10000');
     expect(payload.messages.at(-2)?.content).toBe('history-11');
     expect(payload.messages.at(-3)?.content).toBe('history-10');
+  });
+});
+
+describe('nvidiaAiService fallback model', () => {
+  it('configures a fallback model distinct from the primary', () => {
+    expect(NVIDIA_FALLBACK_MODEL_ID).toBeTruthy();
+    expect(NVIDIA_FALLBACK_MODEL_ID).not.toBe(NVIDIA_CHAT_MODEL_ID);
+    expect(MODAL_MODELS.deepseek.fallbackId).toBe(NVIDIA_FALLBACK_MODEL_ID);
+    expect(MODAL_MODELS.kimi.fallbackId).toBe(NVIDIA_FALLBACK_MODEL_ID);
+  });
+
+  it('classifies and describes errors without leaking internals', () => {
+    expect(classifyAiError(new AiRequestError('x', 'auth'))).toBe('auth');
+    expect(classifyAiError(new Error('Generation aborted'))).toBe('aborted');
+    expect(classifyAiError(new Error('NVIDIA API timeout after 30000ms'))).toBe('timeout');
+    expect(classifyAiError(new Error('NVIDIA API key is not configured on the server'))).toBe(
+      'not-configured'
+    );
+    expect(classifyAiError(new Error('Rate limit exceeded. Please slow down'))).toBe('rate-limit');
+    expect(classifyAiError(new Error('something totally new'))).toBe('unknown');
+
+    const messages = [
+      describeAiError(new AiRequestError('x', 'auth')),
+      describeAiError(new AiRequestError('x', 'not-configured')),
+      describeAiError(new AiRequestError('x', 'model-not-found')),
+      describeAiError(new AiRequestError('x', 'rate-limit')),
+      describeAiError(new AiRequestError('x', 'timeout')),
+      describeAiError(new AiRequestError('x', 'network')),
+      describeAiError(new AiRequestError('x', 'empty')),
+      describeAiError(new AiRequestError('x', 'server')),
+      describeAiError(new AiRequestError('x', 'unknown')),
+    ];
+    for (const message of messages) {
+      expect(message).toBeTruthy();
+      expect(message).not.toContain('nvapi-');
+    }
+    expect(new Set(messages).size).toBeGreaterThan(1);
+  });
+});
+
+describe('nvidiaAiService generateResponseWithMeta', () => {
+  const okResponse = (content: string) =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content } }] }),
+      text: async () => JSON.stringify({ choices: [{ message: { content } }] }),
+    }) as unknown as Response;
+
+  const errResponse = (status: number, body: string) =>
+    ({
+      ok: false,
+      status,
+      json: async () => {
+        try {
+          return JSON.parse(body);
+        } catch {
+          return {};
+        }
+      },
+      text: async () => body,
+    }) as unknown as Response;
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const fetchMock = () => vi.mocked(fetch as unknown as (...args: any[]) => Promise<Response>);
+
+  const modelOfCall = (callIndex: number) => {
+    const init = fetchMock().mock.calls[callIndex]?.[1] as RequestInit | undefined;
+    return JSON.parse(String(init?.body)).model as string;
+  };
+
+  it('returns the primary answer without fallback on success', async () => {
+    fetchMock().mockResolvedValue(okResponse('Primary answer'));
+
+    const result = await modalResearchService.generateResponseWithMeta(
+      'Hello',
+      [],
+      null,
+      [],
+      null,
+      false,
+      [],
+      'deepseek',
+      false
+    );
+
+    expect(result.text).toBe('Primary answer');
+    expect(result.fellBack).toBe(false);
+    expect(result.modelId).toBe(NVIDIA_CHAT_MODEL_ID);
+    expect(fetchMock()).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the string-returning generateResponse working', async () => {
+    fetchMock().mockResolvedValue(okResponse('Plain text'));
+
+    const text = await modalResearchService.generateResponse('Hello', [], null);
+
+    expect(text).toBe('Plain text');
+  });
+
+  it('automatically retries once on the fallback model when the primary is gone', async () => {
+    fetchMock()
+      .mockResolvedValueOnce(errResponse(404, JSON.stringify({ error: 'model not found' })))
+      .mockResolvedValueOnce(okResponse('Backup answer'));
+
+    const result = await modalResearchService.generateResponseWithMeta(
+      'Hello',
+      [],
+      null,
+      [],
+      null,
+      false,
+      [],
+      'kimi',
+      false
+    );
+
+    expect(result.text).toBe('Backup answer');
+    expect(result.fellBack).toBe(true);
+    expect(result.modelId).toBe(NVIDIA_FALLBACK_MODEL_ID);
+    expect(result.fallbackReason).toBe('model-not-found');
+    expect(fetchMock()).toHaveBeenCalledTimes(2);
+    expect(modelOfCall(0)).toBe(NVIDIA_CHAT_MODEL_ID);
+    expect(modelOfCall(1)).toBe(NVIDIA_FALLBACK_MODEL_ID);
+  });
+
+  it('does not waste a fallback attempt on auth failures', async () => {
+    fetchMock().mockResolvedValue(errResponse(401, JSON.stringify({ error: 'unauthorized' })));
+
+    await expect(
+      modalResearchService.generateResponseWithMeta('Hello', [], null)
+    ).rejects.toMatchObject({ code: 'auth' });
+    expect(fetchMock()).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces an empty error when both models return no usable content', async () => {
+    fetchMock()
+      .mockResolvedValueOnce(okResponse(''))
+      .mockResolvedValueOnce(
+        okResponse('<think>hidden reasoning only</think>')
+      );
+
+    await expect(
+      modalResearchService.generateResponseWithMeta('Hello', [], null)
+    ).rejects.toMatchObject({ code: 'empty' });
+    expect(fetchMock()).toHaveBeenCalledTimes(2);
+  });
+
+  it('never leaks reasoning-only fallback content as an answer', async () => {
+    fetchMock()
+      .mockResolvedValueOnce(errResponse(500, JSON.stringify({ error: 'boom' })))
+      .mockResolvedValueOnce(okResponse(''))
+      .mockResolvedValueOnce(okResponse(''));
+
+    await expect(
+      modalResearchService.generateResponseWithMeta('Hello', [], null, [], null, false, [], 'deepseek', false, undefined, undefined, { retryDelayMs: 10 })
+    ).rejects.toMatchObject({ code: 'empty' });
+    // 500 -> same-model retry -> empty -> fallback -> empty -> throw
+    expect(fetchMock()).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries once on the same model for transient 5xx before failing over', async () => {
+    fetchMock()
+      .mockResolvedValueOnce(errResponse(500, JSON.stringify({ error: 'boom' })))
+      .mockResolvedValueOnce(okResponse('Recovered'));
+
+    const result = await modalResearchService.generateResponseWithMeta(
+      'Hello', [], null, [], null, false, [], 'deepseek', false,
+      undefined, undefined, { retryDelayMs: 10 }
+    );
+
+    expect(result.text).toBe('Recovered');
+    expect(result.fellBack).toBe(false);
+    expect(fetchMock()).toHaveBeenCalledTimes(2);
+    expect(modelOfCall(0)).toBe(NVIDIA_CHAT_MODEL_ID);
+    expect(modelOfCall(1)).toBe(NVIDIA_CHAT_MODEL_ID);
+  });
+
+  it('fails over to the backup only after the same-model retry is exhausted', async () => {
+    fetchMock()
+      .mockResolvedValueOnce(errResponse(500, JSON.stringify({ error: 'boom' })))
+      .mockResolvedValueOnce(errResponse(500, JSON.stringify({ error: 'boom again' })))
+      .mockResolvedValueOnce(okResponse('Backup after retry'));
+
+    const result = await modalResearchService.generateResponseWithMeta(
+      'Hello', [], null, [], null, false, [], 'kimi', false,
+      undefined, undefined, { retryDelayMs: 10 }
+    );
+
+    expect(result.text).toBe('Backup after retry');
+    expect(result.fellBack).toBe(true);
+    expect(result.fallbackReason).toBe('server');
+    expect(fetchMock()).toHaveBeenCalledTimes(3);
+    expect(modelOfCall(2)).toBe(NVIDIA_FALLBACK_MODEL_ID);
+  });
+
+  it('trips the first-token watchdog on a hung upstream and surfaces timeout', async () => {
+    // Abort-aware like real fetch: rejects when the combined signal fires.
+    fetchMock().mockImplementation(
+      (_url: unknown, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          const onAbort = () => reject(new DOMException('This operation was aborted', 'AbortError'));
+          if ((init?.signal as AbortSignal | undefined)?.aborted) {
+            onAbort();
+            return;
+          }
+          (init?.signal as AbortSignal | undefined)?.addEventListener('abort', onAbort, { once: true });
+        })
+    );
+
+    await expect(
+      modalResearchService.generateResponseWithMeta(
+        'Hello', [], null, [], null, false, [], 'deepseek', false,
+        undefined, undefined, { timeoutMs: 300, firstTokenTimeoutMs: 50, retryDelayMs: 10 }
+      )
+    ).rejects.toMatchObject({ code: 'timeout' });
+    // primary + same-model retry + fallback attempt
+    expect(fetchMock()).toHaveBeenCalledTimes(3);
+  });
+
+  it('streams tokens progressively and assembles the final text', async () => {
+    const enc = new TextEncoder();
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"world"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(enc.encode(chunk));
+        controller.close();
+      },
+    });
+    fetchMock().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: stream,
+      text: async () => '',
+      json: async () => ({}),
+    } as unknown as Response);
+
+    const seen: string[] = [];
+    const result = await modalResearchService.generateResponseWithMeta(
+      'Hello', [], null, [], null, false, [], 'deepseek', false,
+      (partial) => { seen.push(partial); }
+    );
+
+    expect(result.text).toBe('Hello world');
+    expect(result.fellBack).toBe(false);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[seen.length - 1]).toBe('Hello world');
+    expect(JSON.parse(String((fetchMock().mock.calls[0]?.[1] as RequestInit)?.body)).stream).toBe(true);
   });
 });

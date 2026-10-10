@@ -167,7 +167,8 @@ export function apiKeyError(
  * Persist a rotated cTrader refresh token. cTrader rotates the refresh token
  * on every mint, so a PATCH-only write silently drops the new token when the
  * row does not exist yet (0 rows affected). Always upsert first, then PATCH
- * for older PostgREST configs, then mirror into service_config.
+ * for older PostgREST configs. A failed primary persistence write must be
+ * reported: accepting it would invalidate the previous single-use token.
  */
 export async function persistRotatedCtraderToken(args: {
   supabaseUrl: string;
@@ -175,37 +176,58 @@ export async function persistRotatedCtraderToken(args: {
   userId: string;
   newRefreshToken: string;
   previousToken?: string;
+  newAccessToken?: string;
+  accessTokenExpiresAt?: string;
 }): Promise<void> {
-  const { supabaseUrl, serviceKey, userId, newRefreshToken, previousToken } = args;
-  if (!supabaseUrl || !serviceKey || !userId || !newRefreshToken) return;
-  if (previousToken && newRefreshToken === previousToken) return;
+  const {
+    supabaseUrl, serviceKey, userId, newRefreshToken, previousToken,
+    newAccessToken, accessTokenExpiresAt,
+  } = args;
+  if (!supabaseUrl || !serviceKey || !userId || !newRefreshToken) {
+    throw new Error('Cannot persist cTrader token: database configuration or token is missing.');
+  }
   const base = supabaseUrl.replace(/\/$/, '');
   const headers = {
     'Content-Type': 'application/json',
     apikey: serviceKey,
     Authorization: `Bearer ${serviceKey}`,
   };
-  const body = JSON.stringify({ user_id: userId, refresh_token: newRefreshToken, updated_at: new Date().toISOString() });
-  try {
-    // 1. Upsert (creates the row when missing — the PATCH-only bug fix).
-    await fetch(`${base}/rest/v1/user_ctrader_tokens`, {
+  const tokenRecord = {
+    user_id: userId,
+    refresh_token: newRefreshToken,
+    ...(newAccessToken ? { access_token: newAccessToken } : {}),
+    ...(accessTokenExpiresAt ? { access_token_expires_at: accessTokenExpiresAt } : {}),
+    updated_at: new Date().toISOString(),
+  };
+  const body = JSON.stringify(tokenRecord);
+  // 1. Upsert (creates the row when missing — the PATCH-only bug fix).
+  const upsertResponse = await fetch(`${base}/rest/v1/user_ctrader_tokens`, {
       method: 'POST',
       headers: { ...headers, Prefer: 'resolution=merge-duplicates' },
       body,
-    }).catch(() => {});
+    });
+  if (!upsertResponse.ok) {
     // 2. PATCH as well for existing rows on strict configs.
-    await fetch(`${base}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
+    const patchResponse = await fetch(`${base}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({ refresh_token: newRefreshToken, updated_at: new Date().toISOString() }),
-    }).catch(() => {});
-    // 3. Mirror so the service_config fallback path never goes stale.
-    await fetch(`${base}/rest/v1/service_config`, {
+      body: JSON.stringify({
+        refresh_token: newRefreshToken,
+        ...(newAccessToken ? { access_token: newAccessToken } : {}),
+        ...(accessTokenExpiresAt ? { access_token_expires_at: accessTokenExpiresAt } : {}),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (!patchResponse.ok) {
+      throw new Error(`Failed to persist rotated cTrader token (HTTP ${patchResponse.status}).`);
+    }
+  }
+
+  // Mirror the per-user legacy key while existing deployments migrate. This
+  // mirror is intentionally non-authoritative; no global credential is read.
+  void fetch(`${base}/rest/v1/service_config`, {
       method: 'POST',
       headers: { ...headers, Prefer: 'resolution=merge-duplicates' },
       body: JSON.stringify({ key: `ctrader_refresh_${userId}`, value: newRefreshToken }),
     }).catch(() => {});
-  } catch {
-    // Best-effort only — never block a trade on bookkeeping.
-  }
 }

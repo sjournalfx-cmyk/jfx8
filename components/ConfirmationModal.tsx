@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Trash2, LogOut, X } from 'lucide-react';
 
 export interface ConfirmationModalProps {
@@ -8,7 +8,7 @@ export interface ConfirmationModalProps {
   confirmText?: string;
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'info';
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
   isDarkMode: boolean;
   showCancel?: boolean;
@@ -26,21 +26,23 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   isDarkMode,
   showCancel = true
 }) => {
+  const [isConfirming, setIsConfirming] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      setTimeout(() => {
-        cancelButtonRef.current?.focus();
-      }, 50);
-    } else {
-      document.body.style.overflow = '';
-    }
+    if (!isOpen) return;
+    // Restore whatever the page had (the app keeps the body locked while
+    // authenticated) instead of forcing an unlock when the modal closes.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusTimer = setTimeout(() => {
+      cancelButtonRef.current?.focus();
+    }, 50);
     return () => {
-      document.body.style.overflow = '';
+      clearTimeout(focusTimer);
+      document.body.style.overflow = prevOverflow;
     };
   }, [isOpen]);
 
@@ -48,7 +50,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
       
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !isConfirming) {
         e.preventDefault();
         onCancel();
         return;
@@ -75,7 +77,21 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onCancel]);
+  }, [isOpen, isConfirming, onCancel]);
+
+  useEffect(() => {
+    if (!isOpen) setIsConfirming(false);
+  }, [isOpen]);
+
+  const handleConfirm = async () => {
+    if (isConfirming) return;
+    setIsConfirming(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsConfirming(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -162,6 +178,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 {showCancel && (
                   <button
                     onClick={onCancel}
+                    disabled={isConfirming}
                     className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-700 bg-black px-4 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-900"
                     ref={cancelButtonRef}
                   >
@@ -169,12 +186,13 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                   </button>
                 )}
                 <button
-                  onClick={onConfirm}
+                  onClick={() => { void handleConfirm(); }}
+                  disabled={isConfirming}
                   className={`inline-flex min-h-10 items-center justify-center rounded-xl px-4 text-sm font-semibold transition-colors ${getConfirmButtonClass()}`}
                   ref={confirmButtonRef}
                   autoFocus={!showCancel}
                 >
-                  {confirmText}
+                  {isConfirming ? 'Working…' : confirmText}
                 </button>
               </div>
             </div>

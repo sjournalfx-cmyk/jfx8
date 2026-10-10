@@ -8,7 +8,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    // PKCE is required for the Google OAuth code-exchange flow
+    // (supabase.auth.exchangeCodeForSession in AuthCallback).
+    flowType: 'pkce',
+    detectSessionInUrl: true,
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});
 
 /** Current user's Supabase JWT, used to authenticate calls to the API proxies. */
 export async function getSessionToken(): Promise<string | null> {

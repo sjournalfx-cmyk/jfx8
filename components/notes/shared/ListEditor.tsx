@@ -40,12 +40,23 @@ const SortableListItem: React.FC<SortableListItemProps> = React.memo(({ item, on
       ref={setNodeRef}
       style={style}
       className="flex items-center gap-2 group/list-item"
-      {...attributes}
-      {...listeners}
     >
-      <span className="cursor-grab active:cursor-grabbing text-[var(--notebook-muted)] opacity-0 group-hover/list-item:opacity-100 transition-opacity" aria-hidden="true">
-        <GripVertical className="w-4 h-4" />
-      </span>
+      {readOnly ? (
+        <span className="w-4 shrink-0" aria-hidden="true" />
+      ) : (
+        <button
+          type="button"
+          // Drag is started from the handle only: listeners on the row would
+          // hijack text selection inside the item input.
+          {...attributes}
+          {...listeners}
+          className="shrink-0 cursor-grab active:cursor-grabbing text-[var(--notebook-muted)] opacity-0 group-hover/list-item:opacity-100 pointer-coarse:opacity-100 transition-opacity"
+          aria-label={`Reorder "${item.text || 'item'}"`}
+          title="Drag to reorder"
+        >
+          <GripVertical className="w-4 h-4" />
+        </button>
+      )}
       <button
         type="button"
         onClick={() => patchItem({ checked: !item.checked })}
@@ -68,7 +79,7 @@ const SortableListItem: React.FC<SortableListItemProps> = React.memo(({ item, on
         <button
           type="button"
           onClick={onRemove}
-          className="p-2 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] opacity-0 group-hover/list-item:opacity-100 transition-opacity"
+          className="p-2 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] opacity-0 group-hover/list-item:opacity-100 pointer-coarse:opacity-100 transition-opacity"
           aria-label="Remove checklist item"
         >
           <X className="w-4 h-4" />

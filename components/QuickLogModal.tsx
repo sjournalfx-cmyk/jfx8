@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { X, Save, TrendingUp, TrendingDown, Target, Clock, Hash, Layout } from 'lucide-react';
 import { Trade, AssetType } from '../types';
 import { Select } from './Select';
@@ -25,18 +25,21 @@ const QuickLogModal: React.FC<QuickLogModalProps> = ({ isOpen, onClose, onSave, 
     result: 'Pending' as 'Win' | 'Loss' | 'BE' | 'Pending',
   });
   const [isSaving, setIsSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.pair || !formData.entryPrice) return;
+    if (saveInFlightRef.current) return;
 
+    saveInFlightRef.current = true;
     setIsSaving(true);
     try {
       const sast = getSASTDateTime();
       const newTrade = normalizeTrade({
-        id: Date.now().toString(),
+        id: crypto.randomUUID(),
         pair: formData.pair.toUpperCase(),
         assetType: formData.assetType,
         date: sast.date,
@@ -62,6 +65,7 @@ const QuickLogModal: React.FC<QuickLogModalProps> = ({ isOpen, onClose, onSave, 
     } catch (err) {
       console.error(err);
     } finally {
+      saveInFlightRef.current = false;
       setIsSaving(false);
     }
   };

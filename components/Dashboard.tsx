@@ -163,6 +163,21 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
     const [lastUpdated, setLastUpdated] = useState<string | null>(null);
     const mountedRef = useRef(true);
     const hasEventsRef = useRef(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const todayAnchorRef = useRef<HTMLDivElement>(null);
+    const toLocalDateStr = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+    // Window: [today-3, today+7] always visible via scroll; opens on today.
+    const { from: windowFrom, to: windowTo, today: todayStr } = (() => {
+        const base = new Date();
+        const fromD = new Date(base); fromD.setDate(base.getDate() - 3);
+        const toD = new Date(base); toD.setDate(base.getDate() + 7);
+        return { from: toLocalDateStr(fromD), to: toLocalDateStr(toD), today: toLocalDateStr(base) };
+    })();
 
     const loadCalendar = useCallback(async (options?: { silent?: boolean }) => {
         const silent = options?.silent ?? false;
@@ -179,13 +194,12 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
         setError(null);
 
         try {
-            const now = new Date();
-            // Start from the beginning of the current ISO week (Monday) so we always
-            // capture the full week from the ForexFactory CDN, not just from yesterday.
-            const monday = new Date(now);
-            monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-            const from = monday.toISOString().split('T')[0];
-            const to = new Date(now.getTime() + 14 * 86400000).toISOString().split('T')[0]; // 2 weeks ahead
+            // Today-first window: fetch max 3 days back + 7 days ahead (local dates).
+            const base = new Date();
+            const fromD = new Date(base); fromD.setDate(base.getDate() - 3);
+            const toD = new Date(base); toD.setDate(base.getDate() + 7);
+            const from = toLocalDateStr(fromD);
+            const to = toLocalDateStr(toD);
             const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
             const response = await fetch(`/api/economic-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&tz=${encodeURIComponent(userTz)}`);
             const payload = await response.json().catch(() => ({}));
@@ -253,15 +267,19 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
         };
     }, []);
 
-    // Filter events by impact level
+    // Filter events by impact level. Window always [today-3, today+7]; list
+    // opens scrolled to today so no scrolling past old news is needed.
+    // Hard cap: never older than 3 days back, never beyond 7 days ahead.
     const filteredEvents = useMemo(() => {
         return events.filter((e) => {
+            if (!e?.date) return false;
+            if (e.date < windowFrom || e.date > windowTo) return false;
             const imp = (e.impact || e.Impact || '').toLowerCase();
             if (impactFilter === 'high') return imp === 'high';
             if (impactFilter === 'med-high') return imp === 'high' || imp === 'medium';
             return true;
         });
-    }, [events, impactFilter]);
+    }, [events, impactFilter, windowFrom, windowTo]);
 
     // Check for imminent High-Impact events within next 60 minutes
     const imminentHighImpactEvent = useMemo(() => {
@@ -278,6 +296,23 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
     }, [events]);
 
     const visibleEvents = filteredEvents;
+
+    // First index with date >= today — the list auto-scrolls here on load
+    // so today's news is what you see first; last 3 days are above via scroll.
+    const todayAnchorIndex = useMemo(() => {
+        const i = visibleEvents.findIndex((e) => e?.date && e.date >= todayStr);
+        return i === -1 ? 0 : i;
+    }, [visibleEvents, todayStr]);
+
+    useEffect(() => {
+        if (isLoading) return;
+        const c = scrollRef.current;
+        const t = todayAnchorRef.current;
+        if (!c || !t) return;
+        const cRect = c.getBoundingClientRect();
+        const tRect = t.getBoundingClientRect();
+        c.scrollTop += (tRect.top - cRect.top) - 8;
+    }, [isLoading, impactFilter, filteredEvents.length]);
 
     return (
         <div className={`h-[400px] p-6 rounded-2xl border flex flex-col ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
@@ -362,7 +397,7 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                     </div>
                 </div>
             ) : (
-                <div className="space-y-3 flex-1 overflow-y-auto max-h-[290px] custom-scrollbar pr-2.5">
+                <div ref={scrollRef} className="space-y-3 flex-1 overflow-y-auto max-h-[290px] custom-scrollbar pr-2.5">
                     {visibleEvents.map((event, index) => {
                         const eventName = event.event || event.Event || 'Unnamed Event';
                         const currency = event.currency || event.Currency || 'USD';
@@ -376,9 +411,12 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                         const actualVal = event.actual || event.Actual || '--';
                         const forecastVal = event.forecast || event.Forecast || '--';
                         const previousVal = event.previous || event.Previous || '--';
+                        const isToday = event.date === todayStr;
 
                         return (
-                            <div key={`${currency}-${event.date}-${eventName}-${index}`} className={`p-3 rounded-xl border ${isDarkMode ? 'border-[#27272a] bg-white/[0.02]' : 'border-slate-100 bg-slate-50'}`}>
+                            <React.Fragment key={`${currency}-${event.date}-${eventName}-${index}`}>
+                            {index === todayAnchorIndex && <div ref={todayAnchorRef} />}
+                            <div className={`p-3 rounded-xl border ${isDarkMode ? 'border-[#27272a] bg-white/[0.02]' : 'border-slate-100 bg-slate-50'}`}>
                                 <div className="flex items-start justify-between gap-3 mb-2">
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
@@ -389,7 +427,7 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                             <p className="text-sm font-bold truncate">{eventName}</p>
                                         </div>
                                         <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                                            {formatDateLabel(event.date)} {event.time ? `| ${event.time}` : ''}
+                                            {isToday ? (<><span className="text-sky-300">Today</span>{event.time ? ` | ${event.time}` : ''}</>) : (<>{formatDateLabel(event.date)} {event.time ? `| ${event.time}` : ''}</>)}
                                         </p>
                                     </div>
                                     <div className="flex flex-col items-end gap-1 shrink-0">
@@ -413,6 +451,7 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                                     </div>
                                 </div>
                             </div>
+                            </React.Fragment>
                         );
                     })}
                 </div>
@@ -604,17 +643,18 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
         }
     };
 
-    // Calculate Stats
-  const totalPnL = trades.reduce((acc, t) => acc + (Number.isFinite(Number(t.pnl)) ? Number(t.pnl) : 0), 0);
+    // Calculate Stats (memoized: runs once per trade-list change, not per render)
+    const { totalPnL, wins, losses, winRate, profitFactor } = useMemo(() => {
+        const pnl = trades.reduce((acc, t) => acc + (Number.isFinite(Number(t.pnl)) ? Number(t.pnl) : 0), 0);
+        const w = trades.filter(t => t.result === 'Win');
+        const l = trades.filter(t => t.result === 'Loss');
+        const wr = trades.length > 0 ? ((w.length / trades.length) * 100).toFixed(1) : 0;
+        const grossProfit = w.reduce((acc, t) => acc + safePnL(t.pnl), 0);
+        const grossLoss = Math.abs(l.reduce((acc, t) => acc + safePnL(t.pnl), 0));
+        const pf = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : (grossProfit > 0 ? "9.9" : "0.00");
+        return { totalPnL: pnl, wins: w, losses: l, winRate: wr, profitFactor: pf };
+    }, [trades]);
     const isPro = currentPlan === APP_CONSTANTS.PLANS.HOBBY;
-    
-    const wins = trades.filter(t => t.result === 'Win');
-    const losses = trades.filter(t => t.result === 'Loss');
-    const winRate = trades.length > 0 ? ((wins.length / trades.length) * 100).toFixed(1) : 0;
-
-    const grossProfit = wins.reduce((acc, t) => acc + safePnL(t.pnl), 0);
-    const grossLoss = Math.abs(losses.reduce((acc, t) => acc + safePnL(t.pnl), 0));
-    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : (grossProfit > 0 ? "9.9" : "0.00");
 
     const LockedView = ({ title, subtitle }: { title: string, subtitle: string }) => (
         <div className={`h-full w-full p-6 rounded-2xl border flex flex-col items-center justify-center text-center relative overflow-hidden ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>

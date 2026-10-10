@@ -38,10 +38,20 @@ const SANITIZE_CONFIG = {
   // Only safe attributes survive; DOMPurify additionally rejects any
   // href whose scheme is not in its URI allowlist (http/https/mailto/tel/
   // relative), which covers javascript:/data: URLs.
-  ALLOWED_ATTR: ['href'],
+  ALLOWED_ATTR: ['href', 'target', 'rel'],
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 };
+
+// External links must never hand the current tab to a third party and must
+// not be able to reach back through window.opener.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName !== 'A') return;
+  const href = node.getAttribute('href');
+  if (!href) return;
+  node.setAttribute('target', '_blank');
+  node.setAttribute('rel', 'noopener noreferrer');
+});
 
 export const sanitizeRichTextHtml = (html?: string | null): string => {
   if (!html) return '';

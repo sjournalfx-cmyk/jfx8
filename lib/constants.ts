@@ -97,6 +97,7 @@ export const PLAN_FEATURES = {
     directBrokerSync: false,
     aiInsights: false,
     voiceNotes: false,
+    complianceAnalytics: false, // Rule Compliance deep charts (KPIs free)
   },
   [APP_CONSTANTS.PLANS.HOBBY]: { // PRO
     maxTradesPerMonth: 500,
@@ -109,6 +110,7 @@ export const PLAN_FEATURES = {
     directBrokerSync: false,
     aiInsights: false,
     voiceNotes: false,
+    complianceAnalytics: false, // Rule Compliance deep charts stay Premium-only
   },
   [APP_CONSTANTS.PLANS.STANDARD]: { // PREMIUM
     maxTradesPerMonth: Infinity,
@@ -123,5 +125,6 @@ export const PLAN_FEATURES = {
     voiceNotes: true, // Enabled for Premium
     robustnessAnalytics: true, // New Intelligence lab
     headlessMT5: true, // New Headless feature
+    complianceAnalytics: true, // Rule Compliance deep charts (KPIs stay free)
   }
 };

@@ -35,7 +35,7 @@ const toOptionalString = (value: unknown, fallback?: string): string | undefined
 const resolveOptionalString = (
   trade: Partial<Trade>,
   fallback: Partial<Trade>,
-  key: keyof Pick<Trade, 'openTime' | 'closeTime' | 'notes' | 'exitComment' | 'voiceNote' | 'beforeScreenshot' | 'afterScreenshot' | 'setupId' | 'setupName' | 'deletedAt'>
+  key: keyof Pick<Trade, 'openTime' | 'closeTime' | 'notes' | 'exitComment' | 'voiceNote' | 'beforeScreenshot' | 'afterScreenshot' | 'setupId' | 'setupName' | 'deletedAt' | 'chartTimeframe'>
 ) => {
   if (Object.prototype.hasOwnProperty.call(trade, key)) {
     return toOptionalString(trade[key], undefined);
@@ -213,5 +213,17 @@ export const normalizeTrade = (
     deletedAt: resolveOptionalString(trade, fallback, 'deletedAt'),
     chartCandles: Array.isArray(trade.chartCandles) ? trade.chartCandles : (Array.isArray(fallback.chartCandles) ? fallback.chartCandles : undefined),
     chartTimeframe: resolveOptionalString(trade, fallback, 'chartTimeframe'),
+    // Discipline engine snapshot (checklist grading per trade).
+    checklistTemplateId: toOptionalString(trade.checklistTemplateId, fallback.checklistTemplateId),
+    checklistChecks: (trade.checklistChecks && typeof trade.checklistChecks === 'object'
+      ? trade.checklistChecks
+      : fallback.checklistChecks) as Trade['checklistChecks'],
+    adherenceRate: toOptionalFiniteNumber(trade.adherenceRate, toOptionalFiniteNumber(fallback.adherenceRate)),
+    executionGrade: (['A', 'B', 'C', 'D', 'F'] as const).includes(trade.executionGrade as never)
+      ? trade.executionGrade
+      : (['A', 'B', 'C', 'D', 'F'] as const).includes(fallback.executionGrade as never)
+        ? fallback.executionGrade
+        : undefined,
+    behaviorTags: toStringArray(trade.behaviorTags, toStringArray(fallback.behaviorTags, [])),
   };
 };

@@ -544,27 +544,161 @@ export const WIDGET_HELP_DATABASE: Record<string, WidgetHelpArticle> = {
             },
         ],
     },
-
-    plAdherence: {
-        id: 'plAdherence',
-        title: 'What is P/L by Plan Adherence?',
-        category: 'Psychology',
-        breadcrumb: 'Help Center / Psychology / Plan Adherence',
-        definition: 'P/L by Plan Adherence compares profitability across trades where you followed your plan exactly versus trades with minor/major deviations or no plan at all.',
-        formula: 'Adherence PnL = Sum of PnL for trades grouped by plan adherence tier',
-        formulaExample: 'Example: Followed Exactly = +R8,500. Major Deviation = -R4,200.',
+    complianceEquity: {
+        id: 'complianceEquity',
+        title: 'What is Compliant vs Non-Compliant Equity?',
+        category: 'Rules Compliance',
+        breadcrumb: 'Help Center / Rules Compliance / Equity Split',
+        definition: 'Two cumulative P&L curves: trades with ≥80% rule compliance (Grades A & B) versus trades below 80% (Grades C, D & F).',
+        formula: 'Compliant equity = running sum of P&L for trades with adherence ≥ 80%',
+        formulaExample: 'Example: compliant trades +R3,450 while non-compliant trades -R1,200.',
         whyMisleading: {
-            intro: 'An off-plan trade can occasionally win, but over a sample of 50+ trades, off-plan trading almost always yields negative expectancy.',
+            intro: 'Small samples can mislead — a few lucky off-plan wins do not prove anything.',
             examples: [
-                'Lucky Deviations: Winning on a trade where you broke your stop-loss rule can falsely validate bad discipline.',
+                'Judge the split over 30+ graded trades, not a single week.',
             ],
         },
         howItHelps: [
             {
-                title: '1. Proves Statistical Edge of Rule Adherence',
+                title: '1. Proves discipline pays',
                 points: [
-                    'Provides clear visual proof that following your plan generates superior returns.',
-                    'Deters impulse entries by highlighting the cost of plan deviations.',
+                    'Visually demonstrates that breaking rules bleeds profits over time.',
+                    'Makes the cost of deviation impossible to ignore.',
+                ],
+            },
+        ],
+    },
+    winRateByGrade: {
+        id: 'winRateByGrade',
+        title: 'What is Win Rate by Execution Grade?',
+        category: 'Rules Compliance',
+        breadcrumb: 'Help Center / Rules Compliance / Win Rate by Grade',
+        definition: 'Win-rate percentage broken down by execution grade (A, B, C–D, F). Grade measures rule-following only — never profitability.',
+        formula: 'Grade win rate = Wins in grade ÷ Completed trades in grade',
+        formulaExample: 'Example: Grade A trades win 68% of the time; Grade F trades win 18%.',
+        whyMisleading: {
+            intro: 'Grades need volume to be meaningful.',
+            examples: [
+                'A grade bucket with fewer than 5 trades has no statistical weight.',
+            ],
+        },
+        howItHelps: [
+            {
+                title: '1. Links process to outcome',
+                points: [
+                    'Shows that following rules raises win rate, independent of market conditions.',
+                    'Justifies the checklist habit with your own data.',
+                ],
+            },
+        ],
+    },
+    disciplineTrend: {
+        id: 'disciplineTrend',
+        title: 'What is the Discipline Trend?',
+        category: 'Rules Compliance',
+        breadcrumb: 'Help Center / Rules Compliance / Discipline Trend',
+        definition: 'Weekly average rule-compliance % plotted against cumulative account growth.',
+        formula: 'Weekly compliance = mean adherence of that week’s graded trades',
+        formulaExample: 'Example: compliance climbs from 62% to 88% while equity recovers.',
+        whyMisleading: {
+            intro: 'Holiday weeks with 1–2 trades swing the average wildly.',
+            examples: [
+                'Focus on the multi-week slope, not single-week spikes.',
+            ],
+        },
+        howItHelps: [
+            {
+                title: '1. Tracks whether you are improving',
+                points: [
+                    'Shows if discipline is improving or degrading as the account grows.',
+                    'Early warning when compliance slips before drawdown follows.',
+                ],
+            },
+        ],
+    },
+    costOfMistakes: {
+        id: 'costOfMistakes',
+        title: 'What is the Cost of Mistakes?',
+        category: 'Rules Compliance',
+        breadcrumb: 'Help Center / Rules Compliance / Cost of Mistakes',
+        definition: 'Net P&L grouped by violation tag (Revenge Trade, Moved Stop Loss, FOMO / Early Entry, Over-leveraged), ranked by financial damage.',
+        formula: 'Violation cost = Sum of P&L for completed trades carrying the tag',
+        formulaExample: 'Example: Revenge trades cost -R1,450 across 6 trades this month.',
+        whyMisleading: {
+            intro: 'A tag only counts when you tag honestly at review time.',
+            examples: [
+                'Untagged violations hide in the totals — review every trade in the Rules tab.',
+            ],
+        },
+        howItHelps: [
+            {
+                title: '1. Prices every bad habit',
+                points: [
+                    'Puts an exact money figure on each mistake, ranked worst-first.',
+                    'The most expensive row is your #1 thing to fix next.',
+                ],
+            },
+        ],
+    },
+    ruleLeakage: {
+        id: 'ruleLeakage',
+        title: 'What is Rule Leakage Analysis?',
+        category: 'Rules Compliance',
+        breadcrumb: 'Help Center / Rules Compliance / Rule Leakage',
+        definition: 'Per-rule fail-rate: the % of graded trades where each checklist item was left unchecked, grouped by trade phase.',
+        formula: 'Rule fail-rate = Trades with rule unchecked ÷ Trades graded against this template',
+        formulaExample: 'Example: "Wait for 15m candle close" failed in 32% of trades.',
+        whyMisleading: {
+            intro: 'Only trades graded against the current template count.',
+            examples: [
+                'Rules added recently have smaller samples — give them time.',
+            ],
+        },
+        howItHelps: [
+            {
+                title: '1. Pinpoints what to train',
+                points: [
+                    'The top of this list is exactly which part of your strategy needs psychological work.',
+                    'Fix one leaking rule at a time, starting with pre-entry.',
+                ],
+            },
+        ],
+    },
+    strategyRulesChecklists: {
+        id: 'strategyRulesChecklists',
+        title: 'What are Strategy Rules & Checklists?',
+        category: 'Discipline',
+        breadcrumb: 'Help Center / Discipline / Strategy Rules & Checklists',
+        definition: 'Your personal rulebook, split into three trade phases. Every rule you add here appears as a checkbox on each trade (Rules tab), and your checks produce an adherence % and an execution grade (A–F) that is completely decoupled from profit and loss.',
+        formula: 'Adherence = checked rules ÷ total rules. A = 100%, B = 80–99%, C = 70–79%, D = 60–69%, F = below 60%.',
+        formulaExample: 'Example: 4 of 5 rules checked = 80% adherence = Grade B — even if the trade lost money.',
+        whyMisleading: {
+            intro: 'A checklist only works if it mirrors your real strategy.',
+            examples: [
+                'Too many rules: more than ~10 rules turns the checklist into a chore you skip.',
+                'Vague rules: "trade well" cannot be checked honestly — write rules you can answer yes/no.',
+            ],
+        },
+        howItHelps: [
+            {
+                title: '1. Pre-Entry Checks — verification before opening',
+                points: [
+                    'Confirm the setup before risking money: trend alignment, candle closes, risk-to-reward, news blackout.',
+                    'Examples: "15m candle closed above the level?", "Risk-to-Reward ≥ 1:2?", "No high-impact news within 30 min?"',
+                ],
+            },
+            {
+                title: '2. In-Trade Management — execution steps',
+                points: [
+                    'Lock in risk discipline while the trade is live: stops placed, size respected, no tampering.',
+                    'Examples: "Stop loss placed immediately?", "Risked ≤ 1% of account?"',
+                ],
+            },
+            {
+                title: '3. Post-Trade Review — reflection questions',
+                points: [
+                    'Score yourself honestly after the trade: exit plan followed, emotions in check.',
+                    'Examples: "Did I follow my exit plan?", "No FOMO or impulse to tamper with the trade?"',
                 ],
             },
         ],

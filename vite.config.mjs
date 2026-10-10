@@ -71,11 +71,6 @@ const readCtraderEnv = (key) => {
       }
     } catch {}
   }
-  // TEMPORARY: restored at user request until credential rotation. These
-  // values are already exposed in git history — rotating the cTrader app and
-  // deleting these two lines is the real fix. Never add NEW secrets here.
-  if (key === 'VITE_CTRADER_CLIENT_ID') return '35508_t8qthF8Rdq0DzmNlxm4WwT0ZlQUggiQaX8uRm6hmQ9xWFz6vmO';
-  if (key === 'VITE_CTRADER_CLIENT_SECRET') return 'B7zkapjST4jMGqXkEeRm8daHKaGdgrsl88mujeJdicx2xaKlcd';
   return '';
 };
 
@@ -125,6 +120,11 @@ const mt5PythonPlugin = () => {
   return {
     name: 'mt5-python-plugin',
     configureServer(server) {
+      // The dev server is a single process, so these maps prevent concurrent
+      // browser requests from consuming the same rotating cTrader refresh
+      // token. Production uses the database-backed lease in its API route.
+      const ctraderAccessCache = new Map();
+      const ctraderRefreshInFlight = new Map();
       const getFmpErrorMessage = (status, details) => {
         if (status === 401) return 'FMP rejected the API key with 401 Unauthorized. Verify the key is active and has access to this endpoint.';
         if (status === 403 || status === 404) return 'This endpoint requires a paid FMP plan. The free plan provides Quote, Profile, Treasury Rates, and Earnings Calendar.';
@@ -631,8 +631,8 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             refreshToken: readCtraderEnv('CTRADER_SERVICE_REFRESH_TOKEN') || '',
             accountId: Number(readCtraderEnv('CTRADER_SERVICE_ACCOUNT_ID') || 0),
             isDemo: readCtraderEnv('CTRADER_SERVICE_IS_DEMO') || 'true',
-            clientId: readCtraderEnv('VITE_CTRADER_CLIENT_ID') || process.env.CTRADER_CLIENT_ID || '',
-            clientSecret: readCtraderEnv('VITE_CTRADER_CLIENT_SECRET') || process.env.CTRADER_CLIENT_SECRET || '',
+            clientId: readCtraderEnv('CTRADER_CLIENT_ID') || readCtraderEnv('VITE_CTRADER_CLIENT_ID') || '',
+            clientSecret: readCtraderEnv('CTRADER_CLIENT_SECRET') || '',
             // cTrader rotates refresh tokens on every mint — persist the
             // latest one so subsequent runs (and the Vercel cron) keep working.
             loadRotatedToken: async () => {
@@ -644,9 +644,12 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             },
           });
 
-          const timeframes = (readCtraderEnv('HARVEST_TIMEFRAMES') || 'M15,H1,H4,D1').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+          const timeframes = (readCtraderEnv('HARVEST_TIMEFRAMES') || 'M1,M5,M15,M30,H1,H4,D1').split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
           const batchSize = Math.max(1, Number(readCtraderEnv('HARVEST_BATCH_SIZE') || 5));
           const MAX_BARS = 2000;
+          // Overfetch: cTrader sometimes returns one fewer bar than requested;
+          // capToNewest below discards the surplus. See api/candles/harvest.ts.
+          const FETCH_COUNT = MAX_BARS + 100;
 
           let { data: queue } = await supabase.from('harvest_queue')
             .select('id, symbol, symbol_id, digits, timeframe')
@@ -674,7 +677,7 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           for (const job of queue) {
             try {
               const target = { symbolName: job.symbol, symbolId: job.symbol_id, digits: job.digits };
-              const incoming = await fetchTrendbarsServer(session, target, job.timeframe, { count: MAX_BARS });
+              const incoming = await fetchTrendbarsServer(session, target, job.timeframe, { count: FETCH_COUNT });
               const { data: existingRow } = await supabase.from('candle_series')
                 .select('bars').eq('symbol', job.symbol).eq('timeframe', job.timeframe).maybeSingle();
               const merged = capToNewest(mergeBars(Array.isArray(existingRow?.bars) ? existingRow.bars : null, incoming), MAX_BARS);
@@ -739,35 +742,12 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         }
       });
 
-      // -----------------------------------------------------------------------
-      // DEV-ONLY: /api/ctrader/debug-session — prints the service-account
-      // values needed for .env.local (refresh token from the httpOnly cookie
-      // set by /api/ctrader/exchange). Never deployed: Vercel functions only
-      // serve api/*.ts files, this exists solely in the Vite dev middleware.
-      // Remove after the harvest env vars are captured.
-      // -----------------------------------------------------------------------
-      server.middlewares.use('/api/ctrader/debug-session', async (req, res) => {
-        res.setHeader('Content-Type', 'text/plain');
-        let refreshToken = '';
-        const cookieHeader = req.headers.cookie || '';
-        for (const part of cookieHeader.split(';')) {
-          const eq = part.indexOf('=');
-          if (eq === -1) continue;
-          if (part.slice(0, eq).trim() === 'jfx_ctrader_refresh') {
-            try { refreshToken = decodeURIComponent(part.slice(eq + 1).trim()); } catch { refreshToken = part.slice(eq + 1).trim(); }
-          }
-        }
-        res.end(JSON.stringify({
-          CTRADER_SERVICE_REFRESH_TOKEN: refreshToken || '(no cookie found — connect cTrader first)',
-          hint: 'Copy the token above into .env.local. Account id comes from the accounts list below.',
-        }, null, 2));
-      });
-
       // Redirect cTrader OAuth callback to root so Vite serves the SPA through its normal pipeline
       server.middlewares.use('/api/ctrader/callback', async (req, res) => {
         const requestUrl = new URL(req.url || '', 'http://127.0.0.1');
         const code = requestUrl.searchParams.get('code');
-        const target = code ? `/?code=${encodeURIComponent(code)}` : '/';
+        const state = requestUrl.searchParams.get('state');
+        const target = code ? `/?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}` : '/';
         res.statusCode = 302;
         res.setHeader('Location', target);
         res.end();
@@ -800,8 +780,24 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           return;
         }
 
-        const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
-        const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+        const authHeader = req.headers['authorization'] || req.headers['Authorization'] || '';
+        const jwt = String(authHeader).replace(/^Bearer\s+/i, '').trim();
+        const supabaseUrl = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
+        const anonKey = readCtraderEnv('SUPABASE_ANON_KEY') || process.env.VITE_SUPABASE_ANON_KEY || '';
+        let verifiedUserId = null;
+        try {
+          const client = supabaseJs.createClient(supabaseUrl, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+          const { data, error } = await client.auth.getUser(jwt);
+          if (!error && data?.user?.id) verifiedUserId = data.user.id;
+        } catch {}
+        if (!verifiedUserId) {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ error: 'Invalid or expired session' }));
+          return;
+        }
+
+        const cid = readCtraderEnv('CTRADER_CLIENT_ID') || readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+        const csec = readCtraderEnv('CTRADER_CLIENT_SECRET');
 
         if (!cid || !csec) {
           res.statusCode = 500;
@@ -827,7 +823,7 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           let body;
           try { body = JSON.parse(rawText); } catch { body = {}; }
 
-          console.log('[cTrader] token response', tokenRes.status, body);
+          console.log('[cTrader] token response', tokenRes.status, body?.errorCode || 'ok');
 
           if (!tokenRes.ok) {
             const errMsg = body?.description || body?.error_description || body?.error || rawText;
@@ -846,98 +842,58 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             return;
           }
 
-          // Mirror the production endpoint: keep the long-lived refresh token
-          // in an httpOnly cookie so silent re-auth survives page reloads.
-          // FIX: also persist per-user into user_ctrader_tokens (mirrors api/ctrader/exchange.ts persistTokenServerSide)
-          // so API-key trading (which prefers user_ctrader_tokens over service_config) sees the new trading-scoped token.
-          if (body.refreshToken) {
-            res.setHeader('Set-Cookie', `jfx_ctrader_refresh=${encodeURIComponent(String(body.refreshToken))}; Path=/; HttpOnly; SameSite=Lax`);
-            try {
-              const surl = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
-              const skey = readCtraderEnv('SUPABASE_SERVICE_ROLE_KEY') || '';
-              if (surl && skey) {
-                // Try per-user insert when the browser sent its Supabase JWT (Connect & Import does)
-                const authH = req.headers['authorization'] || req.headers['Authorization'] || '';
-                const jwt = String(authH).replace(/^Bearer\s+/i, '').trim();
-                let userId = requestUrl.searchParams.get('user_id') || null;
-                if (!userId && jwt && jwt.split('.').length === 3) {
-                  try {
-                    const payloadB64 = jwt.split('.')[1];
-                    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-                    userId = payload.sub || null;
-                  } catch {}
-                }
-                const tok = String(body.refreshToken);
-                const persistPromises = [];
-                if (userId) {
-                  // Upsert per-user row — this is what /api/ctrader/trade checks first
-                  persistPromises.push(
-                    fetch(`${surl}/rest/v1/user_ctrader_tokens`, {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': skey,
-                        'Authorization': `Bearer ${skey}`,
-                        'Prefer': 'resolution=merge-duplicates',
-                      },
-                      body: JSON.stringify({ user_id: userId, refresh_token: tok, updated_at: new Date().toISOString() }),
-                    }).catch(() => {})
-                  );
-                  // Also PATCH for existing rows
-                  persistPromises.push(
-                    fetch(`${surl}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
-                      method: 'PATCH',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': skey,
-                        'Authorization': `Bearer ${skey}`,
-                      },
-                      body: JSON.stringify({ refresh_token: tok, updated_at: new Date().toISOString() }),
-                    }).catch(() => {})
-                  );
-                  // Also keep per-user service_config as secondary fallback
-                  persistPromises.push(
-                    fetch(`${surl}/rest/v1/service_config`, {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': skey,
-                        'Authorization': `Bearer ${skey}`,
-                        'Prefer': 'resolution=merge-duplicates',
-                      },
-                      body: JSON.stringify({ key: `ctrader_refresh_${userId}`, value: tok }),
-                    }).catch(() => {})
-                  );
-                }
-                // Always keep global fallback too
-                persistPromises.push(
-                  fetch(`${surl}/rest/v1/service_config`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'apikey': skey,
-                      'Authorization': `Bearer ${skey}`,
-                      'Prefer': 'resolution=merge-duplicates',
-                    },
-                    body: JSON.stringify({
-                      key: 'ctrader_service_refresh_token',
-                      value: tok,
-                    }),
-                  }).catch(() => {})
-                );
-                await Promise.allSettled(persistPromises);
-                console.log(`[cTrader dev] Persisted refresh token to DB (user: ${userId || 'none'})`);
-              }
-            } catch (err) {
-              console.warn('[cTrader dev] DB persist exception:', err);
-            }
+          if (!body.accessToken || !body.refreshToken) {
+            res.statusCode = 502;
+            res.end(JSON.stringify({ error: 'cTrader exchange returned an incomplete token response' }));
+            return;
           }
 
-          res.end(JSON.stringify({
-            accessToken: body.accessToken,
-            refreshToken: body.refreshToken,
-            expiresIn: body.expiresIn,
-          }));
+          // Keep cTrader credentials server-side. The database write is
+          // required before acknowledging a connection because cTrader
+          // refresh tokens are single-use after their next rotation.
+          const surl = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
+          const skey = readCtraderEnv('SUPABASE_SERVICE_ROLE_KEY') || '';
+          if (!surl || !skey) {
+            res.statusCode = 503;
+            res.end(JSON.stringify({ error: 'Supabase service configuration is required to save the cTrader connection.' }));
+            return;
+          }
+          const expiresIn = Number(body.expiresIn || body.expires_in);
+          const accessTokenExpiresAt = new Date(Date.now() + (Number.isFinite(expiresIn) ? Math.max(60, expiresIn) : 300) * 1000).toISOString();
+          const tokenRecord = JSON.stringify({
+            user_id: verifiedUserId,
+            refresh_token: String(body.refreshToken),
+            access_token: String(body.accessToken),
+            access_token_expires_at: accessTokenExpiresAt,
+            updated_at: new Date().toISOString(),
+          });
+          const dbHeaders = { 'Content-Type': 'application/json', apikey: skey, Authorization: `Bearer ${skey}` };
+          try {
+            const upsert = await fetch(`${surl}/rest/v1/user_ctrader_tokens`, {
+              method: 'POST', headers: { ...dbHeaders, Prefer: 'resolution=merge-duplicates' }, body: tokenRecord,
+            });
+            if (!upsert.ok) {
+              const patch = await fetch(`${surl}/rest/v1/user_ctrader_tokens?user_id=eq.${verifiedUserId}`, {
+                method: 'PATCH', headers: dbHeaders, body: tokenRecord,
+              });
+              if (!patch.ok) throw new Error(`token persistence failed (HTTP ${patch.status})`);
+            }
+            ctraderAccessCache.set(verifiedUserId, { accessToken: String(body.accessToken), expiresAt: Date.parse(accessTokenExpiresAt) });
+            void fetch(`${surl}/rest/v1/service_config`, {
+              method: 'POST',
+              headers: { ...dbHeaders, Prefer: 'resolution=merge-duplicates' },
+              body: JSON.stringify({ key: `ctrader_refresh_${verifiedUserId}`, value: String(body.refreshToken) }),
+            }).catch(() => {});
+          } catch (err) {
+            console.warn('[cTrader dev] DB persist exception:', err);
+            res.statusCode = 503;
+            res.end(JSON.stringify({ error: 'Could not securely save the cTrader connection. Please try again.' }));
+            return;
+          }
+
+          res.setHeader('Set-Cookie', `jfx_ctrader_refresh=${encodeURIComponent(String(body.refreshToken))}; Path=/; HttpOnly; SameSite=Lax`);
+
+          res.end(JSON.stringify({ ok: true }));
         } catch (err) {
           console.error('[cTrader] exchange exception:', err);
           res.statusCode = 500;
@@ -965,8 +921,8 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           return;
         }
 
-        const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
-        const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+        const cid = readCtraderEnv('CTRADER_CLIENT_ID') || readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+        const csec = readCtraderEnv('CTRADER_CLIENT_SECRET');
         if (!cid || !csec) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: 'cTrader credentials not configured' }));
@@ -1025,8 +981,8 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           ws.on('open', async () => {
             console.log(`[cTrader][${host}] WS connected`);
             try {
-              const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
-              const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+              const cid = readCtraderEnv('CTRADER_CLIENT_ID') || readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+              const csec = readCtraderEnv('CTRADER_CLIENT_SECRET');
               // 1. Authenticate the application
               const appAuthRes = await send(2100, { clientId: cid, clientSecret: csec });
               console.log(`[cTrader][${host}] App auth response:`, JSON.stringify(appAuthRes));
@@ -1090,13 +1046,13 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
 
         const TOKEN_PATTERN = /^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/;
-        const PT_DEV = { APPLICATION_AUTH_REQ: 2100, ACCOUNT_AUTH_REQ: 2102, NEW_ORDER_REQ: 2106, CANCEL_ORDER_REQ: 2108, AMEND_ORDER_REQ: 2109, AMEND_POSITION_SLTP_REQ: 2110, CLOSE_POSITION_REQ: 2111, SYMBOLS_LIST_REQ: 2114, RECONCILE_REQ: 2124, GET_ACCOUNTS_BY_TOKEN_REQ: 2149, ERROR_RES: 2142 };
+        const PT_DEV = { APPLICATION_AUTH_REQ: 2100, ACCOUNT_AUTH_REQ: 2102, NEW_ORDER_REQ: 2106, CANCEL_ORDER_REQ: 2108, AMEND_ORDER_REQ: 2109, AMEND_POSITION_SLTP_REQ: 2110, CLOSE_POSITION_REQ: 2111, SYMBOLS_LIST_REQ: 2114, TRADER_REQ: 2121, RECONCILE_REQ: 2124, SUBSCRIBE_SPOTS_REQ: 2127, UNSUBSCRIBE_SPOTS_REQ: 2129, SPOT_EVENT: 2131, GET_TRENDBARS_REQ: 2137, EXPECTED_MARGIN_REQ: 2139, CASH_FLOW_HISTORY_LIST_REQ: 2143, GET_ACCOUNTS_BY_TOKEN_REQ: 2149, GET_CTID_PROFILE_BY_TOKEN_REQ: 2151, HEARTBEAT_EVENT: 51, ERROR_RES: 2142 };
         const toVolumeCentsDev = (v) => v >= 500 ? Math.round(v * 100) : Math.round(v * 10000000);
         const hashTokenDev = (raw) => { try { const c = _require('crypto'); return c.createHash('sha256').update(raw).digest('hex'); } catch { return raw; } };
         const openCtraderSessionDev = (host, clientId, clientSecret, ctidTraderAccountId, accessToken, timeoutMs = 25000) => new Promise((resolve, reject) => {
           let ws; try { ws = new (_require('ws'))(`wss://${host}:5036`); } catch (e) { return reject(e); }
           const timer = setTimeout(() => { try { ws.close(); } catch {} reject(new Error(`Connection timeout to ${host}`)); }, timeoutMs);
-          let msgId = 0; const pending = new Map();
+          let msgId = 0; const pending = new Map(); const eventListeners = new Set();
           const send = (payloadType, payload) => new Promise((res2, rej2) => {
             const clientMsgId = `dev_${++msgId}_${Date.now()}`; pending.set(clientMsgId, { resolve: res2, reject: rej2 }); ws.send(JSON.stringify({ clientMsgId, payloadType, payload }));
           });
@@ -1107,11 +1063,14 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
                 const p = pending.get(msg.clientMsgId); pending.delete(msg.clientMsgId);
                 if (msg.payloadType === PT_DEV.ERROR_RES) p.reject(new Error(msg.payload?.description || msg.payload?.errorCode || 'cTrader Error')); else p.resolve(msg.payload);
               }
+              for (const listener of eventListeners) {
+                try { listener(msg.payloadType, msg.payload || {}); } catch {}
+              }
             } catch {}
           });
           ws.on('error', (err) => { clearTimeout(timer); reject(err); });
           ws.on('open', async () => {
-            try { await send(PT_DEV.APPLICATION_AUTH_REQ, { clientId, clientSecret }); if (ctidTraderAccountId && ctidTraderAccountId > 0) await send(PT_DEV.ACCOUNT_AUTH_REQ, { ctidTraderAccountId, accessToken }); clearTimeout(timer); resolve({ send, close: () => { try { ws.close(); } catch {} } }); } catch (err) { clearTimeout(timer); try { ws.close(); } catch {} reject(err); }
+            try { await send(PT_DEV.APPLICATION_AUTH_REQ, { clientId, clientSecret }); if (ctidTraderAccountId && ctidTraderAccountId > 0) await send(PT_DEV.ACCOUNT_AUTH_REQ, { ctidTraderAccountId, accessToken }); clearTimeout(timer); resolve({ send, onEvent: (listener) => { eventListeners.add(listener); return () => eventListeners.delete(listener); }, heartbeat: () => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ clientMsgId: `heartbeat_${Date.now()}`, payloadType: PT_DEV.HEARTBEAT_EVENT, payload: {} })); }, close: () => { try { ws.close(); } catch {} } }); } catch (err) { clearTimeout(timer); try { ws.close(); } catch {} reject(err); }
           });
         });
         const mintAccessTokenDev = async (clientId, clientSecret, refreshToken) => {
@@ -1119,7 +1078,11 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           u.searchParams.set('grant_type', 'refresh_token'); u.searchParams.set('refresh_token', refreshToken); u.searchParams.set('client_id', clientId); u.searchParams.set('client_secret', clientSecret);
           const r = await fetch(u.toString(), { headers: { Accept: 'application/json' } }); const b = await r.json().catch(() => ({}));
           if (!r.ok || b.errorCode || !b.accessToken) throw new Error(b.description || b.errorCode || `cTrader refresh failed (HTTP ${r.status})`);
-          return { accessToken: String(b.accessToken), refreshToken: b.refreshToken ? String(b.refreshToken) : null };
+          return {
+            accessToken: String(b.accessToken),
+            refreshToken: b.refreshToken ? String(b.refreshToken) : null,
+            expiresInSeconds: Number.isFinite(Number(b.expiresIn || b.expires_in)) ? Math.max(60, Number(b.expiresIn || b.expires_in)) : 300,
+          };
         };
 
         let rawBody = '';
@@ -1150,10 +1113,11 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         const action = String(body.action || (req.method === 'GET' ? 'get_positions' : 'open')).toLowerCase();
         const isReadAction = action === 'get_positions' || action === 'positions' || action === 'get_accounts' || action === 'accounts' || action === 'check_auth' || action === 'auth_status' || req.method === 'GET';
 
-        const clientId = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
-        const clientSecret = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
+        const clientId = readCtraderEnv('CTRADER_CLIENT_ID') || readCtraderEnv('VITE_CTRADER_CLIENT_ID');
+        const clientSecret = readCtraderEnv('CTRADER_CLIENT_SECRET');
         const supabaseUrl = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
         const serviceKey = readCtraderEnv('SUPABASE_SERVICE_ROLE_KEY') || '';
+        const anonKey = readCtraderEnv('SUPABASE_ANON_KEY') || process.env.VITE_SUPABASE_ANON_KEY || '';
 
         if (!clientId || !clientSecret) { res.statusCode = 503; res.end(JSON.stringify({ error: 'cTrader credentials not configured on server' })); return; }
 
@@ -1162,26 +1126,40 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         let keyId = null;
         let defaultAccountId = null;
         let defaultIsDemo = true;
+        let isBrowserSession = false;
 
-        if (TOKEN_PATTERN.test(rawKey)) {
+        // Match production: a browser request must prove its Supabase session,
+        // never merely claim a user id in a query parameter or JWT payload.
+        let browserUserId = null;
+        if (!TOKEN_PATTERN.test(rawKey) && rawKey && supabaseUrl && anonKey) {
+          try {
+            const client = supabaseJs.createClient(supabaseUrl, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+            const { data, error } = await client.auth.getUser(rawKey);
+            if (!error && data?.user?.id) browserUserId = data.user.id;
+          } catch {}
+        }
+
+        if (TOKEN_PATTERN.test(rawKey) || browserUserId) {
           if (!supabaseUrl || !serviceKey) { res.statusCode = 503; res.end(JSON.stringify({ error: 'Database service not configured' })); return; }
           const keyHash = hashTokenDev(rawKey);
-          let apiKey = null;
-          try {
-            const qr = await fetch(`${supabaseUrl}/rest/v1/api_keys?key_hash=eq.${keyHash}&select=id,user_id,scopes,expires_at`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
-            const rows = await qr.json().catch(() => []);
-            apiKey = Array.isArray(rows) ? rows[0] : null;
-          } catch {}
+          let apiKey = browserUserId ? { id: null, user_id: browserUserId, scopes: ['trades:read', 'trades:write'] } : null;
+          if (!browserUserId) {
+            try {
+              const qr = await fetch(`${supabaseUrl}/rest/v1/api_keys?key_hash=eq.${keyHash}&select=id,user_id,scopes,expires_at`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
+              const rows = await qr.json().catch(() => []);
+              apiKey = Array.isArray(rows) ? rows[0] : null;
+            } catch {}
+          }
           if (!apiKey) { res.statusCode = 401; res.end(JSON.stringify({ error: 'invalid_api_key', message: 'API key not recognised. Copy the full key from Settings → Developer Tools (it starts with jfx_pat_) and send it as X-API-Key or Authorization: Bearer.' })); return; }
-          if (apiKey.expires_at && new Date(apiKey.expires_at).getTime() <= Date.now()) { res.statusCode = 401; res.end(JSON.stringify({ error: 'expired_api_key', message: 'This API key has expired. Create a new one in Settings → Developer Tools.' })); return; }
+          if (!browserUserId && apiKey.expires_at && new Date(apiKey.expires_at).getTime() <= Date.now()) { res.statusCode = 401; res.end(JSON.stringify({ error: 'expired_api_key', message: 'This API key has expired. Create a new one in Settings → Developer Tools.' })); return; }
           const scopes = apiKey.scopes || [];
           const requiredScope = isReadAction ? 'trades:read' : 'trades:write';
-          if (!scopes.includes(requiredScope) && !scopes.includes('trades:write')) {
+          if (!browserUserId && !scopes.includes(requiredScope) && !scopes.includes('trades:write')) {
             res.statusCode = 403; res.end(JSON.stringify({ error: 'insufficient_scope', need: requiredScope, have: scopes, message: requiredScope === 'trades:write' ? 'This key lacks trades:write. Recreate it in Settings → Developer Tools with trades:write enabled.' : 'This key lacks the required scope.', hint: requiredScope === 'trades:write' ? 'Recreate the key in Settings → Developer Tools with trades:write enabled' : 'Requires trades:read (or trades:write)' })); return;
           }
-          authenticatedUserId = apiKey.user_id; keyId = apiKey.id;
+          authenticatedUserId = apiKey.user_id; keyId = apiKey.id; isBrowserSession = Boolean(browserUserId);
           // rate limit: 429 only on explicit deny; transport errors are 503 (never silent 429 confusion)
-          try {
+          if (keyId) try {
             const rl = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_api_key_rate_limit`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}` }, body: JSON.stringify({ p_user_id: authenticatedUserId, p_key_id: keyId }) });
             if (!rl.ok) { res.statusCode = 503; res.end(JSON.stringify({ error: 'rate_limiter_unavailable', message: 'Rate-limiter check failed on the server. Try again shortly.' })); return; }
             const allowed = await rl.json().catch(() => true);
@@ -1189,62 +1167,62 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           } catch { res.statusCode = 503; res.end(JSON.stringify({ error: 'rate_limiter_unavailable', message: 'Rate-limiter check failed on the server. Try again shortly.' })); return; }
           // lookup refresh token
           let userRefreshToken = '';
+          let storedToken = null;
           try {
-            const tr = await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${authenticatedUserId}&select=refresh_token,default_account_id,is_demo`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
+            const tr = await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${authenticatedUserId}&select=refresh_token,default_account_id,is_demo,access_token,access_token_expires_at`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
             if (tr.ok) {
               const rows = await tr.json().catch(() => []);
               const ut = Array.isArray(rows) ? rows[0] : null;
+              storedToken = ut;
               if (ut?.refresh_token) { userRefreshToken = ut.refresh_token; defaultAccountId = ut.default_account_id ? Number(ut.default_account_id) : null; defaultIsDemo = ut.is_demo !== undefined ? (String(ut.is_demo).toLowerCase() !== 'false' && Boolean(ut.is_demo)) : true; }
             }
           } catch {}
-          if (!userRefreshToken) {
+          const tokenCacheKey = String(authenticatedUserId);
+          const cachedAccess = ctraderAccessCache.get(tokenCacheKey);
+          const persistedAccessExpiry = Date.parse(storedToken?.access_token_expires_at || '');
+          if (cachedAccess?.expiresAt > Date.now() + 60_000) {
+            accessToken = cachedAccess.accessToken;
+          } else if (storedToken?.access_token && Number.isFinite(persistedAccessExpiry) && persistedAccessExpiry > Date.now() + 60_000) {
+            accessToken = String(storedToken.access_token);
+            ctraderAccessCache.set(tokenCacheKey, { accessToken, expiresAt: persistedAccessExpiry });
+          }
+          if (!accessToken && !userRefreshToken) {
             try {
-              const cr = await fetch(`${supabaseUrl}/rest/v1/service_config?key=in.(ctrader_refresh_${authenticatedUserId},ctrader_service_refresh_token)&select=key,value`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
-              if (cr.ok) { const rows = await cr.json().catch(() => []); const ur = rows.find((r) => r.key === `ctrader_refresh_${authenticatedUserId}`); const gr = rows.find((r) => r.key === 'ctrader_service_refresh_token'); userRefreshToken = ur?.value || gr?.value || ''; }
+              const cr = await fetch(`${supabaseUrl}/rest/v1/service_config?key=eq.ctrader_refresh_${authenticatedUserId}&select=value`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
+              if (cr.ok) { const rows = await cr.json().catch(() => []); userRefreshToken = Array.isArray(rows) ? String(rows[0]?.value || '') : ''; }
             } catch {}
           }
-          if (!userRefreshToken) { res.statusCode = 400; res.end(JSON.stringify({ error: 'ctrader_not_connected', message: 'Your JFX API key is valid, but your cTrader account has not been connected yet. Please connect cTrader once on the Connect & Import page.' })); return; }
-          try {
-            const minted = await mintAccessTokenDev(clientId, clientSecret, userRefreshToken);
-            accessToken = minted.accessToken;
-            // Persist rotated refresh token (cTrader rotates on each mint) — best-effort, never block trade
-            // FIX: upsert per-user row via POST merge-duplicates so a missing row gets created (PATCH with 0 rows was silently ignored)
-            if (minted.refreshToken && minted.refreshToken !== userRefreshToken) {
-              const newTok = minted.refreshToken;
-              const upsertUser = fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' },
-                body: JSON.stringify({ user_id: authenticatedUserId, refresh_token: newTok, updated_at: new Date().toISOString() }),
-              }).catch(()=>{});
-              // keep PATCH as well for existing rows (some Supabase configs need it)
-              void fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${authenticatedUserId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-                body: JSON.stringify({ refresh_token: newTok, updated_at: new Date().toISOString() }),
-              }).catch(()=>{});
-              void upsertUser.then(()=>{}); // ensure POST fires
-              void fetch(`${supabaseUrl}/rest/v1/service_config`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: `ctrader_refresh_${authenticatedUserId}`, value: newTok }) }).catch(()=>{});
-              void fetch(`${supabaseUrl}/rest/v1/service_config`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: 'ctrader_service_refresh_token', value: newTok }) }).catch(()=>{});
+          if (!accessToken) {
+            if (!userRefreshToken) { res.statusCode = 400; res.end(JSON.stringify({ error: 'ctrader_not_connected', message: 'Your JFX API key is valid, but your cTrader account has not been connected yet. Please connect cTrader once on the Connect & Import page.' })); return; }
+            let refreshPromise = ctraderRefreshInFlight.get(tokenCacheKey);
+            if (!refreshPromise) {
+              refreshPromise = (async () => {
+                const minted = await mintAccessTokenDev(clientId, clientSecret, userRefreshToken);
+                if (!minted.refreshToken) throw new Error('cTrader refresh returned no replacement refresh token');
+                const expiresAt = Date.now() + minted.expiresInSeconds * 1000;
+                const record = JSON.stringify({ user_id: authenticatedUserId, refresh_token: minted.refreshToken, access_token: minted.accessToken, access_token_expires_at: new Date(expiresAt).toISOString(), updated_at: new Date().toISOString() });
+                const dbHeaders = { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+                const upsert = await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens`, { method: 'POST', headers: { ...dbHeaders, Prefer: 'resolution=merge-duplicates' }, body: record });
+                if (!upsert.ok) {
+                  const patch = await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${authenticatedUserId}`, { method: 'PATCH', headers: dbHeaders, body: record });
+                  if (!patch.ok) throw new Error(`token persistence failed (HTTP ${patch.status})`);
+                }
+                ctraderAccessCache.set(tokenCacheKey, { accessToken: minted.accessToken, expiresAt });
+                void fetch(`${supabaseUrl}/rest/v1/service_config`, { method: 'POST', headers: { ...dbHeaders, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: `ctrader_refresh_${authenticatedUserId}`, value: minted.refreshToken }) }).catch(() => {});
+                return minted.accessToken;
+              })();
+              ctraderRefreshInFlight.set(tokenCacheKey, refreshPromise);
             }
-          } catch (err) {
-            const _msg = String(err?.message || '');
-            const _retryable = /access denied|access_denied|invalid_grant|invalid grant|invalid_token|expired|revoked|ch_access_denied/i.test(_msg);
-            if (_retryable) {
-              try {
-                const svcRes = await fetch(`${supabaseUrl}/rest/v1/service_config?key=eq.ctrader_service_refresh_token&select=value`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
-                const svcRows = await svcRes.json().catch(() => []);
-                const svcToken = Array.isArray(svcRows) ? svcRows[0]?.value : svcRows?.value;
-                if (svcToken && svcToken !== userRefreshToken) {
-                  const retry = await mintAccessTokenDev(clientId, clientSecret, String(svcToken));
-                  accessToken = retry.accessToken;
-                  if (retry.refreshToken && retry.refreshToken !== String(svcToken)) {
-                    const nt = retry.refreshToken;
-                    void fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ user_id: authenticatedUserId, refresh_token: nt, updated_at: new Date().toISOString() }) }).catch(()=>{});
-                    void fetch(`${supabaseUrl}/rest/v1/service_config`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify({ key: `ctrader_refresh_${authenticatedUserId}`, value: nt }) }).catch(()=>{});
-                  }
-                } else throw err;
-              } catch (e2) { res.statusCode = 502; res.end(JSON.stringify({ error: 'ctrader_auth_failed', message: `Failed to authenticate with cTrader: ${_msg || e2?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.` })); return; }
-            } else { res.statusCode = 502; res.end(JSON.stringify({ error: 'ctrader_auth_failed', message: `Failed to authenticate with cTrader: ${_msg || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.` })); return; }
+            try {
+              accessToken = await refreshPromise;
+            } catch (err) {
+              const message = String(err?.message || 'Invalid session');
+              res.statusCode = 502;
+              res.end(JSON.stringify({ error: 'ctrader_auth_failed', message: `Failed to authenticate with cTrader: ${message}. Please reconnect cTrader on the Connect & Import page.` }));
+              return;
+            } finally {
+              if (ctraderRefreshInFlight.get(tokenCacheKey) === refreshPromise) ctraderRefreshInFlight.delete(tokenCacheKey);
+            }
           }
         } else if (rawKey) {
           accessToken = rawKey;
@@ -1316,6 +1294,65 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
             return;
           }
           session = await openCtraderSessionDev(host, clientId, clientSecret, accountId, accessToken);
+          if (action === 'stream_spots') {
+            const symbolIds = Array.isArray(body?.payload?.symbolIds)
+              ? [...new Set(body.payload.symbolIds.map(Number).filter(id => Number.isSafeInteger(id) && id > 0))].slice(0, 50)
+              : [];
+            if (!isBrowserSession || symbolIds.length === 0) {
+              session.close();
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'A signed-in web session and at least one valid symbol id are required.' }));
+              return;
+            }
+            await session.send(PT_DEV.SUBSCRIBE_SPOTS_REQ, { ctidTraderAccountId: accountId, symbolId: symbolIds });
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Connection', 'keep-alive');
+            const writeEvent = (event, payload) => { if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`); };
+            const removeEventListener = session.onEvent((payloadType, payload) => {
+              if (payloadType === PT_DEV.SPOT_EVENT && symbolIds.includes(Number(payload.symbolId))) writeEvent('spot', payload);
+            });
+            const heartbeat = setInterval(() => { session?.heartbeat(); writeEvent('keepalive', {}); }, 10000);
+            const cleanup = () => { clearInterval(heartbeat); removeEventListener(); session?.close(); };
+            req.once('close', cleanup);
+            res.once('close', cleanup);
+            writeEvent('ready', { accountId, isDemo, symbolIds });
+            return;
+          }
+          if (action === 'proxy') {
+            const allowedPayloadTypes = new Set([
+              PT_DEV.SYMBOLS_LIST_REQ, PT_DEV.TRADER_REQ, PT_DEV.RECONCILE_REQ,
+              PT_DEV.GET_TRENDBARS_REQ, PT_DEV.EXPECTED_MARGIN_REQ,
+              PT_DEV.CASH_FLOW_HISTORY_LIST_REQ, PT_DEV.GET_CTID_PROFILE_BY_TOKEN_REQ,
+              PT_DEV.NEW_ORDER_REQ, PT_DEV.CANCEL_ORDER_REQ, PT_DEV.AMEND_ORDER_REQ,
+              PT_DEV.AMEND_POSITION_SLTP_REQ, PT_DEV.CLOSE_POSITION_REQ,
+            ]);
+            const payloadType = Number(body.payloadType);
+            if (!isBrowserSession || !allowedPayloadTypes.has(payloadType)) {
+              session.close();
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: 'A signed-in web session and supported browser operation are required.' }));
+              return;
+            }
+            if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
+              session.close();
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'A cTrader payload object is required.' }));
+              return;
+            }
+            const payload = { ...body.payload };
+            delete payload.clientId;
+            delete payload.clientSecret;
+            delete payload.accessToken;
+            payload.ctidTraderAccountId = accountId;
+            if (payloadType === PT_DEV.GET_CTID_PROFILE_BY_TOKEN_REQ) payload.accessToken = accessToken;
+            const result = await session.send(payloadType, payload);
+            session.close();
+            res.statusCode = 200;
+            res.end(JSON.stringify({ ok: true, accountId, isDemo, result }));
+            return;
+          }
           if (isReadAction) {
             const reconcile = await session.send(PT_DEV.RECONCILE_REQ, { ctidTraderAccountId: accountId });
             const rawPositions = reconcile.position || []; const rawOrders = reconcile.order || [];
@@ -1394,69 +1431,27 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
       server.middlewares.use('/api/ctrader/refresh', async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         if (req.method !== 'POST') { res.statusCode = 405; res.end(JSON.stringify({ error: 'Method not allowed' })); return; }
-
-        let rawBody = '';
-        req.on('data', (chunk) => { rawBody += chunk; });
-        req.on('end', async () => {
-          try {
-            // Prefer the httpOnly cookie set by /api/ctrader/exchange above,
-            // falling back to the JSON body the client sends in dev.
-            let refreshToken = '';
-            const cookieHeader = req.headers.cookie || '';
-            for (const part of cookieHeader.split(';')) {
-              const eq = part.indexOf('=');
-              if (eq === -1) continue;
-              if (part.slice(0, eq).trim() === 'jfx_ctrader_refresh') {
-                const rawVal = part.slice(eq + 1).trim();
-                try { refreshToken = decodeURIComponent(rawVal); } catch { refreshToken = rawVal; }
-              }
-            }
-            if (!refreshToken) {
-              try {
-                const parsed = JSON.parse(rawBody || '{}');
-                refreshToken = parsed.refresh_token || parsed.refreshToken || '';
-              } catch { /* ignore malformed body */ }
-            }
-            if (!refreshToken) { res.statusCode = 401; res.end(JSON.stringify({ error: 'Missing cTrader session' })); return; }
-
-            const cid = readCtraderEnv('VITE_CTRADER_CLIENT_ID');
-            const csec = readCtraderEnv('VITE_CTRADER_CLIENT_SECRET');
-
-            const tokenUrl = new URL('https://openapi.ctrader.com/apps/token');
-            tokenUrl.searchParams.set('grant_type', 'refresh_token');
-            tokenUrl.searchParams.set('refresh_token', refreshToken);
-            tokenUrl.searchParams.set('client_id', cid);
-            tokenUrl.searchParams.set('client_secret', csec);
-
-            const tokenRes = await fetch(tokenUrl.toString(), { headers: { Accept: 'application/json' } });
-            const data = await tokenRes.json().catch(() => ({}));
-            if (!tokenRes.ok || !data.accessToken) {
-              console.warn('[cTrader] refresh failed:', tokenRes.status, data?.error || data?.errorCode || '');
-              res.statusCode = 502;
-              res.end(JSON.stringify({ error: data?.error || 'Refresh failed' }));
-              return;
-            }
-
-            // Rotate the cookie when cTrader issues a new refresh token.
-            if (data.refreshToken) {
-              res.setHeader('Set-Cookie', `jfx_ctrader_refresh=${encodeURIComponent(String(data.refreshToken))}; Path=/; HttpOnly; SameSite=Lax`);
-            }
-            res.statusCode = 200;
-            // Respond with both naming conventions so the client and any
-            // server-side consumers can read the fields.
-            res.end(JSON.stringify({
-              access_token: data.accessToken,
-              expires_in: data.expiresIn,
-              refresh_token: data.refreshToken,
-              accessToken: data.accessToken,
-              expiresIn: data.expiresIn,
-              refreshToken: data.refreshToken,
-            }));
-          } catch (err) {
-            res.statusCode = 500;
-            res.end(JSON.stringify({ error: err.message || 'Refresh error' }));
+        const authHeader = req.headers['authorization'] || req.headers['Authorization'] || '';
+        const jwt = String(authHeader).replace(/^Bearer\s+/i, '').trim();
+        const supabaseUrl = readCtraderEnv('SUPABASE_URL') || process.env.VITE_SUPABASE_URL || '';
+        const anonKey = readCtraderEnv('SUPABASE_ANON_KEY') || process.env.VITE_SUPABASE_ANON_KEY || '';
+        try {
+          const client = supabaseJs.createClient(supabaseUrl, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+          const { data, error } = await client.auth.getUser(jwt);
+          if (error || !data?.user) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Invalid or expired session' }));
+            return;
           }
-        });
+          // The web client restores connections through /api/ctrader/trade,
+          // which serializes the single-use cTrader token rotation. Do not
+          // consume an httpOnly cookie here and desynchronize its DB record.
+          res.statusCode = 200;
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.statusCode = 503;
+          res.end(JSON.stringify({ error: 'Unable to verify session' }));
+        }
       });
     },
   };

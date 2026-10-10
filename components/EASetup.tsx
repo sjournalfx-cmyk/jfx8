@@ -268,7 +268,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             ],
             accent: '#FF4F01',
             gradient: 'from-[#FF4F01]/20 via-transparent to-transparent',
-            description: 'Install the JournalFX Bridge application on your Windows desktop for automated, real-time trade synchronization via the EA.'
+            description: 'Install the JFX-JOURNAL Bridge application on your Windows desktop for automated, real-time trade synchronization via the EA.'
         }] : []),
         {
             id: 'ctrader' as const,
@@ -344,7 +344,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                         Choose Your Connection
                     </h1>
                     <p className="text-zinc-500 text-sm leading-relaxed max-w-2xl mx-auto whitespace-normal break-normal">
-                        Select how you want to connect your trading terminal to JournalFX.
+                        Select how you want to connect your trading terminal to JFX-JOURNAL.
                         You can switch between methods at any time.
                     </p>
                 </div>
@@ -1097,7 +1097,7 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, onB
         {
             id: 0,
             title: 'Download the bridge',
-            subtitle: 'Get the Windows app that connects MT5 to JournalFX.',
+            subtitle: 'Get the Windows app that connects MT5 to JFX-JOURNAL.',
             icon: Download,
             panelIcon: WindowsLogoIcon,
             requirements: [
@@ -1116,16 +1116,16 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, onB
         {
             id: 1,
             title: 'Open and sign in',
-            subtitle: 'Launch the app, then sign in with your JournalFX account.',
+            subtitle: 'Launch the app, then sign in with your JFX-JOURNAL account.',
             icon: Play,
             requirements: [
-                'JournalFX email and password',
+                'JFX-JOURNAL email and password',
                 'MetaTrader 5 open and logged in',
                 'The bridge file downloaded',
             ],
             actions: [
                 'Run JournalFX_Bridge.exe',
-                'Sign in to your JournalFX account',
+                'Sign in to your JFX-JOURNAL account',
                 'Click Start Bridge in the app',
             ],
             note: 'The app prepares your sync key automatically.',
@@ -1151,7 +1151,7 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, onB
 
     const globalRequirements = [
         'Windows device',
-        'JournalFX account',
+        'JFX-JOURNAL account',
         'MetaTrader 5 terminal',
         'Internet connection',
     ];
@@ -1385,7 +1385,7 @@ const BridgeWizard: React.FC<BridgeWizardProps> = ({ isDarkMode, onComplete, onB
                                                 </div>
                                                 <h3 className={`text-2xl font-black ${textPrimary}`}>Bridge connected</h3>
                                                 <p className={`mt-2 max-w-2xl whitespace-normal break-normal text-sm ${subTextColor}`}>
-                                                    Your terminal data is now streaming to JournalFX.
+                                                    Your terminal data is now streaming to JFX-JOURNAL.
                                                 </p>
                                                 <button
                                                     onClick={() => onComplete(syncKey)}

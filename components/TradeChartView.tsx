@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { RefreshCw, ChevronDown, AlertTriangle, Clock, Settings, Cloud, CloudCheck } from 'lucide-react';
 import { Trade, Candle } from '../types';
 import {
@@ -7,6 +7,7 @@ import {
   getAccounts as getCtraderAccounts,
   getSelectedAccountId,
 } from '../services/ctraderService';
+import { dataService } from '../services/dataService';
 import CustomChart from './CustomChart';
 import { Drawing } from './backtest/types';
 
@@ -112,6 +113,102 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [tfMenuOpen, setTfMenuOpen] = useState(false);
   const fetchIdRef = useRef(0); // abort stale fetches
+  // Persist-once guard: onSaveCandles → App.setTrades → new trade object →
+  // fetchCandles recreated → effect refires. Without this every chart open
+  // fires a heavy full-row updateTrade write of chart_candles.
+  const savedSigRef = useRef<string | null>(null);
+  const persistOnce = (list: any[], tf: string) => {
+    const sig = `${trade.id}:${tf}:${list.length}`;
+    if (savedSigRef.current === sig) return;
+    savedSigRef.current = sig;
+    onSaveCandles?.(list, tf);
+  };
+
+  // ── Marker resolvability (mirrors CustomChart placement) ──────────────
+  // Surfaces WHY arrows may be missing instead of failing silently: bad or
+  // missing timestamps, or fill prices far outside the candle range
+  // (e.g. wrong per-symbol scaling from the feed).
+  const markerInfo = useMemo(() => {
+    if (candles.length < 2) return null;
+    const parseSec = (v: unknown): number | null => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number') {
+        if (!Number.isFinite(v) || v <= 0) return null;
+        return v > 1e11 ? Math.floor(v / 1000) : Math.floor(v);
+      }
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (!t) return null;
+        const ms = Date.parse(t);
+        if (Number.isFinite(ms)) return Math.floor(ms / 1000);
+        const alt = Date.parse(t.replace(/\./g, '/'));
+        return Number.isFinite(alt) ? Math.floor(alt / 1000) : null;
+      }
+      return null;
+    };
+    const closest = (sec: number | null): number => {
+      if (sec === null) return -1;
+      let best = -1;
+      let min = Infinity;
+      for (let i = 0; i < candles.length; i++) {
+        const d = Math.abs(candles[i].time - sec);
+        if (d < min) { min = d; best = i; }
+      }
+      return best;
+    };
+    const entryIdx = closest(parseSec(trade.openTime));
+    const exitIdx = closest(parseSec(trade.closeTime));
+    const hasEntryPrice = Number.isFinite(Number(trade.entryPrice)) && Number(trade.entryPrice) > 0;
+    const hasExitPrice = Number.isFinite(Number(trade.exitPrice)) && Number(trade.exitPrice) > 0;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const c of candles) {
+      if (Number.isFinite(c.low) && c.low > 0 && c.low < lo) lo = c.low;
+      if (Number.isFinite(c.high) && c.high > 0 && c.high > hi) hi = c.high;
+    }
+    const span = hi - lo;
+    const offScale = (p: number) =>
+      Number.isFinite(p) && p > 0 && Number.isFinite(lo) && Number.isFinite(span) && span > 0 &&
+      (p < lo - span * 0.25 || p > hi + span * 0.25);
+    const entryOff = hasEntryPrice && offScale(Number(trade.entryPrice));
+    const exitOff = hasExitPrice && offScale(Number(trade.exitPrice));
+
+    if (entryIdx < 0 && exitIdx < 0) {
+      return {
+        ok: false,
+        label: 'No timestamps',
+        detail: `Trade has no usable open/close time (openTime=${String(trade.openTime)}, closeTime=${String(trade.closeTime)}). Add timestamps to place markers.`,
+      };
+    }
+    const problems: string[] = [];
+    if (entryIdx < 0) problems.push('entry: no usable time');
+    else if (entryOff) problems.push(`entry price ${trade.entryPrice} is far outside candle range ${lo}–${hi}`);
+    if (exitIdx < 0) problems.push('exit: no usable time');
+    else if (exitOff) problems.push(`exit price ${trade.exitPrice} is far outside candle range ${lo}–${hi}`);
+    if (problems.length === 0) {
+      return {
+        ok: true,
+        label: 'Entry ✓ · Exit ✓',
+        detail: `Entry bar ${entryIdx}, exit bar ${exitIdx} of ${candles.length}. If arrows are still hidden, pan left / zoom out — they may be outside the current view.`,
+      };
+    }
+    return { ok: false, label: `⚠ ${problems.join(' · ')}`, detail: problems.join('; ') };
+  }, [candles, trade.openTime, trade.closeTime, trade.entryPrice, trade.exitPrice]);
+
+  useEffect(() => {
+    if (status === 'done' && markerInfo) {
+      console.debug('[TradeChartView] marker state', {
+        tradeId: trade.id,
+        pair: trade.pair,
+        openTime: trade.openTime,
+        closeTime: trade.closeTime,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice,
+        candles: candles.length,
+        ...markerInfo,
+      });
+    }
+  }, [status, markerInfo, candles.length, trade.id, trade.pair, trade.openTime, trade.closeTime, trade.entryPrice, trade.exitPrice]);
 
   // ── Fetch from cTrader & Persist ──────────────────────────────────────────
 
@@ -122,6 +219,22 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
       setStatus('done');
       setIsSavedToCloud(true);
       return;
+    }
+
+    // Historical chart data is deliberately omitted from the journal list
+    // query. Load it only when this chart is opened.
+    if (!force && (!trade.chartCandles || trade.chartCandles.length < 2)) {
+      try {
+        const stored = await dataService.getTradeChartCandles(trade.id);
+        if (stored?.candles && stored.candles.length >= 2 && (stored.timeframe === tf || !stored.timeframe)) {
+          setCandles(normalizeCandleScale(stored.candles, trade));
+          setStatus('done');
+          setIsSavedToCloud(true);
+          return;
+        }
+      } catch (error) {
+        console.warn('Failed to load saved trade candles:', error);
+      }
     }
 
     // 2. Guard: check local cache if not forced
@@ -136,7 +249,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
             setStatus('done');
             setIsSavedToCloud(true);
             if (!trade.chartCandles || trade.chartCandles.length === 0) {
-              onSaveCandles?.(cachedCandles, tf);
+              persistOnce(cachedCandles, tf);
             }
             return;
           }
@@ -215,10 +328,8 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
         console.warn('Failed to cache trade candles locally:', e);
       }
 
-      // Persist to Supabase cloud
-      if (onSaveCandles) {
-        onSaveCandles(freshCandles, tf);
-      }
+      // Persist to Supabase cloud (once per trade+tf+size — see guard)
+      persistOnce(freshCandles, tf);
     } catch (err: any) {
       if (id !== fetchIdRef.current) return;
       setStatus('error');
@@ -363,6 +474,21 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
               Saved
             </span>
           )}
+
+          {/* Marker resolvability: tells cTrader-connected users whether the
+              open/close arrows could be placed, and why not if not. */}
+          {status === 'done' && markerInfo && (
+            <span
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wider border ${
+                markerInfo.ok
+                  ? 'text-sky-400 bg-sky-500/10 border-sky-500/20'
+                  : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+              }`}
+              title={markerInfo.detail}
+            >
+              {markerInfo.label}
+            </span>
+          )}
         </div>
 
         {/* Right: TF picker + context window + force refresh */}
@@ -454,6 +580,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
           showGrid={true}
           disablePan={false}
           tradingView
+          autoFitTrades
           symbol={trade.pair}
           timeframe={timeframe}
         />

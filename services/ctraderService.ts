@@ -5,12 +5,10 @@ const CTRADER_ID_BASE = 'https://id.ctrader.com';
 const WS_DEMO = 'wss://demo.ctraderapi.com:5036';
 const WS_LIVE = 'wss://live.ctraderapi.com:5036';
 
-// The client ID is a public OAuth identifier (safe to ship to the browser).
-// The client secret is required by the cTrader Open API web flow for the direct
-// WebSocket application auth (ProtoOAApplicationAuthReq) and is supplied via the
-// VITE_CTRADER_CLIENT_SECRET env var only — never hardcoded in source.
+// OAuth client IDs are public identifiers. The cTrader client secret is kept
+// exclusively in server environment variables; browser requests use the
+// authenticated server proxy instead of direct protocol authentication.
 const CLIENT_ID = import.meta.env.VITE_CTRADER_CLIENT_ID || '';
-const CLIENT_SECRET = import.meta.env.VITE_CTRADER_CLIENT_SECRET || '';
 const CTRADER_VOLUME_CENTS_PER_UNIT = 100;
 const CTRADER_UNITS_PER_LOT = 100000;
 const CTRADER_VOLUME_CENTS_PER_LOT = CTRADER_VOLUME_CENTS_PER_UNIT * CTRADER_UNITS_PER_LOT;
@@ -103,6 +101,7 @@ const SCOPE = 'trading'; // cTrader OAuth scope: trading includes accounts + tra
 // in the browser.
 // ------------------------------------------------------------------
 let memoryTokens: { accessToken: string; expiresAt: number } | null = null;
+let refreshInFlight: Promise<boolean> | null = null;
 
 /** Test helper only — seeds the in-memory token store. */
 export function __setTokensForTesting(tokens: { accessToken: string; expiresAt: number } | null) {
@@ -117,7 +116,7 @@ export function __setTokensForTesting(tokens: { accessToken: string; expiresAt: 
 // of flashing the "Connect" screen. Cleared only by an explicit logout.
 // ------------------------------------------------------------------
 const SESSION_FLAG_KEY = 'jfx_ctrader_session';
-const DEV_REFRESH_KEY = 'jfx_ctrader_dev_refresh';
+const OAUTH_STATE_KEY = 'jfx_ctrader_oauth_state';
 
 function markSession() {
   try { localStorage.setItem(SESSION_FLAG_KEY, '1'); } catch { /* blocked */ }
@@ -161,64 +160,56 @@ async function getOrWaitForSession(): Promise<{ jwt?: string; userId?: string } 
   return null;
 }
 
-/** Refresh the access token from the server (which reads the httpOnly cookie). */
-async function refreshTokensFromCookie(): Promise<boolean> {
-  try {
-    // Vercel production reads the httpOnly cookie server-side. The local
-    // Vite dev middleware has no cookie jar, so a dev-only stored refresh
-    // token is sent in the body as a fallback (ignored by production).
-    const payload: Record<string, string> = {};
-    try {
-      const devRefresh = localStorage.getItem(DEV_REFRESH_KEY);
-      if (devRefresh) payload.refresh_token = devRefresh;
-    } catch { /* blocked */ }
+async function ctraderApiRequest(body: Record<string, unknown>): Promise<any> {
+  const session = await getOrWaitForSession();
+  if (!session?.jwt) throw new Error('Sign in again before using cTrader.');
 
-    // Send the Supabase JWT so the server can persist the rotated refresh
-    // token to user_ctrader_tokens — that's the row API-key trading mints
-    // from. Without it, web sessions heal via cookie while agent keys rot.
-    const refreshHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  const res = await fetch('/api/ctrader/trade', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.jwt}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || data?.error || `cTrader request failed (HTTP ${res.status})`);
+  return data;
+}
+
+/**
+ * Restore a cTrader session without exposing or rotating a cookie-held token
+ * in the browser. The authenticated server checks the user-scoped token store
+ * and serializes any cTrader refresh internally.
+ */
+async function refreshTokensFromCookie(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
     try {
-      const session = await getOrWaitForSession();
-      if (session?.jwt) refreshHeaders['Authorization'] = `Bearer ${session.jwt}`;
-      if (session?.userId) payload.user_id = session.userId;
-    } catch { /* ignore — refresh still works via cookie, DB just won't update */ }
-    const res = await fetch('/api/ctrader/refresh', {
-      method: 'POST',
-      headers: refreshHeaders,
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    const accessToken = data.access_token || data.accessToken;
-    if (!accessToken) return false;
-    memoryTokens = {
-      accessToken,
-      expiresAt: Date.now() + ((data.expires_in || data.expiresIn || 2628000) * 1000),
-    };
-    markSession();
-    // Persist any rotated refresh token for the dev-middleware flow.
-    try {
-      const rotated = data.refresh_token || data.refreshToken;
-      if (rotated) localStorage.setItem(DEV_REFRESH_KEY, String(rotated));
-    } catch { /* blocked */ }
-    return true;
-  } catch {
-    return false;
+      await ctraderApiRequest({ action: 'check_auth' });
+      markSession();
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
   }
 }
 
 /** Return a valid token, silently refreshing from the httpOnly cookie when needed. */
 export async function getTokens(): Promise<{ accessToken: string; expiresAt: number } | null> {
-  const cached = getStoredTokens();
-  if (cached) return cached;
-  const refreshed = await refreshTokensFromCookie();
-  return refreshed ? getStoredTokens() : null;
+  // Kept for backward-compatible callers. Access tokens intentionally never
+  // cross the browser boundary; only explicit test seeds can return one.
+  return getStoredTokens();
 }
 
 /** Returns the active cTrader access token string for AI agent API use. */
 export async function getActiveAccessToken(): Promise<string | null> {
-  const t = await getTokens();
-  return t ? t.accessToken : null;
+  return null;
 }
 
 let wsDemo: WebSocket | null = null;
@@ -297,12 +288,89 @@ export const PT = {
 
 export type CtraderEventListener = (payloadType: number, payload: any, isDemo: boolean) => void;
 const eventListeners = new Set<CtraderEventListener>();
+const spotSubscriptions = new Map<string, { accountId: number; symbolIds: Set<number>; isDemo: boolean; version: number }>();
+const spotStreamControllers = new Map<string, AbortController>();
+
+const broadcastCtraderEvent = (payloadType: number, payload: any, isDemo: boolean) => {
+  for (const listener of eventListeners) {
+    try { listener(payloadType, payload, isDemo); } catch { /* listener isolation */ }
+  }
+};
 
 export function addCtraderListener(listener: CtraderEventListener) {
   eventListeners.add(listener);
   return () => {
     eventListeners.delete(listener);
   };
+}
+
+async function startSpotStream(accountId: number, isDemo: boolean): Promise<void> {
+  const key = `${isDemo ? 'demo' : 'live'}:${accountId}`;
+  const subscription = spotSubscriptions.get(key);
+  if (!subscription || subscription.symbolIds.size === 0) return;
+  const version = subscription.version;
+  const symbolIds = [...subscription.symbolIds];
+
+  spotStreamControllers.get(key)?.abort();
+  const controller = new AbortController();
+  spotStreamControllers.set(key, controller);
+
+  const session = await getOrWaitForSession();
+  if (!session?.jwt) throw new Error('Sign in again before using cTrader.');
+  let response: Response;
+  try {
+    response = await fetch('/api/ctrader/trade', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.jwt}`,
+      },
+      body: JSON.stringify({
+        action: 'stream_spots',
+        ctidTraderAccountId: accountId,
+        isDemo,
+        payload: { symbolIds },
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted && subscription.version !== version) return;
+    throw error;
+  }
+  if (subscription.version !== version) {
+    controller.abort();
+    return;
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error || `Spot stream failed (HTTP ${response.status})`);
+  }
+  if (!response.body) throw new Error('Spot stream returned no response body.');
+
+  void (async () => {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() || '';
+        for (const frame of frames) {
+          const event = /^event:\s*([^\n]+)/m.exec(frame)?.[1];
+          const rawData = /^data:\s*(.+)$/m.exec(frame)?.[1];
+          if (event !== 'spot' || !rawData) continue;
+          try { broadcastCtraderEvent(PT.SPOT_EVENT, JSON.parse(rawData), isDemo); } catch { /* ignore malformed stream frame */ }
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) console.warn('cTrader spot stream disconnected:', error);
+    } finally {
+      if (spotStreamControllers.get(key) === controller) spotStreamControllers.delete(key);
+    }
+  })();
 }
 
 async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
@@ -412,10 +480,7 @@ async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
           }
         }
 
-        // Broadcast to registered event listeners
-        for (const listener of eventListeners) {
-          try { listener(msg.payloadType, msg.payload, isDemo); } catch { /* ignore listener errors */ }
-        }
+        broadcastCtraderEvent(msg.payloadType, msg.payload, isDemo);
       } catch { /* ignore parse errors */ }
     };
 
@@ -492,28 +557,40 @@ export function getAuthorizeUrl(): string {
   if (!CLIENT_ID) throw new Error('cTrader client ID is not configured (VITE_CTRADER_CLIENT_ID).');
   const redirectUri = `${window.location.origin}/api/ctrader/callback`;
   const url = new URL(`${CTRADER_ID_BASE}/my/settings/openapi/grantingaccess/`);
+  const state = crypto.randomUUID();
+  try {
+    sessionStorage.setItem(OAUTH_STATE_KEY, state);
+  } catch {
+    throw new Error('Browser storage is required to start cTrader authorization.');
+  }
   url.searchParams.set('client_id', CLIENT_ID);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('scope', SCOPE);
   url.searchParams.set('product', 'web');
+  url.searchParams.set('state', state);
   return url.toString();
 }
 
-export async function exchangeCode(code: string): Promise<{ ok: boolean; error?: string }> {
+export async function exchangeCode(code: string, state: string | null): Promise<{ ok: boolean; error?: string }> {
   const redirectUri = `${window.location.origin}/api/ctrader/callback`;
   try {
+    const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+    // The installed native app uses its registered deep-link state. Browser
+    // authorizations must always match the one-time state generated above.
+    const isNativeCallback = state === 'jfx-native';
+    if (!isNativeCallback && (!state || !expectedState || state !== expectedState)) {
+      return { ok: false, error: 'Invalid or expired cTrader authorization state. Please try connecting again.' };
+    }
+    if (expectedState) sessionStorage.removeItem(OAUTH_STATE_KEY);
     const session = await getOrWaitForSession();
     const jwt = session?.jwt;
-    const userId = session?.userId;
-    const headers: Record<string, string> = {};
-    if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
+    if (!jwt) return { ok: false, error: 'Sign in again before connecting cTrader.' };
+    const headers: Record<string, string> = { Authorization: `Bearer ${jwt}` };
 
     const queryParams = new URLSearchParams({
       code,
       redirect_uri: redirectUri,
     });
-    if (userId) queryParams.set('user_id', userId);
-
     const res = await fetch(`/api/ctrader/exchange?${queryParams.toString()}`, { headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -521,17 +598,7 @@ export async function exchangeCode(code: string): Promise<{ ok: boolean; error?:
       console.warn('[cTrader] exchange failed:', msg, data);
       return { ok: false, error: String(msg) };
     }
-    if (data.accessToken) {
-      // The refresh token is stored server-side in an httpOnly cookie by the exchange endpoint.
-      memoryTokens = {
-        accessToken: data.accessToken,
-        expiresAt: Date.now() + (data.expiresIn || 2628000) * 1000,
-      };
-      // Dev middleware returns the refresh token in the body (production
-      // delivers it via httpOnly cookie instead) — keep a dev-local copy.
-      try {
-        if (data.refreshToken) localStorage.setItem(DEV_REFRESH_KEY, String(data.refreshToken));
-      } catch { /* blocked */ }
+    if (data.ok) {
       markSession();
       return { ok: true };
     }
@@ -543,7 +610,7 @@ export async function exchangeCode(code: string): Promise<{ ok: boolean; error?:
 
 
 export function isAuthenticated(): boolean {
-  return getStoredTokens() !== null;
+  return hasActiveSession();
 }
 
 export async function refreshToken(): Promise<boolean> {
@@ -577,14 +644,12 @@ export function clearSelectedAccountId() {
  */
 export function clearStaleCtraderFlags() {
   try { localStorage.removeItem(SESSION_FLAG_KEY); } catch { /* blocked */ }
-  try { localStorage.removeItem(DEV_REFRESH_KEY); } catch { /* blocked */ }
 }
 
 export function logout() {
   memoryTokens = null;
   clearSelectedAccountId();
   try { localStorage.removeItem(SESSION_FLAG_KEY); } catch { /* blocked */ }
-  try { localStorage.removeItem(DEV_REFRESH_KEY); } catch { /* blocked */ }
   // Clear the server-side refresh cookie (best-effort).
   try { void fetch('/api/ctrader/logout', { method: 'POST' }); } catch { /* ignore */ }
   appAuthDone.clear();
@@ -592,6 +657,9 @@ export function logout() {
   accountAuthPromises.clear();
   connectPromiseDemo = null;
   connectPromiseLive = null;
+  for (const controller of spotStreamControllers.values()) controller.abort();
+  spotStreamControllers.clear();
+  spotSubscriptions.clear();
   if (wsDemo) {
     wsDemo.close();
     wsDemo = null;
@@ -604,76 +672,32 @@ export function logout() {
 }
 
 export async function getAccounts(): Promise<CtraderAccount[]> {
-  const tokens = await getTokens();
-  if (!tokens) throw new Error('Not authenticated with cTrader');
-
-  const res = await fetch('/api/ctrader/accounts', {
-    headers: { Authorization: `Bearer ${tokens.accessToken}` },
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data?.error || `Server returned ${res.status}`);
-  }
-
-  const data = await res.json();
-  return dedupeAccountsByTraderId((data.accounts || []) as CtraderAccount[]);
+  const data = await ctraderApiRequest({ action: 'get_accounts' });
+  const accounts = (data.accounts || []).map((account: any) => ({
+    ctidTraderAccountId: Number(account.accountId),
+    login: String(account.traderLogin || account.accountId),
+    server: String(account.broker || ''),
+    isDemo: account.isDemo !== undefined ? Boolean(account.isDemo) : !account.isLive,
+    currency: String(account.currency || 'USD'),
+    balance: Number(account.balance || 0),
+    equity: Number(account.equity || 0),
+    profit: Number(account.profit || 0),
+    margin: Number(account.margin || 0),
+    freeMargin: Number(account.freeMargin || 0),
+    name: String(account.name || `Account #${account.traderLogin || account.accountId}`),
+    depositAssetId: Number(account.depositAssetId || 0),
+  }));
+  return dedupeAccountsByTraderId(accounts as CtraderAccount[]);
 }
 export async function authAccount(ctidTraderAccountId: number, isDemo: boolean = true): Promise<void> {
-  const tokens = await getTokens();
-  if (!tokens) throw new Error('Not authenticated with cTrader');
-
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    throw new Error('cTrader app credentials are not configured (VITE_CTRADER_CLIENT_ID / VITE_CTRADER_CLIENT_SECRET).');
-  }
-
-  const socket = await ensureConnected(isDemo);
-
-  // 1. Application Auth (Single execution per socket)
-  let appPromise = appAuthPromises.get(socket);
-  if (!appPromise) {
-    appPromise = (async () => {
-      if (!appAuthDone.has(socket)) {
-        await sendWsMessage(socket, PT.APPLICATION_AUTH_REQ, {
-          clientId: CLIENT_ID,
-          clientSecret: CLIENT_SECRET,
-        });
-        appAuthDone.add(socket);
-      }
-    })();
-    // A failed app auth must not stay cached, otherwise every future call on
-    // this socket reuses the stale rejection (same as account auth below).
-    const currentApp = appPromise;
-    currentApp.catch(() => { appAuthPromises.delete(socket); });
-    appAuthPromises.set(socket, appPromise);
-  }
-  await appPromise;
-
-  // 2. Account Auth (Single execution per socket + accountId)
-  let socketAccountMap = accountAuthPromises.get(socket);
-  if (!socketAccountMap) {
-    socketAccountMap = new Map<number, Promise<void>>();
-    accountAuthPromises.set(socket, socketAccountMap);
-  }
-
-  let accPromise = socketAccountMap.get(ctidTraderAccountId);
-  if (!accPromise) {
-    accPromise = (async () => {
-      await sendWsMessage(socket, PT.ACCOUNT_AUTH_REQ, {
-        ctidTraderAccountId,
-        accessToken: tokens.accessToken,
-      });
-    })();
-    // A failed auth must not stay cached, otherwise every future call on this
-    // socket reuses the stale rejection (e.g. after a transient disconnect).
-    const current = accPromise;
-    current.catch(() => { socketAccountMap.delete(ctidTraderAccountId); });
-    socketAccountMap.set(ctidTraderAccountId, accPromise);
-  }
-  await accPromise;
+  void ctidTraderAccountId;
+  void isDemo;
+  const session = await getOrWaitForSession();
+  if (!session?.jwt) throw new Error('Sign in again before using cTrader.');
 }
 
 const isCantRouteError = (e: any) => String(e?.message || e).includes('CANT_ROUTE_REQUEST');
+const isRefreshInProgressError = (e: any) => String(e?.message || e).includes('ctrader_refresh_in_progress');
 
 const isRecoverableConnectionError = (e: any) => {
   const msg = String(e?.message || e);
@@ -712,24 +736,26 @@ async function authenticatedRequest(
   isDemo: boolean,
   options: { allowEnvironmentFallback?: boolean } = {}
 ): Promise<any> {
-  const send = (envIsDemo: boolean) => (async () => {
-    const socket = await ensureConnected(envIsDemo);
-    await authAccount(ctidTraderAccountId, envIsDemo);
-    return sendWsMessage(socket, payloadType, payload);
-  })();
+  const send = async (envIsDemo: boolean) => {
+    const response = await ctraderApiRequest({
+      action: 'proxy',
+      ctidTraderAccountId,
+      isDemo: envIsDemo,
+      payloadType,
+      payload,
+    });
+    return response.result;
+  };
 
   try {
     return await send(isDemo);
-  } catch (e) {
-    if (!isCantRouteError(e) && !isRecoverableConnectionError(e)) throw e;
-    forceReconnect(isDemo);
-    try {
-      return await send(isDemo);
-    } catch (retryError) {
-      if (!options.allowEnvironmentFallback || !isCantRouteError(retryError)) throw retryError;
-      forceReconnect(!isDemo);
-      return await send(!isDemo);
+  } catch (error) {
+    if (isRefreshInProgressError(error)) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return send(isDemo);
     }
+    if (!options.allowEnvironmentFallback || !isCantRouteError(error)) throw error;
+    return send(!isDemo);
   }
 }
 export async function getPositions(ctidTraderAccountId: number, isDemo: boolean = true): Promise<CtraderPosition[]> {
@@ -964,22 +990,19 @@ export async function getCashFlowHistory(
   // Probes the newest window first so a misrouted/unsupported account fails
   // fast instead of after hundreds of requests.
   const runOnEnvironment = async (envIsDemo: boolean): Promise<void> => {
-    const socket = await ensureConnected(envIsDemo);
-    await authAccount(ctidTraderAccountId, envIsDemo);
-
     const windows: Array<{ s: number; e: number }> = [];
     for (let windowEnd = end; windowEnd > start; windowEnd -= MAX_WINDOW_MS) {
       windows.push({ s: Math.max(start, windowEnd - MAX_WINDOW_MS + 1), e: windowEnd });
     }
 
     const [first, ...rest] = windows;
-    await withTimeout(sendWsMessage(socket, PT.CASH_FLOW_HISTORY_LIST_REQ, buildWindowPayload(first.s, first.e)))
+    await withTimeout(authenticatedRequest(ctidTraderAccountId, PT.CASH_FLOW_HISTORY_LIST_REQ, buildWindowPayload(first.s, first.e), envIsDemo))
       .then(collectEntries);
 
     for (let i = 0; i < rest.length; i += BATCH_SIZE) {
       const batch = rest.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
-        batch.map(w => withTimeout(sendWsMessage(socket, PT.CASH_FLOW_HISTORY_LIST_REQ, buildWindowPayload(w.s, w.e))))
+        batch.map(w => withTimeout(authenticatedRequest(ctidTraderAccountId, PT.CASH_FLOW_HISTORY_LIST_REQ, buildWindowPayload(w.s, w.e), envIsDemo)))
       );
       results.forEach(res => {
         if (res.status === 'fulfilled') collectEntries(res.value);
@@ -1085,12 +1108,10 @@ export interface CtraderOrder {
 }
 
 export async function getCtidProfile(): Promise<any> {
-  const tokens = await getTokens();
-  if (!tokens) throw new Error('Not authenticated with cTrader');
-  const socket = await ensureConnected(true);
-  const data = await sendWsMessage(socket, PT.GET_CTID_PROFILE_BY_TOKEN_REQ, {
-    accessToken: tokens.accessToken,
-  });
+  const accounts = await getAccounts();
+  const account = accounts[0];
+  if (!account) throw new Error('No cTrader accounts are available.');
+  const data = await authenticatedRequest(account.ctidTraderAccountId, PT.GET_CTID_PROFILE_BY_TOKEN_REQ, {}, account.isDemo);
   return data.profile;
 }
 
@@ -1303,19 +1324,47 @@ export async function getSymbolsList(ctidTraderAccountId: number, isDemo: boolea
 }
 
 export async function subscribeToSpots(ctidTraderAccountId: number, symbolId: number, isDemo: boolean = true): Promise<any> {
-  // No environment fallback: spot events are consumed by listeners filtered on
-  // this environment, so a silent host switch would break the live ticks.
-  return authenticatedRequest(ctidTraderAccountId, PT.SUBSCRIBE_SPOTS_REQ, {
-    ctidTraderAccountId,
-    symbolId: [symbolId],
-  }, isDemo);
+  const key = `${isDemo ? 'demo' : 'live'}:${ctidTraderAccountId}`;
+  const subscription = spotSubscriptions.get(key) || {
+    accountId: ctidTraderAccountId,
+    symbolIds: new Set<number>(),
+    isDemo,
+    version: 0,
+  };
+  if (subscription.symbolIds.has(symbolId)) return { ok: true, symbolId };
+  subscription.symbolIds.add(symbolId);
+  subscription.version += 1;
+  spotSubscriptions.set(key, subscription);
+  const version = subscription.version;
+  try {
+    await startSpotStream(ctidTraderAccountId, isDemo);
+    return { ok: true, symbolId };
+  } catch (error) {
+    // A later subscription superseded this request. Its stream owns the
+    // current state, so this older request must not roll it back.
+    if (subscription.version === version) {
+      subscription.symbolIds.delete(symbolId);
+      subscription.version += 1;
+      if (subscription.symbolIds.size === 0) spotSubscriptions.delete(key);
+    }
+    throw error;
+  }
 }
 
 export async function unsubscribeFromSpots(ctidTraderAccountId: number, symbolId: number, isDemo: boolean = true): Promise<any> {
-  return authenticatedRequest(ctidTraderAccountId, PT.UNSUBSCRIBE_SPOTS_REQ, {
-    ctidTraderAccountId,
-    symbolId: [symbolId],
-  }, isDemo);
+  const key = `${isDemo ? 'demo' : 'live'}:${ctidTraderAccountId}`;
+  const subscription = spotSubscriptions.get(key);
+  if (!subscription) return { ok: true, symbolId };
+  subscription.symbolIds.delete(symbolId);
+  subscription.version += 1;
+  if (subscription.symbolIds.size === 0) {
+    spotSubscriptions.delete(key);
+    spotStreamControllers.get(key)?.abort();
+    spotStreamControllers.delete(key);
+  } else {
+    await startSpotStream(ctidTraderAccountId, isDemo);
+  }
+  return { ok: true, symbolId };
 }
 
 export async function getExpectedMargin(

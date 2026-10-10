@@ -1,18 +1,18 @@
 import React, { useRef, useState } from 'react';
 import {
-  Archive,
   Check,
   CheckSquare,
   Image as ImageIcon,
   Minus,
-  MoreVertical,
   Palette,
   Pin,
   Plus,
   RotateCcw,
   RotateCw,
   Table as TableIcon,
+  Tag,
   Trash2,
+  X,
 } from 'lucide-react';
 import { Note, NoteColor, ColorStyles, ListItem, TableData } from './types';
 import { genId, COLUMN_WIDTH_INC, CANVAS_MIN_WIDTH, CANVAS_MAX_WIDTH } from './shared/constants';
@@ -22,7 +22,7 @@ import TableEditor from './shared/TableEditor';
 import { usePopoverDismiss } from './shared/usePopoverDismiss';
 
 interface CreateAreaProps {
-  onCreate: (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'isArchived' | 'isTrashed' | 'labels'>) => Promise<any> | void;
+  onCreate: (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'isArchived' | 'isTrashed'>) => Promise<any> | void;
   canvasWidth?: number;
   setCanvasWidth?: React.Dispatch<React.SetStateAction<number>>;
 }
@@ -57,8 +57,11 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
 
   const [isPinned, setIsPinned] = useState(false);
   const [color, setColor] = useState<NoteColor>(NoteColor.DEFAULT);
+  const [labels, setLabels] = useState<string[]>([]);
+  const [labelDraft, setLabelDraft] = useState('');
   const [showColorOptions, setShowColorOptions] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<SwitchTarget | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,6 +77,8 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     const blockers: string[] = [];
     if ((target === 'list' || target === 'table') && content.trim()) blockers.push('your note text');
     if ((target === 'text' || target === 'table') && listHasContent) blockers.push('your checklist');
+    // The table was silently thrown away when switching to text/list before.
+    if (target !== 'table' && tableHasContent) blockers.push('your table');
     return blockers;
   };
 
@@ -115,6 +120,8 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     setTableData(undefined);
     setIsPinned(false);
     setColor(NoteColor.DEFAULT);
+    setLabels([]);
+    setLabelDraft('');
     setIsExpanded(false);
     setShowColorOptions(false);
     setPendingSwitch(null);
@@ -129,6 +136,7 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     tableData: TableData | undefined;
     isPinned: boolean;
     color: NoteColor;
+    labels: string[];
   }
 
   const restoreDraft = (draft: DraftSnapshot) => {
@@ -140,13 +148,14 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     setTableData(draft.tableData);
     setIsPinned(draft.isPinned);
     setColor(draft.color);
+    setLabels(draft.labels);
     setShowColorOptions(false);
     setPendingSwitch(null);
     setIsExpanded(true);
   };
 
   const saveAndClose = () => {
-    if (!isExpanded || submitLockRef.current) return;
+    if (!isExpanded || submitLockRef.current || isSaving) return;
 
     const validItems = listItems.filter(item => item.text.trim().length > 0);
     const draft: DraftSnapshot = {
@@ -158,6 +167,7 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
       tableData,
       isPinned,
       color,
+      labels,
     };
 
     if (!(title.trim() || (isList ? validItems.length > 0 : content.trim()) || image || tableHasContent)) {
@@ -166,6 +176,9 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
     }
 
     submitLockRef.current = true;
+    setIsSaving(true);
+    // Collapse right away, but keep the button state honest — restoring the
+    // draft on failure is what makes the "it vanished" bug visible.
     discard();
 
     Promise.resolve(
@@ -177,6 +190,7 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
         isPinned: draft.isPinned,
         color: draft.color,
         image: draft.image,
+        labels: draft.labels,
         tableData: tableHasContent ? draft.tableData : undefined,
       })
     )
@@ -186,6 +200,7 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
       })
       .finally(() => {
         submitLockRef.current = false;
+        setIsSaving(false);
       });
   };
 
@@ -238,10 +253,22 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && !showColorOptions) {
-      setIsExpanded(false);
+    if (e.key === 'Escape' && !showColorOptions && !pendingSwitch) {
+      // Escape on an untouched composer throws it away entirely; a draft with
+      // content just collapses so reopening picks up where the user left off.
+      if (hasContent) setIsExpanded(false);
+      else discard();
     }
   };
+
+  const addLabel = () => {
+    const next = labelDraft.trim().replace(/^#/, '');
+    if (!next) return;
+    setLabels(prev => (prev.some(l => l.toLowerCase() === next.toLowerCase()) ? prev : [...prev, next]));
+    setLabelDraft('');
+  };
+
+  const removeLabel = (label: string) => setLabels(prev => prev.filter(l => l !== label));
 
   return (
     <div className="w-full relative z-10">
@@ -376,10 +403,47 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
               )}
             </div>
 
+            <div className="flex flex-wrap items-center gap-1.5 px-4 pb-1 min-h-[28px]">
+              {labels.map(label => (
+                <span
+                  key={label}
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--notebook-divider)] bg-[var(--notebook-hover)] pl-2 pr-1 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[var(--notebook-text)]"
+                >
+                  <Tag className="w-3 h-3 opacity-60" />
+                  {label}
+                  <button
+                    type="button"
+                    aria-label={`Remove label ${label}`}
+                    onClick={() => removeLabel(label)}
+                    className="p-0.5 rounded-full hover:bg-neutral-600/40 text-[var(--notebook-muted)] hover:text-[var(--notebook-text)] transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              <input
+                id="create-note-label"
+                name="label"
+                aria-label="Add label"
+                type="text"
+                value={labelDraft}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addLabel();
+                  } else if (e.key === 'Backspace' && !labelDraft && labels.length) {
+                    removeLabel(labels[labels.length - 1]);
+                  }
+                }}
+                onBlur={addLabel}
+                placeholder={labels.length ? 'Add label' : 'Add label (optional)'}
+                className="min-w-[120px] flex-1 bg-transparent text-[var(--notebook-text)] placeholder-[var(--notebook-placeholder)] text-xs outline-none py-1"
+              />
+            </div>
+
             <div className="flex justify-between items-center px-2 pb-2">
               <div className="flex gap-0 items-center">
-                <ToolbarButton icon={<BellIcon />} title="Reminders are not configured yet" disabled />
-
                 <div className="relative" ref={colorPickerRef}>
                   <ToolbarButton
                     onClick={() => setShowColorOptions(o => !o)}
@@ -421,8 +485,6 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
                 </div>
 
                 <ToolbarButton onClick={handleImageClick} icon={<ImageIcon className="w-4 h-4" />} title="Add Image" ariaLabel="Add image" />
-                <ToolbarButton icon={<Archive className="w-4 h-4" />} title="Archive becomes available after saving" disabled />
-                <ToolbarButton icon={<MoreVertical className="w-4 h-4" />} title="More actions become available after saving" disabled />
                 <ToolbarButton icon={<CheckSquare className="w-4 h-4" />} title="Toggle checkboxes" ariaLabel="Toggle checklist" onClick={() => requestSwitch(isList ? 'text' : 'list')} />
                 <ToolbarButton icon={<TableIcon className="w-4 h-4" />} title="Add table" ariaLabel="Add table" onClick={() => requestSwitch('table')} />
 
@@ -447,9 +509,10 @@ const CreateArea: React.FC<CreateAreaProps> = ({ onCreate, canvasWidth, setCanva
                 <button
                   type="button"
                   onClick={saveAndClose}
-                  className="px-6 py-2 text-[var(--notebook-text)] font-medium text-sm rounded-md hover:bg-[var(--notebook-hover)] transition-colors"
+                  disabled={isSaving}
+                  className="px-6 py-2 text-[var(--notebook-text)] font-medium text-sm rounded-md hover:bg-[var(--notebook-hover)] transition-colors disabled:opacity-50 disabled:cursor-wait"
                 >
-                  {hasContent ? 'Save note' : 'Close'}
+                  {isSaving ? 'Saving…' : hasContent ? 'Save note' : 'Close'}
                 </button>
               </div>
             </div>
@@ -484,8 +547,6 @@ const ToolbarButton = ({ icon, title, ariaLabel, onClick, disabled, expanded, ha
     {icon}
   </button>
 );
-
-const BellIcon = () => <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>;
 
 export default CreateArea;
 

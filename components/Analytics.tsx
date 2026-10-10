@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Trade, UserProfile, EASession, CashTransaction } from '../types';
 import {
     Info, Activity,
-    Target, LineChart, Shield, X, Printer, Gauge, Zap, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle
+    Target, LineChart, Shield, ShieldCheck, X, Printer, Gauge, Zap, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle
 } from 'lucide-react';
 import { Tooltip } from './ui/Tooltip';
 import { normalizePlan } from '../lib/constants';
@@ -41,8 +41,8 @@ import { TradeGradeDistributionWidget } from './analytics/TradeGradeDistribution
 import { PsychologyAnalyzeLoader, PsychologyAnalyzeEmptyState } from './analytics/PsychologyAnalyzeState';
 import { TimeAnalysisMatrixWidget } from './analytics/TimeAnalysisMatrixWidget';
 import { DetailedStatistics } from './analytics/DetailedStatistics';
-import { PLByPlanAdherenceWidget } from './analytics/PLByPlanAdherenceWidget';
 import { CashTransactionsView } from './analytics/CashTransactionsView';
+import { ComplianceView } from './analytics/compliance/ComplianceView';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { WidgetHelpDrawer } from './ui/WidgetHelpDrawer';
 import { resolveBridgeBackedInitialBalance } from '../lib/bridgeBalance';
@@ -610,9 +610,8 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 </section>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
+            <div className="grid grid-cols-1 gap-6 pb-6">
                 <PLByMindsetWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('plMindset')} />
-                <PLByPlanAdherenceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('plAdherence')} />
             </div>
         </div>
     );
@@ -663,7 +662,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
         }
     };
 
-    const [activeTab, setActiveTab] = useState<'overview' | 'trades' | 'psychology' | 'advanced' | 'comparison' | 'cash' | 'reports' | 'session'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'trades' | 'psychology' | 'advanced' | 'comparison' | 'cash' | 'reports' | 'session' | 'compliance'>('overview');
     const [isHelpDrawerOpen, setIsHelpDrawerOpen] = useState(false);
     const [helpWidgetId, setHelpWidgetId] = useState<string | null>(null);
 
@@ -676,6 +675,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'trades', label: 'Trade Analysis', icon: LineChart },
         { id: 'psychology', label: 'Psychology', icon: Target },
+        { id: 'compliance', label: 'Rules Compliance', icon: ShieldCheck },
         { id: 'session', label: 'Session', icon: Zap },
         { id: 'advanced', label: 'Advanced', icon: Gauge },
         { id: 'comparison', label: 'Reports', icon: Activity },
@@ -796,6 +796,16 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             )}
 
             {activeTab === 'psychology' && renderPsychologyLayout()}
+
+            {activeTab === 'compliance' && (
+                <ComplianceView
+                    trades={completedTrades}
+                    isDarkMode={isDarkMode}
+                    currencySymbol={currencySymbol}
+                    userProfile={userProfile}
+                    onInfoClick={(id) => handleOpenHelp(id)}
+                />
+            )}
 
             {activeTab === 'advanced' && (
                 <div className="space-y-6 pb-20">

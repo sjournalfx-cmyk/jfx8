@@ -398,9 +398,12 @@ export const DrawingLayer = React.memo<DrawingLayerProps>(({
     // Early return if no chart/series
     if (!chart || !series) return null;
 
-    // Use stable container dimensions - prevent layout thrashing
+    // Use stable container dimensions - prevent layout thrashing.
+    // containerWidth excludes the price scale (parent passes width - 60);
+    // plotHeight additionally excludes the bottom date axis.
     const stableContainerWidth = useMemo(() => Math.max(containerWidth, 100), [containerWidth]);
     const stableContainerHeight = useMemo(() => Math.max(containerHeight, 100), [containerHeight]);
+    const plotHeight = useMemo(() => Math.max(stableContainerHeight - 26, 50), [stableContainerHeight]);
 
     // Memoized coordinate converter
     const convertCoordinate = useCoordinateConverter(chart, series);
@@ -410,30 +413,36 @@ export const DrawingLayer = React.memo<DrawingLayerProps>(({
     const renderActiveToolPreview = useCallback(() => {
         if (!mousePos) return null;
 
-        // Select Bar takes absolute precedence and shouldn't be blocked by selected drawings
+        // Select Bar takes absolute precedence and shouldn't be blocked by selected drawings.
+        // Clamped to the plot so the preview never spills onto the price scale.
         if (isSelectBarMode) {
-            return <line x1={mousePos.x} y1={0} x2={mousePos.x} y2={stableContainerHeight} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6,4" />;
+            const previewX = Math.max(0, Math.min(mousePos.x, stableContainerWidth));
+            return <line x1={previewX} y1={0} x2={previewX} y2={plotHeight} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6,4" />;
         }
 
         // Block normal drawing previews if a drawing is already selected
         if (currentDrawing || selectedDrawingId) return null;
 
         const color = "#2962ff";
+        // Clamped to the plot: previews must never spill onto the price scale.
+        const previewX = Math.max(0, Math.min(mousePos.x, stableContainerWidth));
         if (activeTool === 'vertical') {
-            return <line x1={mousePos.x} y1={0} x2={mousePos.x} y2={stableContainerHeight} stroke={color} strokeWidth={1} strokeDasharray="5,5" opacity={0.5} />;
+            return <line x1={previewX} y1={0} x2={previewX} y2={plotHeight} stroke={color} strokeWidth={1} strokeDasharray="5,5" opacity={0.5} />;
         }
         if (activeTool === 'horizontal') {
             return <line x1={0} y1={mousePos.y} x2={stableContainerWidth} y2={mousePos.y} stroke={color} strokeWidth={1} strokeDasharray="5,5" opacity={0.5} />;
         }
         return null;
-    }, [mousePos, currentDrawing, selectedDrawingId, isSelectBarMode, activeTool, stableContainerWidth, stableContainerHeight]);
+    }, [mousePos, currentDrawing, selectedDrawingId, isSelectBarMode, activeTool, stableContainerWidth, plotHeight]);
 
-    // Memoize common props for DrawingItem to prevent unnecessary re-renders
+    // Memoize common props for DrawingItem to prevent unnecessary re-renders.
+    // NOTE: containerHeight is the plot height (date axis excluded) so
+    // vertical lines and ray bounds stop at the plot edge, never on an axis.
     const itemProps = useMemo(() => ({
         selectedDrawingId,
         hoveredDrawingId,
         containerWidth: stableContainerWidth,
-        containerHeight: stableContainerHeight,
+        containerHeight: plotHeight,
         isDarkMode,
         isLocked,
         convertCoordinate,
@@ -448,7 +457,7 @@ export const DrawingLayer = React.memo<DrawingLayerProps>(({
         selectedDrawingId,
         hoveredDrawingId,
         stableContainerWidth,
-        stableContainerHeight,
+        plotHeight,
         isDarkMode,
         isLocked,
         convertCoordinate,
@@ -468,7 +477,12 @@ export const DrawingLayer = React.memo<DrawingLayerProps>(({
             height="100%"
             style={{ pointerEvents: 'none' }}
         >
-            <g style={{ pointerEvents: allowHitTesting ? 'auto' : 'none' }}>
+            <defs>
+                <clipPath id="jfx-plot-clip">
+                    <rect x={0} y={0} width={stableContainerWidth} height={plotHeight} />
+                </clipPath>
+            </defs>
+            <g clipPath="url(#jfx-plot-clip)" style={{ pointerEvents: allowHitTesting ? 'auto' : 'none' }}>
                 {drawings.map(d => (
                     <DrawingItem
                         key={d.id}

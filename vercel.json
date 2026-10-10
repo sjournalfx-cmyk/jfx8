@@ -1,9 +1,17 @@
 {
   "buildCommand": "vite build",
   "installCommand": "npm install",
+  "rewrites": [
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/terms", "destination": "/terms.html" },
+    { "source": "/auth/callback", "destination": "/index.html" }
+  ],
   "functions": {
     "api/**/*.ts": {
       "includeFiles": "node_modules/ws/**"
+    },
+    "api/candles/harvest.ts": {
+      "maxDuration": 60
     }
   },
   "headers": [

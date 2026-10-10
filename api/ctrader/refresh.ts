@@ -1,13 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { persistRotatedCtraderToken } from '../_lib/jfxApiKey.js';
+import { requireUser } from '../_lib/auth.js';
+import { setCtraderRefreshLease } from '../_lib/ctraderTokenLock.js';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 
 function getCredentials() {
   return {
-    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
-    clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '',
+    clientId: process.env.CTRADER_CLIENT_ID || '',
+    clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
   };
 }
 
@@ -26,6 +28,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  const auth = await requireUser(req.headers);
+  if (!auth.ok || !auth.userId) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
   const refreshToken = (req.cookies?.[REFRESH_COOKIE] || '') as string;
   if (!refreshToken) {
     res.status(401).json({ error: 'Missing cTrader session' });
@@ -38,10 +46,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const authHeader = (req.headers['authorization'] || '') as string;
-  const supabaseJwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceKey) {
+    res.status(503).json({ error: 'Database service is required to refresh cTrader securely' });
+    return;
+  }
 
+  let leaseAcquired = false;
   try {
+    leaseAcquired = await setCtraderRefreshLease(supabaseUrl, serviceKey, auth.userId, true);
+    if (!leaseAcquired) {
+      res.setHeader('Retry-After', '1');
+      res.status(503).json({ error: 'ctrader_refresh_in_progress' });
+      return;
+    }
+
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
@@ -84,58 +104,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // persisted nothing, locking out both the web app and API-key trading.
     const accessToken = tokens.accessToken || tokens.access_token;
     const newRefreshToken = tokens.refreshToken || tokens.refresh_token;
-    const expiresIn = tokens.expiresIn || tokens.expires_in;
     if (!accessToken) {
       res.status(502).json({ error: 'cTrader refresh returned no access token' });
       return;
     }
 
-    if (newRefreshToken) {
-      res.setHeader('Set-Cookie', [
-        `${REFRESH_COOKIE}=${encodeURIComponent(String(newRefreshToken))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
-      ]);
-
-      let userId: string | undefined;
-      if (typeof (req.body as any)?.user_id === 'string') userId = (req.body as any).user_id.trim();
-      if (!userId && typeof req.query?.user_id === 'string') userId = (req.query.user_id as string).trim();
-      if (!userId && supabaseJwt) {
-        try {
-          const [, payloadB64] = supabaseJwt.split('.');
-          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-          userId = payload.sub as string | undefined;
-        } catch {}
-      }
-
-      if (userId) {
-        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-        try {
-          await persistRotatedCtraderToken({
-            supabaseUrl,
-            serviceKey,
-            userId,
-            newRefreshToken: String(newRefreshToken),
-          });
-          console.log(`[cTrader] Refresh: persisted rotated token for user ${userId}`);
-        } catch (e: any) {
-          console.error('[cTrader] Refresh: failed to persist token', e?.message);
-        }
-      }
+    if (!newRefreshToken) {
+      res.status(502).json({ error: 'cTrader refresh returned no replacement refresh token' });
+      return;
     }
 
-    // Both casings so every client (and the dev mirror) reads the fields.
-    res.json({
-      access_token: accessToken,
-      expires_in: expiresIn,
-      refresh_token: newRefreshToken,
-      accessToken,
-      expiresIn,
-      refreshToken: newRefreshToken,
-    });
+    try {
+      await persistRotatedCtraderToken({
+        supabaseUrl,
+        serviceKey,
+        userId: auth.userId,
+        newRefreshToken: String(newRefreshToken),
+        previousToken: refreshToken,
+        newAccessToken: String(accessToken),
+        accessTokenExpiresAt: new Date(Date.now() + (Number.isFinite(Number(tokens.expiresIn || tokens.expires_in)) ? Math.max(60, Number(tokens.expiresIn || tokens.expires_in)) : 300) * 1000).toISOString(),
+      });
+    } catch (error) {
+      console.error('[cTrader] Refresh: failed to persist token', error);
+      res.status(503).json({ error: 'Could not securely rotate the cTrader connection. Please reconnect.' });
+      return;
+    }
+
+    res.setHeader('Set-Cookie', [
+      `${REFRESH_COOKIE}=${encodeURIComponent(String(newRefreshToken))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
+    ]);
+
+    res.json({ ok: true });
   } catch (err) {
     console.error('cTrader refresh error:', err);
     res.status(500).json({
       error: err instanceof Error ? err.message : 'Unexpected error during token refresh',
     });
+  } finally {
+    if (leaseAcquired) {
+      await setCtraderRefreshLease(supabaseUrl, serviceKey, auth.userId, false).catch(() => undefined);
+    }
   }
 }

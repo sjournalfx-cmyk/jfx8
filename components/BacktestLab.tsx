@@ -481,8 +481,10 @@ useEffect(() => {
             const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
             if (!account) return null;
             // Inclusive fromTimestamp so the still-open live bar gets its
-            // final values; 300 bars comfortably covers any short absence.
-            const fresh = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 300, account.isDemo, 2, meta.lastTime * 1000);
+            // final values. 1000 bars per top-up so even a weeks-long absence
+            // heals in a couple of opens and the replay count grows every
+            // fetch until the 2000-bar store cap.
+            const fresh = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 1000, account.isDemo, 2, meta.lastTime * 1000);
             const existing = loadSeries(sym, tf) || [];
             const merged = mergeBars(existing, fresh);
             if (merged.length === 0) return null;
@@ -732,7 +734,7 @@ setAllData(validData);
                 addToast({
                     type: 'error',
                     title: 'MT5 Sync Failed',
-                    message: 'MT5 Bridge is offline. Start the JournalFX Bridge app to sync live data.'
+                    message: 'MT5 Bridge is offline. Start the JFX-JOURNAL Bridge app to sync live data.'
                 });
             }
         } finally {
@@ -792,7 +794,13 @@ setAllData(validData);
             if (!hasCustomFilter) {
                 const toppedShared = await topUpSharedSeries(activeSymbol, activeTF);
                 if (seq !== activeFetchSeqRef.current) return;
-                if (toppedShared && toppedShared.added > 0) {
+                // A successful top-up is authoritative: merged is the union of
+                // stored + fresh bars, so the replay count can only grow (or
+                // stay at the 2000-bar cap). Serve it even when added === 0
+                // (live-bar-only update) instead of re-downloading the full
+                // series for zero gain. Null means nothing stored / fetch
+                // failed → fall through to the full load below.
+                if (toppedShared) {
                     setAllData(toppedShared.merged);
                     setCurrentIdx(prev => Math.min(prev, toppedShared.merged.length - 1));
                     setDataSource('ctrader');
@@ -861,7 +869,10 @@ setAllData(validData);
             if (!hasCustomFilter) {
                 const topped = await topUpCtraderSeries(activeSymbol, activeTF);
                 if (seq !== activeFetchSeqRef.current) return;
-                if (topped && topped.added > 0) {
+                // Same authoritative-merge contract as the shared path: the
+                // merged union can only grow the replay count, so serve it
+                // whenever the top-up succeeded (null = nothing stored/failed).
+                if (topped) {
                     candles = topped.merged;
                     incremental = true;
                     addedCount = topped.added;
@@ -942,13 +953,13 @@ setAllData(validData);
                 window.setTimeout(() => backfillCtraderTimeframes(activeSymbol), 1200);
             }
 
-            if (incremental) {
+            if (incremental && addedCount > 0) {
                 addToast({
                     type: 'info',
                     title: 'History Synced',
                     message: `Added ${addedCount} new bar${addedCount === 1 ? '' : 's'} to ${activeSymbol} ${activeTF}.`
                 });
-            } else {
+            } else if (!incremental) {
                 const firstDate = candles[0]?.time ? new Date(candles[0].time * 1000).toLocaleDateString() : '';
                 const lastDate = candles[candles.length - 1]?.time ? new Date(candles[candles.length - 1].time * 1000).toLocaleDateString() : '';
                 const rangeStr = firstDate && lastDate ? ` (${firstDate} – ${lastDate})` : '';
@@ -1794,11 +1805,11 @@ setAllData(validData);
                             {isTFMenuOpen && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setIsTFMenuOpen(false)} />
-                                    <div className={`absolute top-full left-0 mt-2 w-48 border rounded-2xl shadow-2xl p-2 z-[100] ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
+                                    <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-2 w-16 border rounded-2xl shadow-2xl p-1.5 z-[100] ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
                                         {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
-                                            <button key={tf} onClick={() => { setTimeframe(tf); setIsTFMenuOpen(false); handleFetchActiveSourceData(undefined, tf); }} className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-left ${timeframe === tf ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
-                                                <span className="text-sm font-black">{tf}</span>
-                                                {timeframe === tf && <Check size={14} className="text-white" />}
+                                            <button key={tf} onClick={() => { setTimeframe(tf); setIsTFMenuOpen(false); handleFetchActiveSourceData(undefined, tf); }} className={`w-full flex items-center justify-center gap-1 px-1 py-2 rounded-xl ${timeframe === tf ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
+                                                <span className="text-[11px] font-black">{tf}</span>
+                                                {timeframe === tf && <Check size={12} className="text-white shrink-0" />}
                                             </button>
                                         ))}
                                     </div>
@@ -1819,6 +1830,26 @@ setAllData(validData);
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                         Shared History
                     </div>
+                    {/* Series freshness: the shared store refreshes a bounded
+                        batch per harvest tick, so an individual series can lag
+                        days/weeks behind live. Show the last bar's date so a
+                        stale chart never passes as current. */}
+                    {allData.length > 0 && (() => {
+                        const lastT = allData[allData.length - 1]?.time ?? 0;
+                        const ageSec = Date.now() / 1000 - lastT;
+                        const stale = ageSec > 2 * 24 * 3600;
+                        const label = lastT > 0
+                            ? new Date(lastT * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                            : '—';
+                        return (
+                            <div
+                                title={`Last bar: ${lastT > 0 ? new Date(lastT * 1000).toLocaleString() : 'unknown'} (${allData.length} bars). Refresh the harvest queue if this lags live prices.`}
+                                className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest hidden sm:flex items-center gap-1.5 border ${stale ? 'bg-amber-500/15 border-amber-500/40 text-amber-500' : isDarkMode ? 'bg-white/5 border-white/10 text-zinc-400' : 'bg-white border-slate-200 text-slate-500'}`}
+                            >
+                                as of {label}
+                            </div>
+                        );
+                    })()}
                 </div>
 
                 <div className="flex items-center gap-4 justify-end">
@@ -1912,7 +1943,7 @@ setAllData(validData);
                             onViewStateChange={handleViewStateChange}
                             initialViewState={chartViewState}
                             disablePan={activeTool !== 'cursor'}                        >
-                            <DrawingLayer drawings={drawings} currentDrawing={currentDrawing} selectedDrawingId={selectedDrawingId} hoveredDrawingId={hoveredDrawingId} mousePos={mousePos} chart={chartRef.current} series={candlestickSeriesRef.current} containerWidth={dimensions.width} containerHeight={dimensions.height} activeTool={activeTool} isSelectBarMode={isSelectBarMode} onMouseDownHandle={handleMouseDownHandle} onSelectDrawing={setSelectedDrawingId} onHoverDrawing={setHoveredDrawingId} onContextMenuDrawing={handleContextMenuDrawing} tick={tick} isLocked={isLocked} isDarkMode={isDarkMode} />
+                            <DrawingLayer drawings={drawings} currentDrawing={currentDrawing} selectedDrawingId={selectedDrawingId} hoveredDrawingId={hoveredDrawingId} mousePos={mousePos} chart={chartRef.current} series={candlestickSeriesRef.current} containerWidth={dimensions.width - 60 /* price-scale width (CustomChart PADDING_RIGHT) — overlay must stop at the plot edge */} containerHeight={dimensions.height} activeTool={activeTool} isSelectBarMode={isSelectBarMode} onMouseDownHandle={handleMouseDownHandle} onSelectDrawing={setSelectedDrawingId} onHoverDrawing={setHoveredDrawingId} onContextMenuDrawing={handleContextMenuDrawing} tick={tick} isLocked={isLocked} isDarkMode={isDarkMode} />
                         </CustomChart>
                     </ChartErrorBoundary>
 

@@ -15,12 +15,14 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   const state = req.query.state as string | undefined;
 
   if (state === NATIVE_STATE && code) {
-    res.setHeader('Location', `${NATIVE_DEEP_LINK}?code=${encodeURIComponent(code)}`);
+    res.setHeader('Location', `${NATIVE_DEEP_LINK}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`);
     res.status(302).end();
     return;
   }
 
-  const target = code ? `/?code=${encodeURIComponent(code)}` : '/';
+  const target = code
+    ? `/?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`
+    : '/';
 
   res.setHeader('Location', target);
   res.status(302).end();

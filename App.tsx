@@ -5,7 +5,10 @@ import LogTrade from './components/LogTrade';
 import Dashboard from './components/Dashboard';
 import Journal from './components/Journal';
 import Auth from './components/Auth';
+import AuthCallback from './components/AuthCallback';
 import BetaSplash from './components/BetaSplash';
+import PublicHome from './components/PublicHome';
+import { PrivacyPolicy, TermsOfService } from './components/LegalPages';
 
 import { Trade, Note, DailyBias, UserProfile } from './types';
 import Onboarding from './components/Onboarding';
@@ -60,6 +63,22 @@ const AppContent: React.FC = () => {
   });
 
   const [currentMigrationVersion] = useState('v20250201.1');
+  // Logged-out visitors see the public landing page first; auth form on demand.
+  const [showAuth, setShowAuth] = useState(false);
+
+  // Public paths: no login, no splash, no mobile blocker, no onboarding.
+  // (Canonical /privacy + /terms are static HTML via vercel rewrites; these
+  // in-app views cover client-side navigation and non-rewritten hosts.)
+  const publicPath = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const isAuthCallbackPath = publicPath === '/auth/callback';
+
+  useEffect(() => {
+    if (publicPath === '/privacy') {
+      document.title = 'Privacy Policy | JFX-JOURNAL';
+    } else if (publicPath === '/terms') {
+      document.title = 'Terms of Service | JFX-JOURNAL';
+    }
+  }, [publicPath]);
 
   const {
     userId,
@@ -87,8 +106,12 @@ const AppContent: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // Supabase Google OAuth returns to /auth/callback?code= — handled by
+    // AuthCallback, never by the cTrader exchange below.
+    if (window.location.pathname === '/auth/callback') return;
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
+    const state = params.get('state');
     if (!code || params.has('ctrader_ready')) return;
 
     // ─── CRITICAL: clear the URL synchronously BEFORE the async import ───────
@@ -104,7 +127,7 @@ const AppContent: React.FC = () => {
       let ok = false;
       let errDetail = '';
       try {
-        const result = await exchangeCode(code);
+        const result = await exchangeCode(code, state);
         if (typeof result === 'object' && result !== null) {
           ok = (result as any).ok === true;
           errDetail = (result as any).error || '';
@@ -399,13 +422,16 @@ const {
     }
   }, [currentView, isDemoMode]);
 
-  // Auto-enable demo mode for new users (onboarded with no trades)
+  // Auto-enable demo mode for new users (onboarded with no trades).
+  // Gated behind load completion so a slow first fetch never flips real
+  // users into sample data (which hides the real journal).
   useEffect(() => {
+    if (isInitialLoading || isDataLoading) return;
     const storedDemo = localStorage.getItem('jfx_demo_mode');
     if (isAuthenticated && userProfile?.onboarded && trades.length === 0 && storedDemo === null) {
       setIsDemoMode(true);
     }
-  }, [isAuthenticated, userProfile?.onboarded, trades.length, setIsDemoMode, isDemoMode]);
+  }, [isAuthenticated, userProfile?.onboarded, trades.length, setIsDemoMode, isDemoMode, isInitialLoading, isDataLoading]);
 
   const blockDemoAction = (title: string, message = 'Demo mode is read-only. Switch back to your real journal to make changes.') => {
     addToast({
@@ -431,7 +457,7 @@ const {
     cancelText?: string;
     variant?: 'danger' | 'warning' | 'info';
     showCancel?: boolean;
-    onConfirm: () => void;
+    onConfirm: () => void | Promise<void>;
   }>({
     isOpen: false,
     title: '',
@@ -479,6 +505,13 @@ const {
         const newTrade = await dataService.addTrade(trade);
         setTrades(prev => [newTrade, ...prev.filter(t => t.id !== newTrade.id)]);
         dataService.logActivity('ADD_TRADE', { pair: newTrade.pair, pnl: newTrade.pnl });
+        addToast({
+          type: 'success',
+          title: 'Trade Logged',
+          message: `${newTrade.pair || 'Trade'} saved to your journal.`,
+          duration: 5000,
+          action: { label: 'View', onClick: () => setCurrentView('history') },
+        });
       }
       setCurrentView('history');
     } catch (error) {
@@ -489,10 +522,10 @@ const {
           setTrades(prev => prev.map(t => t.id === trade.id ? previousTrade : t));
         }
       }
-      
+
       // Check if it's a network/connectivity error
-      const isNetworkError = !navigator.onLine || 
-        error instanceof TypeError || 
+      const isNetworkError = !navigator.onLine ||
+        error instanceof TypeError ||
         (error as any).code === 'FETCH_ERROR' ||
         (error as any).message?.includes('Failed to fetch');
 
@@ -502,10 +535,11 @@ const {
         return;
       }
 
+      const errMsg = (error as any)?.message || 'Failed to save trade. Please try again.';
       setConfirmModal({
         isOpen: true,
         title: 'Error',
-        description: 'Failed to save trade. Please try again.',
+        description: errMsg,
         confirmText: 'OK',
         variant: 'danger',
         showCancel: false,
@@ -529,6 +563,44 @@ const {
       return;
     }
     try {
+      const currentPlan = normalizePlan(userProfile?.plan);
+      const features = PLAN_FEATURES[currentPlan] || PLAN_FEATURES[APP_CONSTANTS.PLANS.FREE];
+      if (userId && features.maxTradesPerMonth !== Infinity) {
+        // Re-importing a broker export should be a harmless no-op. Do not
+        // count ticketed rows already present in the local journal (or repeat
+        // tickets within the same file) against the monthly plan allowance.
+        const knownTickets = new Set(trades.map(trade => trade.ticketId).filter(Boolean));
+        const importTickets = new Set<string>();
+        const tradesForLimit = newTrades.filter(trade => {
+          if (!trade.ticketId) return true;
+          if (knownTickets.has(trade.ticketId) || importTickets.has(trade.ticketId)) return false;
+          importTickets.add(trade.ticketId);
+          return true;
+        });
+        const importsByMonth = new Map<string, number>();
+        for (const trade of tradesForLimit) {
+          const month = String(trade.date || '').slice(0, 7);
+          if (/^\d{4}-\d{2}$/.test(month)) {
+            importsByMonth.set(month, (importsByMonth.get(month) || 0) + 1);
+          }
+        }
+
+        const counts = await Promise.all(Array.from(importsByMonth.entries()).map(async ([month, imported]) => {
+          const [year, monthNumber] = month.split('-').map(Number);
+          return { month, imported, existing: await dataService.getMonthlyTradeCount(userId, year, monthNumber) };
+        }));
+        const overLimit = counts.find(({ imported, existing }) => existing + imported > features.maxTradesPerMonth);
+        if (overLimit) {
+          addToast({
+            type: 'error',
+            title: 'Import exceeds monthly limit',
+            message: `${overLimit.month} would exceed your ${features.maxTradesPerMonth}-trade ${currentPlan} limit.`,
+            duration: 7000,
+          });
+          return;
+        }
+      }
+
       const addedTrades = await dataService.batchAddTrades(newTrades);
       setTrades(prev => {
         const existingIds = new Set(prev.map(t => t.id));
@@ -552,6 +624,8 @@ const {
     }
   };
 
+  const LIGHT_EDIT_FIELDS = ['notes', 'exitComment', 'rating', 'tags'];
+
   const handleUpdateTrade = async (updatedTrade: Trade) => {
     if (isDemoMode) {
       blockDemoAction('Cannot update trade');
@@ -562,20 +636,36 @@ const {
       ? Object.keys(updatedTrade).filter(key => updatedTrade[key as keyof Trade] !== previousTrade[key as keyof Trade])
       : [];
     const isCommentOnlyUpdate = changedFields.length > 0 && changedFields.every(key => key === 'notes' || key === 'exitComment');
+    const isLightUpdate = changedFields.length > 0 && changedFields.every(key => LIGHT_EDIT_FIELDS.includes(key));
 
-    if (isCommentOnlyUpdate) {
-      setTrades(prev => prev.map(t => t.id === updatedTrade.id ? updatedTrade : t));
-    }
+    // Optimistic for ALL edits so the UI never freezes behind the network.
+    setTrades(prev => prev.map(t => t.id === updatedTrade.id ? updatedTrade : t));
     try {
       const savedTrade = isCommentOnlyUpdate
         ? await dataService.updateTradeComments(updatedTrade.id, updatedTrade.notes, updatedTrade.exitComment)
-        : await dataService.updateTrade(updatedTrade);
+        : isLightUpdate
+          ? await dataService.updateTradeFields(updatedTrade.id, {
+              notes: updatedTrade.notes,
+              exitComment: updatedTrade.exitComment,
+              rating: updatedTrade.rating,
+              tags: updatedTrade.tags,
+            })
+          : await dataService.updateTrade(updatedTrade);
       setTrades(prev => prev.map(t => t.id === savedTrade.id ? savedTrade : t));
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating trade:", error);
       if (previousTrade) {
         setTrades(prev => prev.map(t => t.id === updatedTrade.id ? previousTrade : t));
       }
+      const msg = String(error?.message || '');
+      addToast({
+        type: 'error',
+        title: 'Update Failed',
+        message: msg.includes('another tab')
+          ? 'This trade changed elsewhere. Reloaded the newest version — please re-apply your edit.'
+          : 'Could not save your changes. Please try again.',
+        duration: 6000,
+      });
     }
   };
 
@@ -616,10 +706,11 @@ const {
       variant: 'danger',
       onConfirm: async () => {
         const removedTrades = trades.filter(t => tradeIds.includes(t.id));
+        // Optimistic: rows vanish instantly, modal closes immediately.
+        setTrades(prev => prev.filter(t => !tradeIds.includes(t.id)));
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
         try {
           await dataService.deleteTrades(tradeIds);
-          setTrades(prev => prev.filter(t => !tradeIds.includes(t.id)));
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
           dataService.logActivity('DELETE_TRADES', { count: tradeIds.length, ids: tradeIds });
 
           addToast({
@@ -655,10 +746,17 @@ const {
           });
         } catch (error) {
           console.error("Error deleting trades:", error);
+          // Rollback so a failed delete never looks like data loss.
+          setTrades(prev => {
+            const existingIds = new Set(prev.map(t => t.id));
+            return [...removedTrades.filter(t => !existingIds.has(t.id)), ...prev]
+              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          });
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
           addToast({
             type: 'error',
             title: 'Delete Failed',
-            message: 'An error occurred while deleting trades.'
+            message: 'Could not delete trades. They have been restored — please try again.'
           });
         }
       }
@@ -723,8 +821,10 @@ const {
       blockDemoAction('Cannot add note');
       return undefined;
     }
-    // Optimistic update with temp ID
-    const tempId = `temp-${Date.now()}`;
+    // Optimistic update with temp ID (crypto.randomUUID needs a secure context)
+    const tempId = `temp-${typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`}`;
     const optimisticNote = { ...note, id: tempId };
     setNotes(prev => [optimisticNote, ...prev]);
 
@@ -741,19 +841,61 @@ const {
     }
   };
 
-  const handleUpdateNote = async (note: Note) => {
+  // Optimistic-concurrency bookkeeping for notes.
+  //
+  // `updateNote` refuses to write when `updated_at` no longer matches, which is
+  // exactly what a real cross-tab edit looks like — but overlapping saves from
+  // the autosave queue also produced stale revisions and a false
+  // "updated in another tab" error. Updates are therefore serialised per note
+  // and the revision is re-read at execution time, never capture time.
+  const noteRevisionRef = useRef<Map<string, string | undefined>>(new Map());
+  const noteChainRef = useRef<Map<string, Promise<unknown>>>(new Map());
+
+  const getNoteRevision = (noteId: string): string | undefined => {
+    if (noteRevisionRef.current.has(noteId)) return noteRevisionRef.current.get(noteId);
+    return notes.find(n => n.id === noteId)?.updatedAt;
+  };
+
+  const runNoteMutation = <T,>(noteId: string, mutation: () => Promise<T>): Promise<T> => {
+    const previous = noteChainRef.current.get(noteId) ?? Promise.resolve();
+    const task = previous.catch(() => undefined).then(mutation);
+    noteChainRef.current.set(noteId, task);
+    return task.finally(() => {
+      if (noteChainRef.current.get(noteId) === task) noteChainRef.current.delete(noteId);
+    });
+  };
+
+  const handleUpdateNote = async (note: Partial<Note> & { id: string }) => {
     if (isDemoMode) {
       blockDemoAction('Cannot update note');
       return;
     }
-    // Optimistic update
-    setNotes(prev => prev.map(n => n.id === note.id ? { ...n, ...note } : n));
-    try {
-      await dataService.updateNote(note);
-    } catch (error) {
-      console.error("Error updating note:", error);
-      // Rollback would be nice but typically Realtime sync handles it
-    }
+    return runNoteMutation(note.id, async () => {
+      const payload: Partial<Note> & { id: string } = {
+        ...note,
+        updatedAt: getNoteRevision(note.id),
+      };
+      // Optimistic update — capture the real previous row inside the setter so
+      // the rollback never depends on a stale render closure.
+      let previousNote: Note | undefined;
+      setNotes(prev => {
+        previousNote = prev.find(n => n.id === payload.id);
+        return prev.map(n => n.id === payload.id ? { ...n, ...payload } : n);
+      });
+      try {
+        const savedNote = await dataService.updateNote(payload);
+        noteRevisionRef.current.set(savedNote.id, savedNote.updatedAt);
+        setNotes(prev => prev.map(n => n.id === savedNote.id ? savedNote : n));
+        return savedNote;
+      } catch (error) {
+        console.error("Error updating note:", error);
+        if (previousNote) {
+          const rollback = previousNote;
+          setNotes(prev => prev.map(n => n.id === payload.id ? rollback : n));
+        }
+        throw error;
+      }
+    });
   };
 
   const handleDeleteNote = async (noteId: string) => {
@@ -776,20 +918,26 @@ const {
       confirmText: 'Delete',
       variant: 'danger',
       onConfirm: async () => {
+        // Move in place — filtering the note out first made it vanish from the
+        // UI entirely when the write failed (or while offline).
+        const trashedNote = { ...noteToDelete, isTrashed: true };
+        setNotes(prev => prev.map(n => n.id === noteId ? trashedNote : n));
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
         try {
-          // Optimistic update
-          setNotes(prev => prev.filter(n => n.id !== noteId));
-          const updatedNote = { ...noteToDelete, isTrashed: true };
-          await dataService.updateNote(updatedNote);
-          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+          const saved = await runNoteMutation(noteId, () =>
+            dataService.updateNote({ ...trashedNote, updatedAt: getNoteRevision(noteId) })
+          );
+          if (saved)           noteRevisionRef.current.set(noteId, saved.updatedAt);
           addToast({
             type: 'success',
             title: 'Note Deleted',
             message: 'Note has been moved to trash.',
-            duration: 5000
+            duration: 8000,
+            action: { label: 'Undo', onClick: () => void handleRestoreNote(noteId) },
           });
         } catch (error) {
           console.error("Error deleting note:", error);
+          setNotes(prev => prev.map(n => n.id === noteId ? noteToDelete : n));
           addToast({
             type: 'error',
             title: 'Delete Failed',
@@ -808,11 +956,15 @@ const {
     const noteToRestore = notes.find(n => n.id === noteId);
     if (!noteToRestore) return;
 
+    const restored = { ...noteToRestore, isTrashed: false };
+    // Optimistic update
+    setNotes(prev => prev.map(n => n.id === noteId ? (restored as Note) : n));
+
     try {
-      // Optimistic update
-      const updatedNote = { ...noteToRestore, isTrashed: false };
-      setNotes(prev => prev.map(n => n.id === noteId ? (updatedNote as Note) : n));
-      await dataService.updateNote(updatedNote as Note);
+      const saved = await runNoteMutation(noteId, () =>
+        dataService.updateNote({ ...restored, updatedAt: getNoteRevision(noteId) })
+      );
+      if (saved) noteRevisionRef.current.set(noteId, saved.updatedAt);
       addToast({
         type: 'success',
         title: 'Note Restored',
@@ -821,7 +973,26 @@ const {
       });
     } catch (error) {
       console.error("Error restoring note:", error);
+      setNotes(prev => prev.map(note => note.id === noteId ? noteToRestore : note));
+      addToast({
+        type: 'error',
+        title: 'Restore Failed',
+        message: 'Your note could not be restored. Please try again.',
+      });
     }
+  };
+
+  // Reorder writes happen straight through dataService (one UPDATE per row),
+  // so this only mirrors the result locally and refreshes each note's revision
+  // — otherwise the next autosave would trip the stale-revision guard.
+  const handleReorderNotes = (rows: { id: string; position: number; updatedAt?: string }[]) => {
+    const byId = new Map(rows.map(r => [r.id, r]));
+    setNotes(prev => prev.map(n => {
+      const row = byId.get(n.id);
+      if (!row) return n;
+      if (row.updatedAt) noteRevisionRef.current.set(n.id, row.updatedAt);
+      return { ...n, position: row.position, updatedAt: row.updatedAt ?? n.updatedAt };
+    }));
   };
 
   const handleDeleteNoteForever = async (noteId: string) => {
@@ -848,6 +1019,7 @@ const {
           });
         } catch (error) {
           console.error("Error deleting note forever:", error);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
           addToast({
             type: 'error',
             title: 'Delete Failed',
@@ -909,15 +1081,47 @@ const onLogout = async () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  if (publicPath === '/privacy') {
+    return <PrivacyPolicy />;
+  }
+
+  if (publicPath === '/terms') {
+    return <TermsOfService />;
+  }
+
+  if (isAuthCallbackPath) {
+    return (
+      <AuthCallback
+        onSuccess={async () => {
+          setIsInitialLoading(true);
+          try {
+            const user = await authService.getCurrentUser();
+            if (user) {
+              setUserId(user.id);
+              setUserEmail(user.email || '');
+              await loadUserData(user.id);
+              setIsAuthenticated(true);
+              posthog.identify(user.id, { email: user.email || '' });
+            }
+          } catch (error) {
+            console.error('OAuth login data load failed:', error);
+          } finally {
+            window.history.replaceState({}, '', '/');
+            setIsInitialLoading(false);
+          }
+        }}
+      />
+    );
+  }
+
   if (isInitialLoading) {
     return <BrandedLoader />;
   }
 
-  if (isMobile) {
-    return <MobileBlocker isDarkMode={isDarkMode} />;
-  }
-
   if (!isAuthenticated) {
+    if (!showAuth) {
+      return <PublicHome onSignUp={() => setShowAuth(true)} onLogIn={() => setShowAuth(true)} />;
+    }
     return (
       <Auth
         isDarkMode={isDarkMode}
@@ -957,6 +1161,10 @@ const onLogout = async () => {
         }}
       />
     );
+  }
+
+  if (isMobile) {
+    return <MobileBlocker isDarkMode={isDarkMode} />;
   }
 
   if (!userProfile || !userProfile.onboarded) {
@@ -1017,7 +1225,7 @@ const onLogout = async () => {
     return tMonth === month && tYear === year;
   }).length;
 
-  const totalNotes = activeNotes.length;
+  const totalNotes = activeNotes.filter(n => !n.isTrashed).length;
   const totalImages = activeTrades.reduce((acc, t) => {
     let count = 0;
     if (t.beforeScreenshot) count++;
@@ -1181,6 +1389,7 @@ const onLogout = async () => {
                 onUpdateNote={handleUpdateNote}
                 onDeleteNote={handleDeleteNote}
                 onRestoreNote={handleRestoreNote}
+                onReorderNotes={handleReorderNotes}
                 userProfile={activeUserProfile}
                 onViewChange={setCurrentView}
                 isDemoMode={isDemoMode}

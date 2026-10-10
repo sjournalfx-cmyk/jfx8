@@ -13,7 +13,6 @@ import { SymbolPerformanceWidget } from './SymbolPerformanceWidget';
 import { DrawdownOverTimeWidget } from './DrawdownOverTimeWidget';
 import { TiltScoreWidget } from './TiltScoreWidget';
 import { PLByMindsetWidget } from './PLByMindsetWidget';
-import { PLByPlanAdherenceWidget } from './PLByPlanAdherenceWidget';
 import { StrategyPerformancePieChart } from './StrategyPerformancePieChart';
 import { OutcomeDistributionWidget } from './OutcomeDistributionWidget';
 import { DetailedStatistics } from './DetailedStatistics';
@@ -309,15 +308,6 @@ export const ReportView: React.FC<ReportViewProps> = ({
                         </div>
                     </div>
                 )}
-
-                {isVisible('plAdherence') && (
-                    <div className="avoid-break">
-                        <h3 className="text-sm font-black uppercase tracking-widest mb-4 opacity-60">Plan Adherence vs P/L</h3>
-                        <div className="h-[300px] p-6 border-2 border-black rounded-[32px]">
-                            <PLByPlanAdherenceWidget trades={trades} isDarkMode={false} currencySymbol={currencySymbol} />
-                        </div>
-                    </div>
-                )}
             </div>
 
             <div className="page-break" />
@@ -365,7 +355,7 @@ export const ReportView: React.FC<ReportViewProps> = ({
 
             {/* Footer */}
             <div className="mt-20 border-t-2 border-black pt-8 flex justify-between items-center text-[10px] font-black uppercase tracking-[0.3em]">
-                <div>JournalFX Analytics Engine v2.0</div>
+                <div>JFX-JOURNAL Analytics Engine v2.0</div>
                 <div className="opacity-40">{new Date().getFullYear()} © All Rights Reserved</div>
             </div>
         </div>

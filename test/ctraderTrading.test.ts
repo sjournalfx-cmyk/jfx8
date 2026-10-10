@@ -1,8 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { access_token: 'mock_session_jwt', user: { id: 'user-1' } } },
+      }),
+    },
+  },
+}));
+
 import * as ctraderService from '../services/ctraderService';
 
 vi.stubEnv('VITE_CTRADER_CLIENT_ID', 'test_client_id');
-vi.stubEnv('VITE_CTRADER_CLIENT_SECRET', 'test_client_secret');
 
 class MockWebSocket {
   url: string;
@@ -52,12 +62,14 @@ class MockWebSocket {
 
 vi.stubGlobal('WebSocket', MockWebSocket);
 
+function latestProxyPayload() {
+  const fetchMock = globalThis.fetch as any;
+  const [, init] = fetchMock.mock.calls.at(-1);
+  return JSON.parse(String(init.body));
+}
+
 describe('cTrader Trade Operations', () => {
   beforeEach(() => {
-    ctraderService.__setTokensForTesting({
-      accessToken: 'mock_access_token',
-      expiresAt: Date.now() + 60000,
-    });
     MockWebSocket.lastInstance = null;
     MockWebSocket.sentMessages = [];
     MockWebSocket.mockResponses = {
@@ -69,6 +81,13 @@ describe('cTrader Trade Operations', () => {
       [2110]: { positionId: 5001 }, // AMEND_POSITION_SLTP_REQ
       [2111]: { positionId: 5001 }, // CLOSE_POSITION_REQ
     };
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      return {
+        ok: true,
+        json: async () => ({ ok: true, result: MockWebSocket.mockResponses[request.payloadType] || {} }),
+      };
+    }));
   });
 
   afterEach(() => {
@@ -86,16 +105,15 @@ describe('cTrader Trade Operations', () => {
 
     expect(res).toEqual({ orderId: 9001 });
 
-    const orderReq = MockWebSocket.sentMessages.find(m => m.payloadType === 2106);
-    expect(orderReq).toBeDefined();
-    expect(orderReq?.payload.ctidTraderAccountId).toBe(1001);
-    expect(orderReq?.payload.symbolId).toBe(1);
-    expect(orderReq?.payload.tradeSide).toBe(1); // 1 = BUY
-    expect(orderReq?.payload.orderType).toBe(1); // 1 = MARKET
-    expect(orderReq?.payload.volume).toBe(500000); // 0.05 lots = 500,000 cent-units
-    expect(orderReq?.payload.stopLoss).toBe(1.0750);
-    expect(orderReq?.payload.takeProfit).toBe(1.0950);
-    expect(orderReq?.payload.comment).toBe('AI Test Trade');
+    const request = latestProxyPayload();
+    expect(request).toMatchObject({ action: 'proxy', ctidTraderAccountId: 1001, payloadType: 2106 });
+    expect(request.payload.symbolId).toBe(1);
+    expect(request.payload.tradeSide).toBe(1); // 1 = BUY
+    expect(request.payload.orderType).toBe(1); // 1 = MARKET
+    expect(request.payload.volume).toBe(500000); // 0.05 lots = 500,000 cent-units
+    expect(request.payload.stopLoss).toBe(1.0750);
+    expect(request.payload.takeProfit).toBe(1.0950);
+    expect(request.payload.comment).toBe('AI Test Trade');
   });
 
   it('opens a limit SELL order', async () => {
@@ -105,24 +123,22 @@ describe('cTrader Trade Operations', () => {
       isDemo: true,
     });
 
-    const orderReq = MockWebSocket.sentMessages.find(m => m.payloadType === 2106);
-    expect(orderReq).toBeDefined();
-    expect(orderReq?.payload.tradeSide).toBe(2); // 2 = SELL
-    expect(orderReq?.payload.orderType).toBe(2); // 2 = LIMIT
-    expect(orderReq?.payload.volume).toBe(1000000); // 0.1 lots = 1,000,000 cent-units
-    expect(orderReq?.payload.limitPrice).toBe(1.2850);
-    expect(orderReq?.payload.stopLoss).toBe(1.2900);
+    const request = latestProxyPayload();
+    expect(request.payload.tradeSide).toBe(2); // 2 = SELL
+    expect(request.payload.orderType).toBe(2); // 2 = LIMIT
+    expect(request.payload.volume).toBe(1000000); // 0.1 lots = 1,000,000 cent-units
+    expect(request.payload.limitPrice).toBe(1.2850);
+    expect(request.payload.stopLoss).toBe(1.2900);
   });
 
   it('closes a position (partial or full)', async () => {
     const res = await ctraderService.closePosition(1001, 5001, 0.02, true);
     expect(res).toEqual({ positionId: 5001 });
 
-    const closeReq = MockWebSocket.sentMessages.find(m => m.payloadType === 2111);
-    expect(closeReq).toBeDefined();
-    expect(closeReq?.payload.ctidTraderAccountId).toBe(1001);
-    expect(closeReq?.payload.positionId).toBe(5001);
-    expect(closeReq?.payload.volume).toBe(200000); // 0.02 lots = 200,000 cent-units
+    const request = latestProxyPayload();
+    expect(request).toMatchObject({ action: 'proxy', ctidTraderAccountId: 1001, payloadType: 2111 });
+    expect(request.payload.positionId).toBe(5001);
+    expect(request.payload.volume).toBe(200000); // 0.02 lots = 200,000 cent-units
   });
 
   it('modifies SL and TP on an active position (amendPositionSltp)', async () => {
@@ -133,13 +149,11 @@ describe('cTrader Trade Operations', () => {
     });
     expect(res).toEqual({ positionId: 5001 });
 
-    const amendReq = MockWebSocket.sentMessages.find(m => m.payloadType === 2110);
-    expect(amendReq).toBeDefined();
-    expect(amendReq?.payload.ctidTraderAccountId).toBe(1001);
-    expect(amendReq?.payload.positionId).toBe(5001);
-    expect(amendReq?.payload.stopLoss).toBe(1.0780);
-    expect(amendReq?.payload.takeProfit).toBe(1.0980);
-    expect(amendReq?.payload.guaranteedStopLoss).toBe(false);
+    const request = latestProxyPayload();
+    expect(request.payload.positionId).toBe(5001);
+    expect(request.payload.stopLoss).toBe(1.0780);
+    expect(request.payload.takeProfit).toBe(1.0980);
+    expect(request.payload.guaranteedStopLoss).toBe(false);
   });
 
   it('modifies a pending order (amendOrder)', async () => {
@@ -151,22 +165,19 @@ describe('cTrader Trade Operations', () => {
     });
     expect(res).toEqual({ orderId: 9001 });
 
-    const amendReq = MockWebSocket.sentMessages.find(m => m.payloadType === 2109);
-    expect(amendReq).toBeDefined();
-    expect(amendReq?.payload.ctidTraderAccountId).toBe(1001);
-    expect(amendReq?.payload.orderId).toBe(9001);
-    expect(amendReq?.payload.limitPrice).toBe(1.0820);
-    expect(amendReq?.payload.stopLoss).toBe(1.0760);
-    expect(amendReq?.payload.takeProfit).toBe(1.0960);
+    const request = latestProxyPayload();
+    expect(request.payload.orderId).toBe(9001);
+    expect(request.payload.limitPrice).toBe(1.0820);
+    expect(request.payload.stopLoss).toBe(1.0760);
+    expect(request.payload.takeProfit).toBe(1.0960);
   });
 
   it('cancels a pending order', async () => {
     const res = await ctraderService.cancelOrder(1001, 9001, true);
     expect(res).toEqual({ orderId: 9001 });
 
-    const cancelReq = MockWebSocket.sentMessages.find(m => m.payloadType === 2108);
-    expect(cancelReq).toBeDefined();
-    expect(cancelReq?.payload.ctidTraderAccountId).toBe(1001);
-    expect(cancelReq?.payload.orderId).toBe(9001);
+    const request = latestProxyPayload();
+    expect(request).toMatchObject({ action: 'proxy', ctidTraderAccountId: 1001, payloadType: 2108 });
+    expect(request.payload.orderId).toBe(9001);
   });
 });

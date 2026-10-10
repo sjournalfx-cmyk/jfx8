@@ -22,7 +22,7 @@ import { normalizeTrade } from '../lib/trade-normalization';
 
 interface LogTradeProps {
     isDarkMode: boolean;
-    onSave: (trade: Trade) => void;
+    onSave: (trade: Trade) => Promise<void>;
     onBatchSave?: (trades: Trade[]) => Promise<void>;
     initialTrade?: Trade;
     onCancel?: () => void;
@@ -38,37 +38,46 @@ const STEPS = [
     { label: 'Review', description: 'Outcome & psychology' },
 ];
 
-const StepIndicator = ({ current, total, isDarkMode }: { current: number, total: number, isDarkMode: boolean }) => (
-    <div className="flex items-center gap-3 mb-10">
+const StepIndicator = ({ current, total, isDarkMode, onSelect }: { current: number, total: number, isDarkMode: boolean, onSelect: (step: number) => void }) => (
+    <div className="flex items-center gap-3 mb-10 px-1 py-2 overflow-visible">
         {Array.from({ length: total }).map((_, i) => {
             const isActive = i + 1 === current;
             const isCompleted = i + 1 < current;
             const step = STEPS[i];
             return (
-                <div key={i} className="flex items-center flex-1 last:flex-none">
-                    <div
+                <div key={i} className="flex items-center flex-1 last:flex-none min-w-0">
+                    <button
+                        type="button"
+                        onClick={() => onSelect(i + 1)}
+                        aria-label={`Go to step ${i + 1}: ${step.label}`}
+                        aria-current={isActive ? 'step' : undefined}
                         className={`
-                        w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all duration-300
+                        w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all duration-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01] focus-visible:ring-offset-2 focus-visible:ring-offset-transparent
                         ${isActive
                                 ? 'border-[#FF4F01] bg-[#FF4F01] text-white shadow-lg shadow-[#FF4F01]/30 scale-110'
                                 : isCompleted
-                                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
-                                    : isDarkMode ? 'border-[#27272a] bg-[#000000] text-zinc-500' : 'border-slate-200 bg-slate-100 text-slate-400'
+                                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500 hover:border-emerald-500/70'
+                                    : isDarkMode ? 'border-[#27272a] bg-[#000000] text-zinc-500 hover:border-[#FF4F01]/60 hover:text-zinc-300' : 'border-slate-200 bg-slate-100 text-slate-400 hover:border-[#FF4F01]/60 hover:text-slate-600'
                             }
                     `}
                     >
                         {isCompleted ? <CheckCircle2 size={14} /> : i + 1}
-                    </div>
-                    <div className="hidden sm:block ml-3 flex-1">
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onSelect(i + 1)}
+                        aria-label={`Go to step ${i + 1}: ${step.label}`}
+                        className="hidden sm:block ml-3 flex-1 min-w-0 text-left cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01]"
+                    >
                         <p className={`text-sm font-bold ${isActive ? 'text-[#FF4F01]' : isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}>
                             {step.label}
                         </p>
                         <p className={`text-[10px] ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
                             {step.description}
                         </p>
-                    </div>
+                    </button>
                     {i < total - 1 && (
-                        <div className={`flex-1 h-0.5 mx-4 rounded-full transition-all duration-500 ${isCompleted ? 'bg-emerald-500/40' : isDarkMode ? 'bg-[#27272a]' : 'bg-slate-200'}`} />
+                        <div className={`flex-1 min-w-[24px] h-0.5 mx-4 rounded-full transition-all duration-500 ${isCompleted ? 'bg-emerald-500/40' : isDarkMode ? 'bg-[#27272a]' : 'bg-slate-200'}`} />
                     )}
                 </div>
             )
@@ -92,7 +101,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
         title: string;
         description: string;
         showCancel?: boolean;
-        onConfirm: () => void;
+        onConfirm: () => void | Promise<void>;
     }>({
         isOpen: false,
         title: '',
@@ -193,10 +202,17 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
     const beforeInputRef = useRef<HTMLInputElement>(null);
     const afterInputRef = useRef<HTMLInputElement>(null);
     const importTradesInputRef = useRef<HTMLInputElement>(null);
+    const saveInFlightRef = useRef(false);
 
     const handleImportMT4MT5 = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file || !onBatchSave) return;
+        const maxImportBytes = 5 * 1024 * 1024;
+        if (file.size > maxImportBytes) {
+            addToast({ type: 'error', title: 'Import too large', message: 'Choose a CSV smaller than 5 MB.', duration: 5000 });
+            e.target.value = '';
+            return;
+        }
         const reader = new FileReader();
         reader.onload = async (event) => {
             try {
@@ -204,6 +220,10 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                 if (!text) return;
                 const importedTrades = parseMTTradeCSV(text);
                 if (importedTrades.length > 0) {
+                    if (importedTrades.length > 5000) {
+                        addToast({ type: 'error', title: 'Import too large', message: 'A single import is limited to 5,000 trades.', duration: 5000 });
+                        return;
+                    }
                     setConfirmModal({
                         isOpen: true,
                         title: 'Import Trades',
@@ -229,7 +249,8 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
   const handleDeleteScreenshot = (type: 'before' | 'after') => setScreenshots(p => ({ ...p, [type]: undefined }));
 
-  const finalizeSave = async () => {
+    const finalizeSave = async () => {
+    if (saveInFlightRef.current) return;
     const entry = parseFloat(formData.entryPrice);
     const stopLoss = parseFloat(formData.stopLoss);
     const takeProfit = parseFloat(formData.takeProfit);
@@ -262,7 +283,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
       ...(initialTrade || {}),
       ...formData,
       ...metrics,
-      id: initialTrade?.id || Date.now().toString(),
+      id: initialTrade?.id || crypto.randomUUID(),
       entryPrice: entry,
       exitPrice,
       stopLoss: Number.isFinite(stopLoss) ? stopLoss : 0,
@@ -290,10 +311,14 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
         }
       : normalizedTrade;
 
+    saveInFlightRef.current = true;
     setIsSaving(true);
     try {
       await onSave(lockedTrade);
-    } finally { setIsSaving(false); }
+    } finally {
+      saveInFlightRef.current = false;
+      setIsSaving(false);
+    }
   };
 
     const isLong = formData.direction === 'Long';
@@ -333,7 +358,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
             <div className="flex flex-1 overflow-hidden relative">
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <div className="max-w-4xl mx-auto px-8 py-10 pb-32">
-                        <StepIndicator current={step} total={3} isDarkMode={isDarkMode} />
+                        <StepIndicator current={step} total={3} isDarkMode={isDarkMode} onSelect={setStep} />
                         {step === 1 ? <TradeFormStep1 formData={formData} handleInputChange={handleInputChange} pairError={pairError} isDarkMode={isDarkMode} userProfile={userProfile} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : step === 2 ? <TradeFormStep2 formData={formData} handleInputChange={handleInputChange} isDarkMode={isDarkMode} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : <TradeFormStep3 formData={formData} handleInputChange={handleInputChange} screenshots={screenshots} handleFileUpload={handleFileUpload} handleDeleteScreenshot={handleDeleteScreenshot} setPreviewImage={setPreviewImage} beforeInputRef={beforeInputRef} afterInputRef={afterInputRef} isDarkMode={isDarkMode} userProfile={userProfile} />}
                     </div>
                 </div>

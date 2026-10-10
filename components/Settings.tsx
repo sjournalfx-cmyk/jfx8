@@ -25,6 +25,7 @@ import {
   ExternalLink,
   Clock,
   Code2,
+  FileText,
 } from 'lucide-react';
 import { UserProfile, EASession } from '../types';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
@@ -97,6 +98,8 @@ const supportLinks = [
   { title: 'Documentation', icon: HelpCircle, desc: 'Setup guides, workflows, and feature notes.', href: '/DOCUMENTATION.md' },
   { title: 'Telegram Community', icon: MessageSquare, desc: 'Share feedback and get release updates.', href: 'https://t.me/+w_KvKM5HESYyMTdk' },
   { title: 'Video Tutorials', icon: Video, desc: 'Short walkthroughs for common setup tasks.', href: null },
+  { title: 'Privacy Policy', icon: Shield, desc: 'How we collect, use and protect your data.', href: '/privacy' },
+  { title: 'Terms of Service', icon: FileText, desc: 'The rules that govern your use of JFX.', href: '/terms' },
 ];
 
 const faqItems = [
@@ -1078,7 +1081,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                       <h4 className="text-lg font-black">Feedback received</h4>
                       <p className="mx-auto mt-1.5 max-w-md text-sm opacity-60">
-                        Your message has been logged. Thanks for helping shape the next version of JournalFX.
+                        Your message has been logged. Thanks for helping shape the next version of JFX-JOURNAL.
                       </p>
                     </div>
                   ) : (

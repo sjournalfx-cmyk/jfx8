@@ -24,6 +24,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useToast, type ToastType } from './ui/Toast';
+import { dataService } from '../services/dataService';
 
 const PAGE = 60;
 
@@ -39,9 +40,10 @@ interface NotesProps {
   isDarkMode: boolean;
   notes: AppNote[];
   onAddNote: (note: any) => Promise<any>;
-  onUpdateNote: (note: any) => Promise<void>;
+  onUpdateNote: (note: any) => Promise<any>;
   onDeleteNote: (id: string) => Promise<void>;
   onRestoreNote: (id: string) => Promise<void>;
+  onReorderNotes?: (rows: { id: string; position: number; updatedAt?: string }[]) => void;
   userProfile?: UserProfile | null;
   onViewChange: (view: string) => void;
   isDemoMode?: boolean;
@@ -53,6 +55,8 @@ const Notes: React.FC<NotesProps> = ({
   onAddNote,
   onUpdateNote,
   onDeleteNote,
+  onRestoreNote,
+  onReorderNotes,
   userProfile,
   onViewChange,
   isDemoMode = false,
@@ -100,7 +104,7 @@ const Notes: React.FC<NotesProps> = ({
     color: (n.color?.toUpperCase() as NoteColor) || NoteColor.DEFAULT,
     labels: n.tags || [],
     createdAt: new Date((n as any).created_at || n.date).getTime(),
-    updatedAt: new Date((n as any).updated_at || (n as any).created_at || n.date).getTime(),
+    updatedAt: new Date(n.updatedAt || (n as any).updated_at || (n as any).created_at || n.date).getTime(),
     isList: (n as any).isList || false,
     listItems: (n as any).listItems || [],
     image: (n as any).image,
@@ -113,11 +117,38 @@ const Notes: React.FC<NotesProps> = ({
     return Array.from(new Set(notes.flatMap(note => note.labels || []))).sort((a, b) => a.localeCompare(b));
   }, [notes]);
 
-  const getNextVisiblePosition = () => {
-    const visiblePositions = appNotes
-      .filter(n => !(n as any).isArchived && !(n as any).isTrashed)
-      .map(n => n.position ?? 0);
-    return visiblePositions.length > 0 ? Math.min(...visiblePositions) - 1 : 0;
+  const visiblePositionNotes = () =>
+    appNotes.filter(n => !(n as any).isArchived && !(n as any).isTrashed);
+
+  // Positions are compared ascending and new notes must land first, so they
+  // take `min - 1`. That walks toward -infinity one create at a time, so once
+  // the range gets deep enough every visible note is shifted back up together
+  // (ordering is preserved because the shift is uniform) and we start over.
+  const POSITION_DRIFT_FLOOR = -500;
+
+  const ensurePositionHeadroom = async (): Promise<number> => {
+    const visible = visiblePositionNotes();
+    if (visible.length === 0) return 0;
+    const min = Math.min(...visible.map(n => n.position ?? 0));
+    if (min > POSITION_DRIFT_FLOOR) return 0;
+
+    const shift = -min; // lifts the smallest position back to 0
+    try {
+      await Promise.all(
+        visible.map(n => onUpdateNote({ id: n.id, position: (n.position ?? 0) + shift } as any))
+      );
+      return shift;
+    } catch (error) {
+      console.error('Failed to renormalize note positions', error);
+      return 0;
+    }
+  };
+
+  const getNextVisiblePosition = async (): Promise<number> => {
+    const shift = await ensurePositionHeadroom();
+    const visible = visiblePositionNotes();
+    if (visible.length === 0) return 0;
+    return Math.min(...visible.map(n => (n.position ?? 0) + shift)) - 1;
   };
 
   const handleCreateNote = async (newNoteData: CreateNotePayload) => {
@@ -125,13 +156,13 @@ const Notes: React.FC<NotesProps> = ({
       blockDemoAction('Cannot create note');
       throw new Error('Demo mode');
     }
-    const nextPosition = newNoteData.position ?? getNextVisiblePosition();
+    const nextPosition = newNoteData.position ?? await getNextVisiblePosition();
 
     const newNote: Partial<AppNote> = {
       title: newNoteData.title,
       content: newNoteData.content,
       isPinned: newNoteData.isPinned,
-      color: newNoteData.color.toLowerCase() as any,
+      color: String(newNoteData.color || NoteColor.DEFAULT).toLowerCase() as any,
       tags: newNoteData.labels || [],
       date: new Date(newNoteData.createdAt ?? Date.now()).toISOString(),
       position: nextPosition
@@ -165,9 +196,12 @@ const Notes: React.FC<NotesProps> = ({
       title: updatedNote.title,
       content: updatedNote.content,
       isPinned: updatedNote.isPinned,
-      color: updatedNote.color.toLowerCase() as any,
+      color: String(updatedNote.color || NoteColor.DEFAULT).toLowerCase() as any,
       tags: updatedNote.labels,
       position: updatedNote.position,
+      // No `updatedAt` here on purpose: App resolves the freshest revision at
+      // execution time so overlapping autosaves can't hand the server a stale
+      // one and trip the "updated in another tab" guard.
     };
 
     // Add extra fields
@@ -183,75 +217,42 @@ const Notes: React.FC<NotesProps> = ({
     } catch (error) {
       console.error('Failed to update note', error);
       pushToast('error', 'Update failed', 'Your changes could not be saved.');
+      throw error;
     }
   };
 
   const handlePinNote = (e: React.MouseEvent, note: KeepNote) => {
     e.stopPropagation();
-    void handleUpdateKeepNote({ ...note, isPinned: !note.isPinned });
+    void handleUpdateKeepNote({ ...note, isPinned: !note.isPinned }).catch(() => undefined);
   };
 
   const handleArchiveNote = (e: React.MouseEvent, note: KeepNote) => {
     e.stopPropagation();
-    void handleUpdateKeepNote({ ...note, isArchived: !note.isArchived });
+    void handleUpdateKeepNote({ ...note, isArchived: !note.isArchived }).catch(() => undefined);
   };
 
-  const trashNote = async (note: KeepNote) => {
-    if (isDemoMode) {
-      blockDemoAction('Cannot delete note');
-      return;
-    }
-    try {
-      await onUpdateNote({ ...note, isTrashed: true } as any);
-      if (selectedNoteId === note.id) setSelectedNoteId(null);
-      pushToast('success', 'Note deleted', `"${note.title || 'Untitled'}" moved to trash.`, {
-        label: 'Undo',
-        onClick: () => void restoreNote(note),
-      });
-    } catch (error) {
-      console.error('Failed to delete note', error);
-      pushToast('error', 'Delete failed', 'An error occurred while deleting the note.');
-    }
-  };
-
-  const restoreNote = async (note: KeepNote) => {
-    if (isDemoMode) {
-      blockDemoAction('Cannot restore note');
-      return;
-    }
-    try {
-      await onUpdateNote({ ...note, isTrashed: false } as any);
-      pushToast('success', 'Note restored', `"${note.title || 'Untitled'}" is back in your library.`);
-    } catch (error) {
+  // Deletions and restores go through the App-level handlers so the Notebook
+  // shares one confirm-modal + toast path with the rest of the app instead of
+  // running a second, confirmation-free implementation.
+  const handleRestoreById = (id: string) => {
+    void Promise.resolve(onRestoreNote(id)).catch((error) => {
       console.error('Failed to restore note', error);
       pushToast('error', 'Restore failed', 'The note could not be restored.');
-    }
+    });
   };
 
   const handleRestoreNote = (e: React.MouseEvent, note: KeepNote) => {
     e.stopPropagation();
-    void restoreNote(note);
+    handleRestoreById(note.id);
   };
 
-  const handleRestoreById = (id: string) => {
-    const target = notes.find(n => n.id === id);
-    if (target) void restoreNote(target);
-  };
-
-  const handleDeleteNote = async (idOrNote: string | KeepNote) => {
-    const note = typeof idOrNote === 'string' ? notes.find(n => n.id === idOrNote) : idOrNote;
-    if (!note) return;
-    // Notes already in trash go through the permanent-delete confirmation.
-    if (note.isTrashed) {
-      try {
-        await onDeleteNote(note.id);
-      } catch (error) {
-        console.error('Failed to delete note', error);
-        pushToast('error', 'Delete failed', 'An error occurred while deleting the note.');
-      }
-      return;
-    }
-    await trashNote(note);
+  const handleDeleteNote = (idOrNote: string | KeepNote) => {
+    const id = typeof idOrNote === 'string' ? idOrNote : idOrNote.id;
+    if (!id) return;
+    void Promise.resolve(onDeleteNote(id)).catch((error) => {
+      console.error('Failed to delete note', error);
+      pushToast('error', 'Delete failed', 'An error occurred while deleting the note.');
+    });
   };
 
   const handleDuplicateNote = async (note: KeepNote) => {
@@ -273,7 +274,9 @@ const Notes: React.FC<NotesProps> = ({
         isTrashed: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        position: getNextVisiblePosition(),
+        // Let handleCreateNote resolve the position — passing the promise
+        // straight through used to store a garbage value.
+        position: undefined,
       });
       pushToast('success', 'Note duplicated', 'A copy of the note was created.');
     } catch (error) {
@@ -354,11 +357,12 @@ const Notes: React.FC<NotesProps> = ({
     totalCount,
   } = React.useMemo(() => {
     const q = searchQuery.toLowerCase();
+    // Notes can arrive from the DB with NULL title/content — guard every access.
     const matchesSearch = (note: KeepNote) =>
-      note.title.toLowerCase().includes(q) ||
-      note.content.toLowerCase().includes(q) ||
-      note.listItems?.some(item => item.text.toLowerCase().includes(q)) ||
-      (note.labels || []).some(label => label.toLowerCase().includes(q));
+      (typeof note.title === 'string' && note.title.toLowerCase().includes(q)) ||
+      (typeof note.content === 'string' && note.content.toLowerCase().includes(q)) ||
+      note.listItems?.some(item => typeof item.text === 'string' && item.text.toLowerCase().includes(q)) ||
+      (note.labels || []).some(label => typeof label === 'string' && label.toLowerCase().includes(q));
 
     const filtered = notes.filter(note => {
       if (!matchesSearch(note)) return false;
@@ -450,32 +454,42 @@ const Notes: React.FC<NotesProps> = ({
     const { active, over } = event;
 
     if (!over || active.id === over.id || reorderBusyRef.current) return;
+    if (isDemoMode) {
+      blockDemoAction('Cannot reorder notes');
+      return;
+    }
 
     const oldIndex = list.findIndex(n => n.id === active.id);
     const newIndex = list.findIndex(n => n.id === over.id);
     if (oldIndex < 0 || newIndex < 0) return;
 
+    // Pinned and unpinned notes are sorted independently, so only the dragged
+    // group needs renumbering — rewriting both doubled the writes and left the
+    // second group without a matching rollback.
     const categoryList = isPinnedList ? allPinnedNotes : allOtherNotes;
-    const otherList = isPinnedList ? allOtherNotes : allPinnedNotes;
     const movedVisible = arrayMove(list, oldIndex, newIndex);
-    const ordered = isPinnedList
-      ? [...movedVisible, ...categoryList.slice(list.length), ...otherList]
-      : [...otherList, ...movedVisible, ...categoryList.slice(list.length)];
+    const ordered = [...movedVisible, ...categoryList.slice(list.length)];
     const updates = ordered.map((n, i) => ({ id: n.id, position: i }));
-    const previousPositions = categoryList.map(n => ({ id: n.id, position: n.position }));
+    const previousPositions = categoryList.map(n => ({ id: n.id, position: n.position ?? 0 }));
 
     reorderBusyRef.current = true;
     try {
-      for (const update of updates) {
-        await onUpdateNote({ id: update.id, position: update.position } as any);
-      }
+      const saved = await dataService.updateNotePositions(updates);
+      onReorderNotes?.(saved.map(row => ({
+        id: row.id,
+        position: updates.find(u => u.id === row.id)?.position ?? 0,
+        updatedAt: row.updated_at,
+      })));
     } catch (error) {
       console.error('Failed to persist note order', error);
       pushToast('error', 'Reorder failed', 'Could not save the new order.');
       try {
-        for (const restore of previousPositions) {
-          await onUpdateNote({ id: restore.id, position: restore.position } as any);
-        }
+        const reverted = await dataService.updateNotePositions(previousPositions);
+        onReorderNotes?.(reverted.map(row => ({
+          id: row.id,
+          position: previousPositions.find(u => u.id === row.id)?.position ?? 0,
+          updatedAt: row.updated_at,
+        })));
       } catch (revertError) {
         console.error('Failed to revert note order', revertError);
       }
@@ -500,7 +514,7 @@ const Notes: React.FC<NotesProps> = ({
     <div className={`flex flex-col h-full w-full font-sans overflow-hidden ${isResizing ? 'cursor-nwse-resize select-none' : ''}`} style={{ backgroundColor: 'var(--note-default-bg)', color: 'var(--notebook-text)' }}>
       {/* Header */}
       <header
-        className="sticky top-0 grid grid-cols-[300px_1fr_300px] items-center px-8 py-1.5 border-b shrink-0 z-30 backdrop-blur-md"
+        className="sticky top-0 flex flex-wrap items-center gap-x-4 gap-y-2 md:grid md:grid-cols-[minmax(0,300px)_1fr_minmax(0,300px)] px-4 md:px-8 py-1.5 border-b shrink-0 z-30 backdrop-blur-md"
         style={{
           backgroundColor: isDarkMode ? 'rgba(10, 10, 10, 0.8)' : 'rgba(255, 255, 255, 0.8)',
           borderColor: 'var(--notebook-divider)'
@@ -711,9 +725,10 @@ const Notes: React.FC<NotesProps> = ({
 
               <div
                 ref={canvasPaneRef}
-                className={`relative transition-all duration-300 ${isResizing ? 'ring-2 ring-[#FF4F00]/50' : ''}`}
+                className={`group relative transition-all duration-300 ${isResizing ? 'ring-2 ring-[#FF4F00]/50' : ''}`}
                 style={{
                   width: `${canvasWidth}px`,
+                  maxWidth: '100%',
                   height: canvasHeight > 0 ? `${canvasHeight}px` : 'auto',
                   minWidth: '320px',
                 }}
@@ -732,6 +747,7 @@ const Notes: React.FC<NotesProps> = ({
                       onDuplicate={handleDuplicateNote}
                       canvasWidth={canvasWidth}
                       setCanvasWidth={setCanvasWidth}
+                      isDarkMode={isDarkMode}
                     />
                   </div>
                 ) : (

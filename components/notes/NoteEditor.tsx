@@ -7,16 +7,18 @@ import { genId, COLUMN_WIDTH_INC, CANVAS_MIN_WIDTH, CANVAS_MAX_WIDTH, AUTOSAVE_D
 import { createEmptyTable } from './shared/tableOps';
 import { usePopoverDismiss } from './shared/usePopoverDismiss';
 import { useAutosave } from './shared/useAutosave';
+import ConfirmationModal from '../ConfirmationModal';
 
 interface NoteEditorProps {
   note: Note;
   onClose: (info?: { saved?: boolean }) => void;
-  onUpdate: (updatedNote: Note) => void;
+  onUpdate: (updatedNote: Note) => void | Promise<void>;
   onDelete: (id: string) => void;
   onRestore?: (id: string) => void;
   onDuplicate?: (note: Note) => void;
   canvasWidth?: number;
   setCanvasWidth?: React.Dispatch<React.SetStateAction<number>>;
+  isDarkMode?: boolean;
 }
 
 interface EditorSnapshot {
@@ -31,6 +33,39 @@ interface EditorSnapshot {
 }
 
 const HISTORY_LIMIT = 50;
+
+const LIST_MARKER = /^\[([ xX])\](\s*)(.*)$/;
+const SNAPSHOT_DEBOUNCE_MS = 700;
+
+const emptyListItem = (): ListItem => ({ id: genId(), text: '', checked: false, indentLevel: 0 });
+
+/**
+ * Checklists serialize to text with `[x]`/`[ ]` markers so converting
+ * list -> text -> list keeps checked state and indentation instead of
+ * silently dropping both.
+ */
+const listToText = (items: ListItem[]): string =>
+  items
+    .map(item => `${item.checked ? '[x]' : '[ ]'}${item.indentLevel ? ' '.repeat(item.indentLevel) : ''}${item.text}`)
+    .join('\n');
+
+const textToList = (text: string): ListItem[] => {
+  const lines = text.split('\n');
+  // Only strip markers when every line carries one; otherwise the note
+  // text is the user's own and must be left untouched.
+  const allMarked = lines.every(line => line.trim() === '' || LIST_MARKER.test(line));
+  const items = lines.map(line => {
+    const match = allMarked ? line.match(LIST_MARKER) : null;
+    if (!match) return { id: genId(), text: line, checked: false, indentLevel: 0 };
+    return {
+      id: genId(),
+      checked: match[1].toLowerCase() === 'x',
+      indentLevel: Math.min(6, match[2].length),
+      text: match[3],
+    };
+  });
+  return items.length ? items : [emptyListItem()];
+};
 
 const migrateTableData = (tableData?: TableData): TableData | undefined =>
   tableData
@@ -63,7 +98,7 @@ const snapshotsEqual = (a?: EditorSnapshot, b?: EditorSnapshot): boolean => {
 };
 
 const formatRelativeTime = (timestamp: number): string => {
-  if (!timestamp) return '';
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
   const minutes = Math.floor((Date.now() - timestamp) / 60000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
@@ -74,7 +109,7 @@ const formatRelativeTime = (timestamp: number): string => {
   return new Date(timestamp).toLocaleDateString();
 };
 
-const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDelete, onRestore, onDuplicate, canvasWidth, setCanvasWidth }) => {
+const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDelete, onRestore, onDuplicate, canvasWidth, setCanvasWidth, isDarkMode = false }) => {
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
   const [labels, setLabels] = useState<string[]>(note.labels || []);
@@ -95,6 +130,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showColorOptions, setShowColorOptions] = useState(false);
   const [showLabelEditor, setShowLabelEditor] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    title: string;
+    description: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -106,16 +146,21 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   const historyRef = useRef(history);
   historyRef.current = history;
   const dirtyRef = useRef(false);
+  // Incremented on every edit; lets save callbacks tell whether their
+  // snapshot is still the newest one before clearing `dirtyRef`.
+  const editSeqRef = useRef(0);
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
   const stateRef = useRef({ note, title, content, isList, listItems, image, color, labels, tableData, isPinned });
   stateRef.current = { note, title, content, isList, listItems, image, color, labels, tableData, isPinned };
+  const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   usePopoverDismiss([colorPickerRef], () => setShowColorOptions(false), showColorOptions);
   usePopoverDismiss([moreMenuRef], () => setShowMoreMenu(false), showMoreMenu);
 
   const bumpVersion = () => {
     dirtyRef.current = true;
+    editSeqRef.current += 1;
     setVersion(v => v + 1);
   };
 
@@ -136,12 +181,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
     };
   };
 
-  const autosave = useAutosave(
-    buildFullNote,
-    (full) => {
-      if (!dirtyRef.current) return;
-      dirtyRef.current = false;
-      onUpdateRef.current(full);
+  const autosave = useAutosave<{ note: Note; seq: number }>(
+    () => ({ note: buildFullNote(), seq: editSeqRef.current }),
+    async ({ note: full, seq }) => {
+      await onUpdateRef.current(full);
+      // Only clean if nothing was typed while this save was in flight.
+      if (editSeqRef.current === seq) dirtyRef.current = false;
     },
     [version],
     AUTOSAVE_DELAY_MS
@@ -169,6 +214,23 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
       const trimmed = entries.length > HISTORY_LIMIT ? entries.slice(entries.length - HISTORY_LIMIT) : entries;
       return { entries: trimmed, index: trimmed.length - 1 };
     });
+  };
+
+  // Undo checkpoints are taken on a debounce while typing so Undo steps back
+  // over intermediate states instead of jumping straight to the last blur.
+  const scheduleSnapshot = () => {
+    if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = setTimeout(() => {
+      snapshotTimerRef.current = null;
+      pushSnapshot(buildSnapshot());
+    }, SNAPSHOT_DEBOUNCE_MS);
+  };
+
+  const flushSnapshot = () => {
+    if (!snapshotTimerRef.current) return;
+    clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = null;
+    pushSnapshot(buildSnapshot());
   };
 
   const applySnapshot = (snap: EditorSnapshot) => {
@@ -201,10 +263,14 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
     setHistory({ entries: [snapshotFromNote(note)], index: 0 });
     if (!note.isTrashed) titleInputRef.current?.focus();
     return () => {
+      if (snapshotTimerRef.current) {
+        clearTimeout(snapshotTimerRef.current);
+        snapshotTimerRef.current = null;
+      }
       if (!dirtyRef.current) return;
       const s = stateRef.current;
-      dirtyRef.current = false;
-      onUpdateRef.current({
+      const seqAtClose = editSeqRef.current;
+      void Promise.resolve(onUpdateRef.current({
         ...s.note,
         title: s.title,
         content: s.content,
@@ -216,6 +282,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
         tableData: s.tableData,
         isPinned: s.isPinned,
         updatedAt: Date.now(),
+      })).then(() => {
+        if (editSeqRef.current === seqAtClose) dirtyRef.current = false;
+      }).catch((error) => {
+        dirtyRef.current = true;
+        console.error('Failed to save note while closing the editor', error);
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,7 +300,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   }, [content, isList, tableData]);
 
   const closeAndReport = () => {
-    const hadPending = dirtyRef.current || autosave.hasPending();
+    // hasPending() only covers the debounce timer; isBusy() also catches a
+    // save already sitting in the queue.
+    const hadPending = dirtyRef.current || autosave.isBusy();
     autosave.flush();
     dirtyRef.current = false;
     onClose({ saved: hadPending });
@@ -238,19 +311,26 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (showColorOptions || showMoreMenu || showLabelEditor) return;
+      if (showColorOptions || showMoreMenu || showLabelEditor || pendingConfirm) return;
       closeAndReport();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showColorOptions, showMoreMenu, showLabelEditor]);
+  }, [showColorOptions, showMoreMenu, showLabelEditor, pendingConfirm]);
 
   const persistNow = (overrides?: Partial<Note>) => {
-    dirtyRef.current = true;
     autosave.cancel();
-    onUpdateRef.current({ ...buildFullNote(), ...overrides });
-    dirtyRef.current = false;
+    const seq = ++editSeqRef.current;
+    dirtyRef.current = true;
+    void autosave
+      .saveNow({ note: { ...buildFullNote(), ...overrides }, seq })
+      .then(() => {
+        if (editSeqRef.current === seq) dirtyRef.current = false;
+      })
+      .catch(() => {
+        dirtyRef.current = true;
+      });
   };
 
   const handleUndo = () => {
@@ -323,56 +403,87 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
 
   const handleToggleArchive = () => {
     persistNow({ isArchived: !note.isArchived });
-    onClose();
+    // The note leaves the editor, so drop the dirty flag before the unmount
+    // cleanup can schedule a second write of the same payload.
+    dirtyRef.current = false;
+    onClose({ saved: true });
   };
 
   const toggleListMode = () => {
-    if (isList) {
-      const text = listItems.map(i => i.text).join('\n');
-      pushSnapshot(buildSnapshot({ isList: false, content: text, listItems: [], tableData: undefined }));
-      setContent(text);
-      setIsList(false);
-      setListItems([]);
-      setTableData(undefined);
-    } else {
-      const lines = content.split('\n');
-      const items = lines.map(line => ({ id: genId(), text: line, checked: false, indentLevel: 0 }));
-      const newList = items.length ? items : [{ id: genId(), text: '', checked: false, indentLevel: 0 }];
-      pushSnapshot(buildSnapshot({ isList: true, listItems: newList, content: '', tableData: undefined }));
-      setListItems(newList);
-      setIsList(true);
-      setContent('');
-      setTableData(undefined);
+    const runSwitch = () => {
+      if (isList) {
+        const text = listToText(listItems);
+        pushSnapshot(buildSnapshot({ isList: false, content: text, listItems: [], tableData: undefined }));
+        setContent(text);
+        setIsList(false);
+        setListItems([]);
+        setTableData(undefined);
+      } else {
+        const newList = textToList(content);
+        pushSnapshot(buildSnapshot({ isList: true, listItems: newList, content: '', tableData: undefined }));
+        setListItems(newList);
+        setIsList(true);
+        setContent('');
+        setTableData(undefined);
+      }
+      bumpVersion();
+    };
+
+    const hasTable = !!tableData?.rows.some(row => row.some(cell => cell.text.trim()));
+    if (hasTable) {
+      setPendingConfirm({
+        title: 'Switch note type?',
+        description: 'Switching to a checklist will discard the table in this note.',
+        onConfirm: runSwitch,
+      });
+      return;
     }
-    bumpVersion();
+    runSwitch();
   };
 
   const addTable = () => {
-    const newTable = createEmptyTable();
-    pushSnapshot(buildSnapshot({ isList: false, content: '', tableData: newTable }));
-    setIsList(false);
-    setContent('');
-    setTableData(newTable);
-    bumpVersion();
+    const runAdd = () => {
+      const newTable = createEmptyTable();
+      pushSnapshot(buildSnapshot({ isList: false, content: '', listItems: [], tableData: newTable }));
+      setIsList(false);
+      setContent('');
+      setListItems([]);
+      setTableData(newTable);
+      bumpVersion();
+    };
+
+    const hasText = Boolean(content.trim() || listItems.some(item => item.text.trim()));
+    if (hasText) {
+      setPendingConfirm({
+        title: 'Add table?',
+        description: 'Adding a table will replace the text or checklist in this note.',
+        onConfirm: runAdd,
+      });
+      return;
+    }
+    runAdd();
   };
 
   const handleListItemsChange = (items: ListItem[]) => {
-    pushSnapshot(buildSnapshot({ listItems: items }));
     setListItems(items);
     bumpVersion();
+    scheduleSnapshot();
   };
 
   const handleTableChange = (next: TableData | undefined) => {
     if (note.isTrashed) return;
-    pushSnapshot(buildSnapshot({ tableData: next }));
     if (setCanvasWidth && tableData && next) {
       const prevCols = tableData.rows[0]?.length ?? 0;
       const nextCols = next.rows[0]?.length ?? 0;
-      if (nextCols > prevCols) setCanvasWidth(prev => prev + COLUMN_WIDTH_INC);
-      else if (nextCols < prevCols) setCanvasWidth(prev => Math.max(CANVAS_MIN_WIDTH, prev - COLUMN_WIDTH_INC));
+      if (nextCols > prevCols) {
+        setCanvasWidth(prev => Math.min(CANVAS_MAX_WIDTH, prev + COLUMN_WIDTH_INC));
+      } else if (nextCols < prevCols) {
+        setCanvasWidth(prev => Math.max(CANVAS_MIN_WIDTH, prev - COLUMN_WIDTH_INC));
+      }
     }
     setTableData(next);
     bumpVersion();
+    scheduleSnapshot();
   };
 
   const adjustWidth = (inc: boolean) => {
@@ -393,6 +504,20 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
   return (
     <div className={`w-full rounded-xl transition-all duration-300 ${ColorStyles[color]} ${color === NoteColor.DEFAULT ? 'border border-[var(--notebook-divider)]' : 'border-transparent'} shadow-2xl relative overflow-visible`}>
       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
+      <ConfirmationModal
+        isOpen={!!pendingConfirm}
+        title={pendingConfirm?.title ?? ''}
+        description={pendingConfirm?.description ?? ''}
+        confirmText="Continue"
+        variant="warning"
+        isDarkMode={isDarkMode}
+        onConfirm={() => {
+          const run = pendingConfirm?.onConfirm;
+          setPendingConfirm(null);
+          run?.();
+        }}
+        onCancel={() => setPendingConfirm(null)}
+      />
       <div className="flex flex-col">
         {image && (
             <div className="relative group w-full">
@@ -421,8 +546,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
               onChange={(e) => {
                   setTitle(e.target.value);
                   bumpVersion();
+                  scheduleSnapshot();
               }}
-              onBlur={() => pushSnapshot(buildSnapshot())}
+              onBlur={flushSnapshot}
               placeholder="Title"
               className="bg-transparent text-[var(--notebook-text)] placeholder-[var(--notebook-placeholder)] font-medium text-2xl outline-none w-full mr-4"
             />
@@ -501,8 +627,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
                     aria-label="Note content"
                     ref={textareaRef} value={content}
                     readOnly={note.isTrashed}
-                    onChange={(e) => { setContent(e.target.value); bumpVersion(); }}
-                    onBlur={() => pushSnapshot(buildSnapshot())}
+                    onChange={(e) => { setContent(e.target.value); bumpVersion(); scheduleSnapshot(); }}
+                    onBlur={flushSnapshot}
                     placeholder="Note"
                     className="w-full bg-transparent text-[var(--notebook-text)] placeholder-[var(--notebook-placeholder)] text-base outline-none resize-none min-h-[300px]"
                 />
@@ -536,8 +662,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({ note, onClose, onUpdate, onDele
                       </>
                     ) : (
                       <>
-                        <ToolbarButton type="button" icon={<BellIcon />} title="Reminders are not configured yet" disabled />
-
                         <div className="relative" ref={colorPickerRef}>
                             <ToolbarButton
                                 type="button"
@@ -642,7 +766,5 @@ const ToolbarButton = ({ icon, title, onClick, disabled, type = 'button', ariaEx
 const MenuOption = ({ icon, label, onClick }: { icon: React.ReactNode, label: string, onClick: () => void }) => (
     <button type="button" role="menuitem" onClick={onClick} className="w-full flex items-center gap-3 px-4 py-2 text-sm text-[var(--notebook-text)] hover:bg-[var(--notebook-hover)] text-left">{icon}{label}</button>
 );
-
-const BellIcon = () => <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>;
 
 export default NoteEditor;

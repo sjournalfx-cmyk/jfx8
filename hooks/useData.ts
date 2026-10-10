@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Trade, Note, DailyBias, UserProfile, EASession, CashTransaction } from '../types';
 import { dataService, mapTradeFromDB, mapCashTransactionFromDB } from '../services/dataService';
 import { supabase } from '../lib/supabase';
@@ -21,6 +21,7 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
   const [isBridgeOnline, setIsBridgeOnline] = useState(false);
   const [offlineQueue, setOfflineQueue] = useLocalStorage<Trade[]>(`jfx_offline_trades_${userId}`, []);
   const [isSyncing, setIsSyncing] = useState(false);
+  const loadGenerationRef = useRef(0);
   const { addToast } = useToast();
 
   const addToOfflineQueue = (trade: Trade) => {
@@ -83,6 +84,8 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
   }, [offlineQueue, userId]);
 
   const loadInitialData = async (currentUserId: string, currentUserProfile: UserProfile | null) => {
+    const loadGeneration = ++loadGenerationRef.current;
+    const isCurrentLoad = () => loadGeneration === loadGenerationRef.current && currentUserId === userId;
     setIsDataLoading(true);
     try {
       const [fetchedTrades, fetchedNotes, fetchedBias] = await Promise.all([
@@ -101,12 +104,15 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
         console.warn('Cash transactions fetch failed; keeping current state:', cashError);
       }
 
+      if (!isCurrentLoad()) return;
+
       const { trades: repairedTrades, changed: directionFixes } = repairCtraderTradeDirections(fetchedTrades);
       setTrades(repairedTrades);
 
       if (directionFixes.length > 0) {
         Promise.all(directionFixes.map(trade => dataService.updateTrade(trade)))
           .then(() => {
+            if (!isCurrentLoad()) return;
             addToast({
               type: 'info',
               title: 'Trade Directions Corrected',
@@ -118,6 +124,7 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
             console.error("Failed to persist cTrader direction repairs:", error);
           });
       }
+      if (!isCurrentLoad()) return;
       setNotes(fetchedNotes);
       setDailyBias(fetchedBias);
       if (fetchedCashTransactions !== null) {
@@ -126,12 +133,12 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
       
       if (currentUserProfile && currentUserProfile.eaConnected && currentUserProfile.syncKey) {
         const session = await dataService.getEASession(currentUserProfile.syncKey);
-        if (session) {
+        if (session && isCurrentLoad()) {
           setEASession(session);
         }
       }
 
-      if (fetchedTrades.length > 0) {
+      if (fetchedTrades.length > 0 && isCurrentLoad()) {
         const lastTradeDate = new Date(fetchedTrades[0].date); // First is newest
         const now = new Date();
         const diffTime = Math.abs(now.getTime() - lastTradeDate.getTime());
@@ -139,6 +146,7 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
 
         if (diffDays > 3) {
           setTimeout(() => {
+            if (!isCurrentLoad()) return;
             addToast({
               type: 'info',
               title: 'Time to Journal?',
@@ -151,13 +159,29 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
     } catch (error) {
       console.error("Error loading user data:", error);
     } finally {
-      setIsDataLoading(false);
+      if (isCurrentLoad()) setIsDataLoading(false);
     }
   };
 
+  const hadUserRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (userId) {
-      loadInitialData(userId, userProfile);
+      hadUserRef.current = userId;
+      void loadInitialData(userId, userProfile);
+      return;
+    }
+    // Only clear on a REAL sign-out transition. The initial null during
+    // auth bootstrap must never blank state (and flip on demo mode).
+    if (hadUserRef.current !== null) {
+      hadUserRef.current = null;
+      loadGenerationRef.current += 1;
+      setTrades([]);
+      setNotes([]);
+      setDailyBias([]);
+      setCashTransactions([]);
+      setEditingTrade(null);
+      setIsDataLoading(false);
     }
   }, [userId, userProfile]);
 
@@ -235,15 +259,24 @@ export const useData = (userId: string | null, userProfile: UserProfile | null) 
     const notesChannel = supabase
       .channel(`notes_sync_${userId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${userId}` }, (payload) => {
+        // Explicit mapping only — spreading the raw row left snake_case twins
+        // (is_pinned + isPinned, is_archived + isArchived …) in the store.
         const mapNote = (dbNote: any): Note => ({
-          ...dbNote,
-          isPinned: dbNote.is_pinned,
-          isArchived: dbNote.is_archived,
-          isTrashed: dbNote.is_trashed,
-          isList: dbNote.is_list,
-          listItems: dbNote.list_items,
-          tableData: dbNote.table_data,
-          date: dbNote.date || dbNote.created_at
+          id: dbNote.id,
+          title: dbNote.title ?? '',
+          content: dbNote.content ?? '',
+          date: dbNote.date || dbNote.created_at,
+          tags: Array.isArray(dbNote.tags) ? dbNote.tags : [],
+          color: dbNote.color ?? 'default',
+          updatedAt: dbNote.updated_at,
+          isPinned: !!dbNote.is_pinned,
+          isArchived: !!dbNote.is_archived,
+          isTrashed: !!dbNote.is_trashed,
+          isList: !!dbNote.is_list,
+          listItems: dbNote.list_items || [],
+          image: dbNote.image ?? undefined,
+          tableData: dbNote.table_data ?? undefined,
+          position: dbNote.position,
         });
 
         if (payload.eventType === 'INSERT') {
@@ -346,11 +379,16 @@ const biasChannel = supabase
           if (accData && accData.account && isActive) {
             // Persist the last known balance so it survives disconnects —
             // timestamped so stale snapshots expire (see bridgeBalance.ts).
+            // Only write on change: every write re-renders App + rebuilds
+            // the analytics snapshot.
             if (typeof accData.account.balance === 'number') {
-              setLastKnownBridgeBalance({
-                v: 1,
-                balance: accData.account.balance,
-                capturedAt: new Date().toISOString(),
+              setLastKnownBridgeBalance(prev => {
+                if (prev && prev.balance === accData.account.balance) return prev;
+                return {
+                  v: 1,
+                  balance: accData.account.balance,
+                  capturedAt: new Date().toISOString(),
+                };
               });
             }
             setEASession(prev => {
@@ -359,16 +397,16 @@ const biasChannel = supabase
                 openPositions: [],
                 trades: []
               };
+              const prevAccount = currentData.account || {};
+              const nextAccount = { ...prevAccount, ...accData.account };
+              if (JSON.stringify(prevAccount) === JSON.stringify(nextAccount)) return prev;
               return {
                 id: prev?.id || 'local-session',
                 sync_key: userProfile.syncKey || '',
                 last_updated: new Date().toISOString(),
                 data: {
                   ...currentData,
-                  account: {
-                    ...(currentData.account || {}),
-                    ...accData.account
-                  }
+                  account: nextAccount
                 }
               };
             });
@@ -379,7 +417,9 @@ const biasChannel = supabase
       }
     };
 
-    const interval = setInterval(pollLocalBridge, 3000);
+    // 5s cadence (was 3s): the stable-identity guard above already prevents
+    // no-op re-renders, this just reduces network churn on top.
+    const interval = setInterval(pollLocalBridge, 5000);
     pollLocalBridge();
 
     return () => {

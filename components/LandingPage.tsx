@@ -694,9 +694,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnterAuth }) => {
               </div>
               <div className="flex flex-col gap-4">
                 <h4 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/50 mb-2">Legal</h4>
-                <a className="hover:text-white transition-colors text-white/80" href="#privacy">Privacy Policy</a>
-                <a className="hover:text-white transition-colors text-white/80" href="#terms">Terms of Service</a>
-                <a className="hover:text-white transition-colors text-white/80" href="#cookies">Cookie Policy</a>
+                <a className="hover:text-white transition-colors text-white/80" href="/privacy">Privacy Policy</a>
+                <a className="hover:text-white transition-colors text-white/80" href="/terms">Terms of Service</a>
               </div>
               <div className="flex flex-col gap-4">
                 <h4 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/50 mb-2">Social</h4>

@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import WebSocket from 'ws';
 import { createHash } from 'crypto';
+import { requireUser } from '../_lib/auth.js';
+import { setCtraderRefreshLease } from '../_lib/ctraderTokenLock.js';
 import {
   extractRawApiKey,
   isJfxApiKey,
@@ -9,7 +11,6 @@ import {
   toVolumeCents,
   chooseCtraderAccount,
   findAltAccountForHost,
-  isFallbackWorthyCtraderError,
   apiKeyError,
   persistRotatedCtraderToken,
 } from '../_lib/jfxApiKey.js';
@@ -18,8 +19,8 @@ const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 
 function getCredentials() {
   return {
-    clientId: (process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '').trim(),
-    clientSecret: (process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '').trim(),
+    clientId: (process.env.CTRADER_CLIENT_ID || '').trim(),
+    clientSecret: (process.env.CTRADER_CLIENT_SECRET || '').trim(),
     supabaseUrl: (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim().replace(/\/$/, ''),
     serviceKey: (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
   };
@@ -34,10 +35,32 @@ const PT = {
   AMEND_POSITION_SLTP_REQ: 2110,
   CLOSE_POSITION_REQ: 2111,
   SYMBOLS_LIST_REQ: 2114,
+  TRADER_REQ: 2121,
   RECONCILE_REQ: 2124,
+  SUBSCRIBE_SPOTS_REQ: 2127,
+  UNSUBSCRIBE_SPOTS_REQ: 2129,
+  GET_TRENDBARS_REQ: 2137,
+  EXPECTED_MARGIN_REQ: 2139,
+  CASH_FLOW_HISTORY_LIST_REQ: 2143,
   GET_ACCOUNTS_BY_TOKEN_REQ: 2149,
+  GET_CTID_PROFILE_BY_TOKEN_REQ: 2151,
   ERROR_RES: 2142,
 };
+
+const BROWSER_PROXY_PAYLOAD_TYPES = new Set<number>([
+  PT.SYMBOLS_LIST_REQ,
+  PT.TRADER_REQ,
+  PT.RECONCILE_REQ,
+  PT.GET_TRENDBARS_REQ,
+  PT.EXPECTED_MARGIN_REQ,
+  PT.CASH_FLOW_HISTORY_LIST_REQ,
+  PT.GET_CTID_PROFILE_BY_TOKEN_REQ,
+  PT.NEW_ORDER_REQ,
+  PT.CANCEL_ORDER_REQ,
+  PT.AMEND_ORDER_REQ,
+  PT.AMEND_POSITION_SLTP_REQ,
+  PT.CLOSE_POSITION_REQ,
+]);
 
 function hashToken(raw: string): string {
   try { return createHash('sha256').update(raw).digest('hex'); } catch (e: any) {
@@ -49,6 +72,8 @@ function hashToken(raw: string): string {
 
 interface WsSession {
   send: (payloadType: number, payload: Record<string, any>) => Promise<any>;
+  onEvent: (listener: (payloadType: number, payload: Record<string, any>) => void) => () => void;
+  heartbeat: () => void;
   close: () => void;
 }
 
@@ -75,6 +100,7 @@ function openCtraderSession(
 
     let msgId = 0;
     const pending = new Map<string, { resolve: (v: any) => void; reject: (err: any) => void }>();
+    const eventListeners = new Set<(payloadType: number, payload: Record<string, any>) => void>();
 
     const send = (payloadType: number, payload: Record<string, any>): Promise<any> =>
       new Promise((res, rej) => {
@@ -96,6 +122,9 @@ function openCtraderSession(
             p.resolve(msg.payload);
           }
         }
+        for (const listener of eventListeners) {
+          try { listener(Number(msg.payloadType), msg.payload || {}); } catch { /* listener isolation */ }
+        }
       } catch {}
     });
 
@@ -114,6 +143,15 @@ function openCtraderSession(
         clearTimeout(timer);
         resolve({
           send,
+          onEvent: (listener) => {
+            eventListeners.add(listener);
+            return () => eventListeners.delete(listener);
+          },
+          heartbeat: () => {
+            if (ws.readyState === WebSocket.OPEN) {
+              try { ws.send(JSON.stringify({ clientMsgId: `heartbeat_${Date.now()}`, payloadType: 51, payload: {} })); } catch {}
+            }
+          },
           close: () => {
             try { ws.close(); } catch {}
           },
@@ -135,7 +173,7 @@ async function mintAccessToken(
   clientId: string,
   clientSecret: string,
   refreshToken: string,
-): Promise<{ accessToken: string; refreshToken: string | null }> {
+): Promise<{ accessToken: string; refreshToken: string | null; expiresInSeconds: number }> {
   const tokenUrl = new URL(CTRADER_TOKEN_URL);
   tokenUrl.searchParams.set('grant_type', 'refresh_token');
   tokenUrl.searchParams.set('refresh_token', refreshToken);
@@ -155,7 +193,100 @@ async function mintAccessToken(
   return {
     accessToken: String(body.accessToken),
     refreshToken: body.refreshToken ? String(body.refreshToken) : null,
+    expiresInSeconds: Number.isFinite(Number(body.expiresIn || body.expires_in))
+      ? Math.max(60, Number(body.expiresIn || body.expires_in))
+      : 300,
   };
+}
+
+async function loadUserCtraderAccessToken({
+  supabaseUrl,
+  serviceKey,
+  clientId,
+  clientSecret,
+  userId,
+}: {
+  supabaseUrl: string;
+  serviceKey: string;
+  clientId: string;
+  clientSecret: string;
+  userId: string;
+}): Promise<{ accessToken: string; defaultAccountId: number | null; defaultIsDemo: boolean } | null> {
+  const headers = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+  type StoredToken = {
+    refresh_token?: string;
+    default_account_id?: number | string | null;
+    is_demo?: boolean | string | null;
+    access_token?: string | null;
+    access_token_expires_at?: string | null;
+  };
+  const loadStoredToken = async (): Promise<StoredToken | null> => {
+    const response = await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}&select=refresh_token,default_account_id,is_demo,access_token,access_token_expires_at`, { headers });
+    if (!response.ok) throw new Error('ctrader_token_store_unavailable');
+    const rows = await response.json().catch(() => []);
+    return Array.isArray(rows) ? rows[0] || null : null;
+  };
+  const cacheIsValid = (stored: StoredToken | null) => {
+    const expiresAt = stored?.access_token_expires_at ? Date.parse(stored.access_token_expires_at) : Number.NaN;
+    return Boolean(stored?.access_token && Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000);
+  };
+
+  let stored = await loadStoredToken();
+  if (cacheIsValid(stored)) {
+    return {
+      accessToken: String(stored!.access_token),
+      defaultAccountId: stored!.default_account_id ? Number(stored!.default_account_id) : null,
+      defaultIsDemo: stored!.is_demo !== undefined ? parseIsDemo(stored!.is_demo, true) : true,
+    };
+  }
+
+  const leaseAcquired = await setCtraderRefreshLease(supabaseUrl, serviceKey, userId, true);
+  if (!leaseAcquired) throw new Error('ctrader_refresh_in_progress');
+
+  try {
+    // Read after acquiring the lease so a caller that waited behind another
+    // rotation uses the replacement token rather than the stale one.
+    stored = await loadStoredToken();
+    if (cacheIsValid(stored)) {
+      return {
+        accessToken: String(stored!.access_token),
+        defaultAccountId: stored!.default_account_id ? Number(stored!.default_account_id) : null,
+        defaultIsDemo: stored!.is_demo !== undefined ? parseIsDemo(stored!.is_demo, true) : true,
+      };
+    }
+
+    let refreshToken = stored?.refresh_token ? String(stored.refresh_token) : '';
+    const defaultAccountId = stored?.default_account_id ? Number(stored.default_account_id) : null;
+    const defaultIsDemo = stored?.is_demo !== undefined ? parseIsDemo(stored.is_demo, true) : true;
+
+    // Support the pre-token-table, per-user storage key during migration. A
+    // global service token must never be used for a different user's account.
+    if (!refreshToken) {
+      const legacyRes = await fetch(`${supabaseUrl}/rest/v1/service_config?key=eq.ctrader_refresh_${userId}&select=value`, { headers });
+      if (legacyRes.ok) {
+        const rows = await legacyRes.json().catch(() => []);
+        refreshToken = Array.isArray(rows) ? String(rows[0]?.value || '') : '';
+      }
+    }
+
+    if (!refreshToken) return null;
+
+    const minted = await mintAccessToken(clientId, clientSecret, refreshToken);
+    if (!minted.refreshToken) throw new Error('cTrader did not return a replacement refresh token.');
+    await persistRotatedCtraderToken({
+      supabaseUrl,
+      serviceKey,
+      userId,
+      newRefreshToken: minted.refreshToken,
+      previousToken: refreshToken,
+      newAccessToken: minted.accessToken,
+      accessTokenExpiresAt: new Date(Date.now() + minted.expiresInSeconds * 1000).toISOString(),
+    });
+
+    return { accessToken: minted.accessToken, defaultAccountId, defaultIsDemo };
+  } finally {
+    await setCtraderRefreshLease(supabaseUrl, serviceKey, userId, false).catch(() => undefined);
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -187,14 +318,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let keyId: string | null = null;
   let defaultAccountId: number | null = null;
   let defaultIsDemo = true;
+  let isBrowserSession = false;
 
   // ---------------------------------------------------------------------------
   // AUTHENTICATION STRATEGY:
-  // 1. JFX Personal API Key (X-API-Key: jfx_pat_...) -> SECURE & RECOMMENDED
-  // 2. Direct cTrader Access Token (Authorization: Bearer <raw_token>) -> BACKWARD COMPAT
+  // 1. Verified JFX web session -> user's server-stored cTrader credential
+  // 2. JFX Personal API Key -> user's server-stored cTrader credential
+  // 3. Direct cTrader access token -> backward compatibility for external tools
   // ---------------------------------------------------------------------------
   try {
-  if (isJfxApiKey(rawKey)) {
+  const browserAuth = isJfxApiKey(rawKey) ? null : await requireUser(req.headers);
+  if (browserAuth?.ok && browserAuth.userId) {
+    if (!supabaseUrl || !serviceKey) {
+      res.status(503).json({ error: 'Database service not configured on server' });
+      return;
+    }
+    const connected = await loadUserCtraderAccessToken({
+      supabaseUrl, serviceKey, clientId, clientSecret, userId: browserAuth.userId,
+    });
+    if (!connected) {
+      res.status(400).json({
+        error: 'ctrader_not_connected',
+        message: 'Connect cTrader before requesting account data.',
+      });
+      return;
+    }
+    accessToken = connected.accessToken;
+    defaultAccountId = connected.defaultAccountId;
+    defaultIsDemo = connected.defaultIsDemo;
+    authenticatedUserId = browserAuth.userId;
+    isBrowserSession = true;
+  } else if (isJfxApiKey(rawKey)) {
     if (!supabaseUrl || !serviceKey) {
       res.status(503).json(apiKeyError('service_unavailable', 'Database service not configured on server'));
       return;
@@ -271,84 +425,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: JSON.stringify({ last_used_at: new Date().toISOString() }),
     }).catch(() => {});
 
-    // Lookup user's stored cTrader refresh token from user_ctrader_tokens or service_config
-    let userRefreshToken = '';
-    const tokenQueryRes = await fetch(`${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${authenticatedUserId}&select=refresh_token,default_account_id,is_demo`, {
-      headers: {
-        'apikey': serviceKey,
-        'Authorization': `Bearer ${serviceKey}`,
-      },
+    const connected = await loadUserCtraderAccessToken({
+      supabaseUrl, serviceKey, clientId, clientSecret, userId: authenticatedUserId,
     });
-    if (tokenQueryRes.ok) {
-      const tokenRows = await tokenQueryRes.json().catch(() => []);
-      const userTokens = Array.isArray(tokenRows) ? tokenRows[0] : null;
-      if (userTokens?.refresh_token) {
-        userRefreshToken = userTokens.refresh_token;
-        defaultAccountId = userTokens.default_account_id ? Number(userTokens.default_account_id) : null;
-        defaultIsDemo = userTokens.is_demo !== undefined ? parseIsDemo(userTokens.is_demo, true) : true;
-      }
-    }
-
-    // Fallback to service_config table
-    if (!userRefreshToken) {
-      const configRes = await fetch(`${supabaseUrl}/rest/v1/service_config?key=in.(ctrader_refresh_${authenticatedUserId},ctrader_service_refresh_token)&select=key,value`, {
-        headers: {
-          'apikey': serviceKey,
-          'Authorization': `Bearer ${serviceKey}`,
-        },
-      });
-      if (configRes.ok) {
-        const rows = await configRes.json().catch(() => []);
-        const userRow = rows.find((r: any) => r.key === `ctrader_refresh_${authenticatedUserId}`);
-        const globalRow = rows.find((r: any) => r.key === 'ctrader_service_refresh_token');
-        userRefreshToken = userRow?.value || globalRow?.value || '';
-      }
-    }
-
-    if (!userRefreshToken) {
+    if (!connected) {
       res.status(400).json({
         error: 'ctrader_not_connected',
         message: 'Your JFX API key is valid, but your cTrader account has not been connected yet. Please connect cTrader once on the Connect & Import page in the web app.',
       });
       return;
     }
-
-    const mintAndPersist = async (refreshToken: string) => {
-      const minted = await mintAccessToken(clientId, clientSecret, refreshToken);
-      if (minted.refreshToken && authenticatedUserId) {
-        await persistRotatedCtraderToken({
-          supabaseUrl, serviceKey,
-          userId: authenticatedUserId,
-          newRefreshToken: minted.refreshToken,
-          previousToken: refreshToken,
-        });
-      }
-      return minted.accessToken;
-    };
-
-    try {
-      accessToken = await mintAndPersist(userRefreshToken);
-    } catch (err: any) {
-      const msg = err?.message || '';
-      // If per-user token is stale/expired/revoked, try global service token as fallback
-      if (isFallbackWorthyCtraderError(msg)) {
-        try {
-          const svcRes = await fetch(`${supabaseUrl}/rest/v1/service_config?key=eq.ctrader_service_refresh_token&select=value`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
-          const svcRows: any = await svcRes.json().catch(() => []);
-          const svcToken = Array.isArray(svcRows) ? svcRows[0]?.value : svcRows?.value;
-          if (svcToken && svcToken !== userRefreshToken) {
-            console.log('[trade] per-user token failed, trying service token fallback');
-            accessToken = await mintAndPersist(String(svcToken));
-          } else throw err;
-        } catch (e2: any) {
-          res.status(502).json(apiKeyError('ctrader_auth_failed', `Failed to authenticate with cTrader: ${msg || e2?.message || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`));
-          return;
-        }
-      } else {
-        res.status(502).json(apiKeyError('ctrader_auth_failed', `Failed to authenticate with cTrader: ${msg || 'Invalid session'}. Please reconnect cTrader on the Connect & Import page.`));
-        return;
-      }
-    }
+    accessToken = connected.accessToken;
+    defaultAccountId = connected.defaultAccountId;
+    defaultIsDemo = connected.defaultIsDemo;
   } else if (rawKey) {
     // Direct cTrader access token (backward compat for callers not on JFX keys)
     accessToken = rawKey;
@@ -358,6 +447,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   } catch (e: any) {
     console.error('[trade] auth error', e);
+    if (!res.headersSent && e?.message === 'ctrader_refresh_in_progress') {
+      res.setHeader('Retry-After', '1');
+      res.status(503).json(apiKeyError('ctrader_refresh_in_progress', 'cTrader is refreshing this account. Retry in a moment.'));
+      return;
+    }
     if (!res.headersSent) res.status(500).json(apiKeyError('auth_failed', e?.message || String(e)));
     return;
   }
@@ -449,6 +543,90 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     session = await openCtraderSession(host, clientId, clientSecret, accountId, accessToken);
+
+    if (action === 'stream_spots') {
+      if (!isBrowserSession) {
+        session.close();
+        await auditLog(403);
+        res.status(403).json({ error: 'A signed-in web session is required for spot streaming.' });
+        return;
+      }
+      const symbolIds = Array.isArray(body?.payload?.symbolIds)
+        ? [...new Set(body.payload.symbolIds.map(Number).filter((id: number) => Number.isSafeInteger(id) && id > 0))].slice(0, 50)
+        : [];
+      if (symbolIds.length === 0) {
+        session.close();
+        await auditLog(400);
+        res.status(400).json({ error: 'At least one valid symbol id is required.' });
+        return;
+      }
+
+      await session.send(PT.SUBSCRIBE_SPOTS_REQ, { ctidTraderAccountId: accountId, symbolId: symbolIds });
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      const writeEvent = (event: string, payload: Record<string, any>) => {
+        if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      };
+      const removeEventListener = session.onEvent((payloadType, payload) => {
+        if (payloadType === 2131 && symbolIds.includes(Number(payload.symbolId))) {
+          writeEvent('spot', payload);
+        }
+      });
+      const heartbeat = setInterval(() => {
+        session?.heartbeat();
+        writeEvent('keepalive', {});
+      }, 10_000);
+      const cleanup = () => {
+        clearInterval(heartbeat);
+        removeEventListener();
+        session?.close();
+      };
+      req.once('close', cleanup);
+      res.once('close', cleanup);
+      writeEvent('ready', { accountId, isDemo, symbolIds });
+      await auditLog(200);
+      return;
+    }
+
+    // The browser can request only the cTrader operations used by the UI. The
+    // server supplies both protocol credentials and the account identifier, so
+    // a caller cannot authenticate another account or submit arbitrary frames.
+    if (action === 'proxy') {
+      if (!isBrowserSession) {
+        session.close();
+        await auditLog(403);
+        res.status(403).json({ error: 'A signed-in web session is required for proxy requests.' });
+        return;
+      }
+      const payloadType = Number(body.payloadType);
+      if (!BROWSER_PROXY_PAYLOAD_TYPES.has(payloadType)) {
+        session.close();
+        await auditLog(400);
+        res.status(400).json({ error: 'Unsupported cTrader browser operation.' });
+        return;
+      }
+      if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
+        session.close();
+        await auditLog(400);
+        res.status(400).json({ error: 'A cTrader payload object is required.' });
+        return;
+      }
+
+      const payload = { ...body.payload } as Record<string, any>;
+      delete payload.clientId;
+      delete payload.clientSecret;
+      delete payload.accessToken;
+      payload.ctidTraderAccountId = accountId;
+      if (payloadType === PT.GET_CTID_PROFILE_BY_TOKEN_REQ) payload.accessToken = accessToken;
+
+      const result = await session.send(payloadType, payload);
+      session.close();
+      await auditLog(200);
+      res.status(200).json({ ok: true, accountId, isDemo, result });
+      return;
+    }
 
     // -------------------------------------------------------------------------
     // 1. GET POSITIONS & PENDING ORDERS

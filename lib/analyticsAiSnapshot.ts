@@ -466,7 +466,6 @@ export const buildAnalyticsAiSnapshot = (
         'streakMomentum',
         'tiltScore',
         'plMindset',
-        'plAdherence',
         'monthlyPerformance',
         'currencyStrength',
         'riskReward',

@@ -1,5 +1,16 @@
-export const genId = (): string =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+const randomPart = (): string => {
+  const value = Math.random().toString(36).slice(2, 10);
+  return value.padEnd(6, '0');
+};
+
+export const genId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Secure contexts (and test runners without crypto.randomUUID) still need
+  // ids that stay unique across rapid calls.
+  return `${Date.now().toString(36)}-${randomPart()}${randomPart()}`;
+};
 
 export const COLUMN_WIDTH_INC = 80;
 

@@ -1,12 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { persistRotatedCtraderToken } from '../_lib/jfxApiKey.js';
+import { requireUser } from '../_lib/auth.js';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 function getCredentials() {
   return {
-    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
-    clientSecret: process.env.CTRADER_CLIENT_SECRET || process.env.VITE_CTRADER_CLIENT_SECRET || '',
+    clientId: process.env.CTRADER_CLIENT_ID || '',
+    clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
   };
 }
 
@@ -53,9 +54,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const code = req.query.code as string;
   const redirectUri = req.query.redirect_uri as string;
-  const authHeader = (req.headers['authorization'] || '') as string;
-  const supabaseJwt = authHeader.replace(/^Bearer\s+/i, '').trim();
-
   if (!code || !redirectUri) {
     res.status(400).json({ error: 'Missing code or redirect_uri' });
     return;
@@ -64,6 +62,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isAllowedRedirectUri(redirectUri)) {
     console.error(`[cTrader] Rejected redirect_uri: ${redirectUri}`);
     res.status(400).json({ error: 'Invalid redirect_uri' });
+    return;
+  }
+
+  const auth = await requireUser(req.headers);
+  if (!auth.ok || !auth.userId) {
+    res.status(auth.status).json({ error: auth.error });
     return;
   }
 
@@ -113,51 +117,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    if (!body.accessToken) {
-      res.status(502).json({ error: 'cTrader exchange returned no access token' });
+    if (!body.accessToken || !body.refreshToken) {
+      res.status(502).json({ error: 'cTrader exchange returned an incomplete token response' });
       return;
     }
 
-    if (body.refreshToken) {
-      res.setHeader('Set-Cookie', [
-        `${REFRESH_COOKIE}=${encodeURIComponent(String(body.refreshToken))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
-      ]);
-
-      let userId = typeof req.query.user_id === 'string' ? req.query.user_id.trim() : undefined;
-      if (!userId && supabaseJwt) {
-        try {
-          const parts2 = supabaseJwt.split('.');
-          const pb64 = parts2[1] || '';
-          let payload: any = {};
-          try { payload = JSON.parse(Buffer.from(pb64, 'base64url').toString('utf8')); } catch { try { const pad = pb64 + '='.repeat((4 - pb64.length % 4) % 4); const b64 = pad.replace(/-/g, '+').replace(/_/g, '/'); payload = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); } catch {} }
-          userId = payload.sub as string | undefined;
-        } catch {}
-      }
-
-      if (userId) {
-        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-        try {
-          await persistRotatedCtraderToken({
-            supabaseUrl,
-            serviceKey,
-            userId,
-            newRefreshToken: String(body.refreshToken),
-          });
-          console.log(`[cTrader] Exchange: persisted token for user ${userId}`);
-        } catch (e: any) {
-          console.error('[cTrader] Exchange: failed to persist token', e?.message);
-        }
-      } else {
-        console.warn('[cTrader] Exchange: no userId found in request, token only saved to cookie');
-      }
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    const expiresIn = Number(body.expiresIn || body.expires_in);
+    try {
+      await persistRotatedCtraderToken({
+        supabaseUrl,
+        serviceKey,
+        userId: auth.userId,
+        newRefreshToken: String(body.refreshToken),
+        newAccessToken: String(body.accessToken),
+        accessTokenExpiresAt: new Date(Date.now() + (Number.isFinite(expiresIn) ? Math.max(60, expiresIn) : 300) * 1000).toISOString(),
+      });
+    } catch (error) {
+      console.error('[cTrader] Exchange: failed to persist token', error);
+      res.status(503).json({ error: 'Could not securely save the cTrader connection. Please try again.' });
+      return;
     }
 
-    res.json({
-      accessToken: body.accessToken,
-      expiresIn: body.expiresIn,
-      refreshToken: body.refreshToken,
-    });
+    res.setHeader('Set-Cookie', [
+      `${REFRESH_COOKIE}=${encodeURIComponent(String(body.refreshToken))}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
+    ]);
+
+    // Access and refresh tokens remain server-side. The web client needs only
+    // confirmation because subsequent broker calls use its Supabase session.
+    res.json({ ok: true });
   } catch (err) {
     console.error('cTrader exchange error:', err);
     res.status(500).json({
