@@ -7,8 +7,11 @@ const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 
 function getCredentials() {
+  // Client ID is a public OAuth identifier: accept the VITE_ copy as a
+  // fallback so deployments that only set VITE_CTRADER_CLIENT_ID still work.
+  // The secret stays server-only (never read from a VITE_ var here).
   return {
-    clientId: process.env.CTRADER_CLIENT_ID || '',
+    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
     clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
   };
 }

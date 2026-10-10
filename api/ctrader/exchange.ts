@@ -5,8 +5,11 @@ import { requireUser } from '../_lib/auth.js';
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 function getCredentials() {
+  // Client ID is a public OAuth identifier: accept the VITE_ copy as a
+  // fallback so deployments that only set VITE_CTRADER_CLIENT_ID still work.
+  // The secret stays server-only (never read from a VITE_ var here).
   return {
-    clientId: process.env.CTRADER_CLIENT_ID || '',
+    clientId: process.env.CTRADER_CLIENT_ID || process.env.VITE_CTRADER_CLIENT_ID || '',
     clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
   };
 }
@@ -78,6 +81,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[cTrader] Missing production OAuth configuration:', missing.join(', '));
     res.status(503).json({
       error: 'cTrader OAuth is not configured for this deployment',
+      code: 'ctrader_oauth_not_configured',
+      missing,
+    });
+    return;
+  }
+
+  // Fail fast BEFORE burning the single-use authorization code: persisting
+  // the rotated refresh token requires the service-role key. Previously the
+  // code exchanged with cTrader first and only then discovered the DB was
+  // unreachable, surfacing as "Could not securely save the cTrader
+  // connection" and forcing the user to re-authorize from scratch.
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceKey) {
+    const missing = [!supabaseUrl && 'SUPABASE_URL', !serviceKey && 'SUPABASE_SERVICE_ROLE_KEY']
+      .filter(Boolean);
+    console.error('[cTrader] Exchange: missing database configuration:', missing.join(', '));
+    res.status(503).json({
+      error: 'cTrader connection cannot be saved: server database is not configured. Please try again later.',
+      code: 'ctrader_db_not_configured',
       missing,
     });
     return;
@@ -122,8 +145,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
     const expiresIn = Number(body.expiresIn || body.expires_in);
     try {
       await persistRotatedCtraderToken({
@@ -136,7 +157,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     } catch (error) {
       console.error('[cTrader] Exchange: failed to persist token', error);
-      res.status(503).json({ error: 'Could not securely save the cTrader connection. Please try again.' });
+      res.status(503).json({
+        error: 'Could not securely save the cTrader connection. Please try again.',
+        code: 'ctrader_persist_failed',
+        detail: error instanceof Error ? error.message : 'persistence failed',
+      });
       return;
     }
 

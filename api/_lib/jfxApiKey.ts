@@ -201,25 +201,49 @@ export async function persistRotatedCtraderToken(args: {
   };
   const body = JSON.stringify(tokenRecord);
   // 1. Upsert (creates the row when missing — the PATCH-only bug fix).
-  const upsertResponse = await fetch(`${base}/rest/v1/user_ctrader_tokens`, {
+  let upsertStatus = 0;
+  let upsertDetail = '';
+  let upsertFailed = false;
+  try {
+    const upsertResponse = await fetch(`${base}/rest/v1/user_ctrader_tokens`, {
       method: 'POST',
       headers: { ...headers, Prefer: 'resolution=merge-duplicates' },
       body,
     });
-  if (!upsertResponse.ok) {
+    upsertStatus = upsertResponse.status;
+    if (!upsertResponse.ok) {
+      upsertFailed = true;
+      try { upsertDetail = (await upsertResponse.text()).slice(0, 300); } catch { /* ignore */ }
+    }
+  } catch (err) {
+    upsertFailed = true;
+    upsertDetail = err instanceof Error ? err.message.slice(0, 300) : 'network error';
+  }
+  if (upsertFailed) {
     // 2. PATCH as well for existing rows on strict configs.
-    const patchResponse = await fetch(`${base}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({
-        refresh_token: newRefreshToken,
-        ...(newAccessToken ? { access_token: newAccessToken } : {}),
-        ...(accessTokenExpiresAt ? { access_token_expires_at: accessTokenExpiresAt } : {}),
-        updated_at: new Date().toISOString(),
-      }),
-    });
-    if (!patchResponse.ok) {
-      throw new Error(`Failed to persist rotated cTrader token (HTTP ${patchResponse.status}).`);
+    try {
+      const patchResponse = await fetch(`${base}/rest/v1/user_ctrader_tokens?user_id=eq.${userId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          refresh_token: newRefreshToken,
+          ...(newAccessToken ? { access_token: newAccessToken } : {}),
+          ...(accessTokenExpiresAt ? { access_token_expires_at: accessTokenExpiresAt } : {}),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      if (!patchResponse.ok) {
+        let patchDetail = '';
+        try { patchDetail = (await patchResponse.text()).slice(0, 300); } catch { /* ignore */ }
+        throw new Error(
+          `Failed to persist rotated cTrader token (upsert HTTP ${upsertStatus}${upsertDetail ? `: ${upsertDetail}` : ''}; patch HTTP ${patchResponse.status}${patchDetail ? `: ${patchDetail}` : ''}).`,
+        );
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Failed to persist rotated cTrader token')) throw err;
+      throw new Error(
+        `Failed to persist rotated cTrader token (upsert HTTP ${upsertStatus}${upsertDetail ? `: ${upsertDetail}` : ''}; patch transport error: ${err instanceof Error ? err.message.slice(0, 200) : 'unknown'}).`,
+      );
     }
   }
 
