@@ -72,10 +72,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       client_secret: clientSecret,
     });
 
+    // Bound the mint: an unbounded fetch that hangs until Vercel kills the
+    // invocation orphans the refresh lease and the single-use grant with no
+    // clean failure. AbortError flows through the normal catch/finally path.
     const tokenRes = await fetch(CTRADER_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
+      signal: AbortSignal.timeout(25000),
     });
 
     if (!tokenRes.ok) {

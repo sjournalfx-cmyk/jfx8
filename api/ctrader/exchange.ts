@@ -116,6 +116,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const tokenRes = await fetch(tokenUrl.toString(), {
       headers: { Accept: 'application/json' },
+      // Bound the call so a hung token endpoint fails cleanly instead of
+      // hanging until the invocation is killed (leaving the user to retry
+      // with a burned single-use code and no actionable error).
+      signal: AbortSignal.timeout(25000),
     });
 
     const rawText = await tokenRes.text();

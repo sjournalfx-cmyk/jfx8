@@ -180,8 +180,11 @@ async function mintAccessToken(
   tokenUrl.searchParams.set('client_id', clientId);
   tokenUrl.searchParams.set('client_secret', clientSecret);
 
+  // Bound the mint (see refresh.ts): an unbounded fetch that hangs until the
+  // invocation is killed orphans the refresh lease with no clean failure.
   const res = await fetch(tokenUrl.toString(), {
     headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(25000),
   });
 
   const body = await res.json().catch(() => ({}));
