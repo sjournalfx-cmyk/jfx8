@@ -141,6 +141,111 @@ describe('nvidiaAiService payload builder', () => {
     expect(payload.messages.at(-2)?.content).toBe('history-11');
     expect(payload.messages.at(-3)?.content).toBe('history-10');
   });
+
+  it('sends full mentor context: trade notes, mechanics, compliance, notebook, goals, positions', () => {
+    const mentorTrade: Trade = {
+      ...sampleTrade,
+      id: 'trade-2',
+      exitComment: 'Scaled out too early at resistance',
+      emotions: ['FOMO', 'Anxious'],
+      setupName: 'London breakout',
+      adherenceRate: 60,
+      executionGrade: 'D',
+      behaviorTags: ['FOMO / Early Entry', 'Moved Stop Loss'],
+    };
+    const payload = buildAiRequestPayload({
+      query: 'Review my recent trading.',
+      trades: [mentorTrade],
+      userProfile: sampleProfile,
+      history: [],
+      modelType: 'kimi',
+      extraContext: {
+        notes: [
+          {
+            id: 'n1',
+            title: 'Impatience reminder',
+            content: '<p>Stop entering before the candle closes.</p>',
+            date: '2026-09-20',
+            tags: ['psychology'],
+            color: 'yellow',
+          },
+        ],
+        goals: [
+          {
+            id: 'g1',
+            title: 'Make $2000 this month',
+            type: 'Financial',
+            metric: 'currency',
+            targetValue: 2000,
+            startValue: 0,
+            startDate: '2026-09-01',
+            endDate: '2026-09-30',
+            milestones: [],
+            status: 'active',
+            createdAt: '2026-09-01',
+          },
+        ],
+        openPositions: [
+          { symbol: 'EURUSD', side: 'BUY', volume: 0.5, openPrice: 1.085, currentPrice: 1.09, profit: 25 },
+        ],
+      },
+    });
+
+    const systemPrompt = payload.messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n');
+
+    // Trade mechanics + notes
+    expect(systemPrompt).toContain('Private journal note');
+    expect(systemPrompt).toContain('Scaled out too early at resistance');
+    expect(systemPrompt).toContain('"entry": 3200');
+    expect(systemPrompt).toContain('"lots": 1');
+    expect(systemPrompt).toContain('London breakout');
+    // Per-trade compliance
+    expect(systemPrompt).toContain('"grade": "D"');
+    expect(systemPrompt).toContain('Moved Stop Loss');
+    expect(systemPrompt).toContain('overallComplianceRate');
+    // Notebook + goals + positions
+    expect(systemPrompt).toContain('Impatience reminder');
+    expect(systemPrompt).toContain('Stop entering before the candle closes');
+    expect(systemPrompt).toContain('Make $2000 this month');
+    expect(systemPrompt).toContain('EURUSD');
+    // Grounding instructions
+    expect(systemPrompt).toContain('GROUNDING');
+  });
+
+  it('keeps research mode free of mentor extras even when provided', () => {
+    const payload = buildAiRequestPayload({
+      query: 'Explain risk management.',
+      trades: [sampleTrade],
+      userProfile: sampleProfile,
+      modelType: 'deepseek',
+      extraContext: {
+        notes: [
+          {
+            id: 'n1',
+            title: 'Secret notebook title',
+            content: 'Secret notebook content',
+            date: '2026-09-20',
+            tags: [],
+            color: 'yellow',
+          },
+        ],
+        goals: [],
+      },
+    });
+
+    const systemPrompt = payload.messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n');
+
+    expect(payload.assistantMode).toBe('research');
+    expect(systemPrompt).not.toContain('Secret notebook title');
+    expect(systemPrompt).not.toContain('Secret notebook content');
+    expect(systemPrompt).not.toContain('Private journal note');
+  });
 });
 
 describe('nvidiaAiService fallback model', () => {

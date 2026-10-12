@@ -5,10 +5,13 @@ import {
     TrendingUp, TrendingDown, XCircle, X,
     Zap, ArrowLeftToLine, StepForward, ChevronDown,
     Trash2, Lock, Unlock, Check, Search, Download, FileUp, RefreshCw,
-    ZoomIn, ZoomOut, Calendar, List, Star, Loader2, Monitor
+    ZoomIn, ZoomOut, Calendar, List, Star, Loader2, Monitor,
+    Maximize, Minimize, Palette, Minus, Copy
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
-import { DrawingToolbar } from './backtest/DrawingToolbar';
+import { DrawingToolbarV2 } from './backtest/DrawingToolbarV2';
+import { ColorDrawer, WidthDrawer, LineStyleDrawer, LineStyleKey } from './backtest/DrawingStyleDrawers';
+import { usePlacementCursor, PlacementCursorPoint, computeAimGap } from './backtest/usePlacementCursor';
 import { DrawingLayer } from './backtest/DrawingLayer';
 import { Drawing, Point, ToolType } from './backtest/types';
 import { timeToNearestBarIndex } from './backtest/utils';
@@ -21,7 +24,7 @@ import { loadSeries, saveSeries, mergeBars, peekMeta, listCachedSeries, CachedSe
 import { dataService } from '../services/dataService';
 import { fetchCtraderCandles, isAuthenticated as isCtraderAuthenticated, getAccounts as getCtraderAccounts, refreshToken as refreshCtraderToken, getSelectedAccountId } from '../services/ctraderService';
 import { fetchSharedCandles } from '../lib/sharedCandles';
-import CustomChart from './CustomChart';
+import CustomChart, { PADDING_RIGHT as PRICE_SCALE_WIDTH } from './CustomChart';
 import CtraderAuthModal from './backtest/CtraderAuthModal';
 import StartScreen from './backtest/StartScreen';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
@@ -67,6 +70,41 @@ const BACKTEST_TF_SECONDS: Record<string, number> = {
     'M1': 60, 'M5': 300, 'M15': 900, 'M30': 1800, 'H1': 3600, 'H4': 14400, 'D1': 86400
 };
 const BACKTEST_TFS = Object.keys(BACKTEST_TF_SECONDS);
+
+// Friendly labels for the armed-tool chip and the style-drawer subtitles.
+const TOOL_LABELS: Record<string, string> = {
+    cursor: 'Cursor', trendline: 'Trend Line', ray: 'Ray', arrow: 'Arrow',
+    horizontal: 'Horizontal Line', vertical: 'Vertical Line', rect: 'Rectangle',
+    channel: 'Channel', long: 'Long Position', short: 'Short Position',
+    fib: 'Fib Retracement', text: 'Text', measure: 'Measure',
+};
+
+// ── Orientation lock (web, no @capacitor/*) ─────────────────────────────────
+// Uses the standard Screen Orientation API. Every call is wrapped: Safari iOS
+// rejects `lock()` with NotAllowedError (it requires fullscreen), desktop
+// Firefox/older Safari have no `lock()` at all. The lock is ALWAYS released
+// on exit/unmount so the page can never be left stuck sideways.
+const lockOrientation = (orientation: string) => {
+    try {
+        const so = typeof window !== 'undefined' ? (window.screen as any)?.orientation : null;
+        if (so && typeof so.lock === 'function') so.lock(orientation);
+    } catch { /* unsupported — fullscreen-less Safari / desktop */ }
+};
+
+const unlockOrientation = () => {
+    try {
+        const so = typeof window !== 'undefined' ? (window.screen as any)?.orientation : null;
+        if (so && typeof so.unlock === 'function') so.unlock();
+    } catch { /* no-op */ }
+};
+
+// Coarse pointers (phones/tablets): bigger snap radius + haptic feedback.
+const IS_COARSE_POINTER =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+
+const hapticTick = (ms: number = 8) => {
+    try { (navigator as any)?.vibrate?.(ms); } catch { /* no-op */ }
+};
 
 // TradingView-style watchlist (same data as ChartGrid)
 export const WATCHLISTS: Record<string, string[]> = {    'Forex': [
@@ -222,6 +260,27 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     })();
 
     const [showWelcome, setShowWelcome] = useState(!hasCachedData);
+    // Fullscreen canvas: hides the top header and the bottom replay bar so the
+    // chart owns the whole viewport (phone-web landscape). Always releases the
+    // orientation lock on the way out — see lockOrientation/unlockOrientation.
+    const [isFullscreenCanvas, setIsFullscreenCanvas] = useState(false);
+    useEffect(() => {
+        if (showWelcome && isFullscreenCanvas) {
+            setIsFullscreenCanvas(false);
+            unlockOrientation();
+        }
+    }, [showWelcome, isFullscreenCanvas]);
+    // Unmount safety net: never leave the viewport orientation-locked.
+    useEffect(() => () => { unlockOrientation(); }, []);
+
+    const toggleFullscreenCanvas = useCallback(() => {
+        setIsFullscreenCanvas(prev => {
+            const next = !prev;
+            if (next) lockOrientation('landscape');
+            else unlockOrientation();
+            return next;
+        });
+    }, []);
     // Load cached chart data when dataSource is cache
     useEffect(() => {
         if (dataSource === 'cache') {
@@ -325,10 +384,21 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [magnetMode, setMagnetMode] = useLocalStorage<boolean>('jfx_backtest_magnet', false);
     const [currentColor, setCurrentColor] = useLocalStorage<string>('jfx_backtest_color', '#2962ff');
     // Selection & Edit State
-    const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+    // selectedIds is the source of truth (TradingView multi-select); the SVG
+    // DrawingLayer on web only knows about a single id, so selectedDrawingId is
+    // derived from the last entry and drives that layer's highlight/handles.
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const selectedDrawingId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
     const [hoveredDrawingId, setHoveredDrawingId] = useState<string | null>(null);
-    const [dragState, setDragState] = useState<{ drawingId: string, handle: 'p1' | 'p2' | 'move' | 'target' | 'stop' } | null>(null);
+    const [dragState, setDragState] = useState<{ drawingId: string, handle: 'p1' | 'p2' | 'move' | 'target' | 'stop' | 'entry' } | null>(null);
     const [dragStartPos, setDragStartPos] = useState<{ time: number, price: number, logical?: number } | null>(null);
+    // Sticky tools (TradingView): when on, a tool stays armed after each draw.
+    const [stickyMode, setStickyMode] = useLocalStorage<boolean>('jfx_tool_sticky', false);
+    // Magnet snap dot (px) — drawn here because web CustomChart has no
+    // snapIndicator prop of its own.
+    const [snapIndicator, setSnapIndicator] = useState<{ x: number, y: number } | null>(null);
+    // Which style drawer is open (null = none).
+    const [styleDrawer, setStyleDrawer] = useState<'color' | 'width' | 'style' | null>(null);
 
     const selectedDrawing = useMemo(() => drawings.find(d => d.id === selectedDrawingId) || null, [drawings, selectedDrawingId]);
     const currentStrokeWidth = selectedDrawing?.strokeWidth || toolDefaults[activeTool]?.strokeWidth || 1;
@@ -348,9 +418,43 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
         }
     }, [zoomLevel, setZoomLevel, setChartViewState, symbol, timeframe]);
 
-    // Toolbar State (Position: pixels from top-left, Orientation)
-    const [toolbarPos, setToolbarPos] = useLocalStorage<{ x: number, y: number }>('jfx_backtest_toolbar_pos_v2', { x: 60, y: 80 });
+    // Toolbar State — DrawingToolbarV2 is a docked rail/top-bar. The legacy
+    // free-floating `toolbarPos` overlay state is gone: V2 ignores it and its
+    // own grip-drag is in-component, so keeping the state would be dead code.
     const [toolbarOrientation, setToolbarOrientation] = useLocalStorage<'horizontal' | 'vertical'>('jfx_backtest_toolbar_orientation', 'horizontal');
+    const toggleMagnetModeCb = useCallback(() => setMagnetMode((v: boolean) => !v), [setMagnetMode]);
+    const toggleToolbarOrientationCb = useCallback(() => setToolbarOrientation(prev => (prev === 'horizontal' ? 'vertical' : 'horizontal')), [setToolbarOrientation]);
+    // Toolbar lock = unlock-all (TradingView parity): pressing it while any
+    // single drawing is locked clears every lock instead of re-locking.
+    const toggleLockedCb = useCallback(() => {
+        if (isLocked || drawings.some(d => d.isLocked)) {
+            setDrawings(prev => prev.map(d => (d.isLocked ? { ...d, isLocked: false } : d)));
+            setSelectedIds([]);
+        } else {
+            setSelectedIds([]);
+            setIsLocked(true);
+        }
+    }, [isLocked, drawings, setDrawings, setIsLocked]);
+    // Show the toolbar as locked when the global lock OR any drawing is locked,
+    // so the unlock-all action stays discoverable.
+    const toolbarLocked = isLocked || drawings.some(d => d.isLocked);
+    // Locked drawings are click-through: drop them from selection and close any
+    // style drawer so no selection glow sticks and pan stays free.
+    useEffect(() => {
+        setSelectedIds(prev => {
+            if (prev.length === 0) return prev;
+            if (isLocked) return [];
+            const next = prev.filter(id => {
+                const d = drawings.find(x => x.id === id);
+                return d && !d.isLocked;
+            });
+            return next.length === prev.length ? prev : next;
+        });
+        if (styleDrawer && (isLocked || !selectedIds.some(id => {
+            const d = drawings.find(x => x.id === id);
+            return d && !d.isLocked;
+        }))) setStyleDrawer(null);
+    }, [isLocked, drawings, selectedIds, styleDrawer]);
 
 // Replay Modes
     const [isSelectBarMode, setIsSelectBarMode] = useState(false);
@@ -361,14 +465,23 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, drawing: Drawing } | null>(null);
     const [clipboard, setClipboard] = useState<Drawing | null>(null);
 
+    // Latest-ref for resetAim (declared further down via usePlacementCursor).
+    // resetDrawingInteractionState must stay above (earlier callbacks list it),
+    // so it reaches resetAim through this ref instead of the TDZ binding.
+    const resetAimRef = useRef<() => void>(() => {});
+    const placingOneClickRef = useRef<'horizontal' | 'vertical' | null>(null);
     const resetDrawingInteractionState = useCallback(() => {
-        setSelectedDrawingId(null);
+        setSelectedIds([]);
         setHoveredDrawingId(null);
         setCurrentDrawing(null);
+        placingOneClickRef.current = null;
         setContextMenu(null);
         setClipboard(null);
         setDragState(null);
         setDragStartPos(null);
+        setSnapIndicator(null);
+        setStyleDrawer(null);
+        resetAimRef.current();
     }, []);
 
 // Undo/Redo State
@@ -1131,6 +1244,67 @@ setAllData(validData);
         setHistoryStep(nextPointer);
     }, []);
 
+    // ── TV-parity selection helpers (multi-select + sticky tools) ──
+    const handleSelectDrawing = useCallback((id: string, additive?: boolean) => {
+        if (additive) {
+            setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+        } else {
+            setSelectedIds([id]);
+        }
+    }, []);
+    const deleteSelected = useCallback(() => {
+        const ids = selectedIds.length ? selectedIds : (selectedDrawingId ? [selectedDrawingId] : []);
+        if (!ids.length) return;
+        setDrawings(prev => { const next = prev.filter(d => !ids.includes(d.id)); pushToHistory(next); return next; });
+        setSelectedIds([]);
+    }, [selectedIds, selectedDrawingId, pushToHistory]);
+    const duplicateSelected = useCallback(() => {
+        const ids = selectedIds.length ? selectedIds : (selectedDrawingId ? [selectedDrawingId] : []);
+        const now = Date.now();
+        const copies: Drawing[] = drawings.filter(d => ids.includes(d.id)).map((d, i) => ({ ...d, id: (now + i).toString(), p1: { ...d.p1 }, p2: d.p2 ? { ...d.p2 } : undefined, isLocked: false }));
+        if (!copies.length) return;
+        setDrawings(prev => { const next = [...prev, ...copies]; pushToHistory(next); return next; });
+        setSelectedIds(copies.map(c => c.id));
+    }, [drawings, selectedIds, selectedDrawingId, pushToHistory]);
+    // Sticky tools: when on, a tool stays armed after each drawing.
+    const finishToolAfterDraw = useCallback(() => { if (!stickyMode) setActiveTool('cursor'); }, [stickyMode]);
+
+    // Magnet with a pixel snap radius (TradingView): only snaps when the cursor
+    // is within SNAP_PX of an OHLC level, and reports the snap dot position.
+    // Fingers are imprecise — a much wider radius on touch devices.
+    const SNAP_PX = IS_COARSE_POINTER ? 24 : 12;
+    const snapPoint = useCallback((sx: number, sy: number, time: number, price: number, logical?: number): { point: Point, snapped: boolean, snapY?: number } => {
+        if (!magnetMode || !allData.length) return { point: { time, price, logical }, snapped: false };
+        const idx = Math.max(0, Math.min(allData.length - 1, Math.round(logical ?? 0)));
+        const candle = allData[idx];
+        const series = candlestickSeriesRef.current;
+        if (!candle || !series) return { point: { time, price, logical }, snapped: false };
+        const levels = [candle.open, candle.high, candle.low, candle.close];
+        let best = price; let bestDist = SNAP_PX; let snapY: number | undefined;
+        for (const lv of levels) { const ly = series.priceToCoordinate(lv); if (ly === null) continue; const dist = Math.abs(ly - sy); if (dist < bestDist) { bestDist = dist; best = lv; snapY = ly; } }
+        const snapped = snapY !== undefined;
+        return { point: { time: candle.time, price: best, logical: idx }, snapped, snapY };
+    }, [magnetMode, allData, SNAP_PX]);
+
+    // Per-chart drawing visibility (TradingView parity): a drawing remembers
+    // the symbol/timeframe it was created on (originKey). With
+    // syncAllTimeframes === false it only renders on its home chart; the default
+    // (undefined/true) shows everywhere, so existing drawings are unaffected.
+    const symbolTfKey = `${symbol}_${timeframe}`;
+    const visibleDrawings = useMemo(
+        () => drawings.filter(d => {
+            const dd = d as any;
+            if (dd.syncAllTimeframes === false) return (dd.originKey || symbolTfKey) === symbolTfKey;
+            return true;
+        }),
+        [drawings, symbolTfKey]
+    );
+    const withOrigin = useCallback((obj: any) => ({
+        ...obj,
+        originKey: (obj.originKey || symbolTfKey),
+        syncAllTimeframes: obj.syncAllTimeframes ?? true,
+    }), [symbolTfKey]);
+
     const resetDrawingHistory = useCallback((snapshot: Drawing[] = []) => {
         if (snapshot.length === 0) {
             historyStatesRef.current = [];
@@ -1148,11 +1322,12 @@ setAllData(validData);
     }, []);
 
     const clearDrawings = useCallback(() => {
+        if (drawings.length === 0) return;
         setDrawings([]);
         resetDrawingInteractionState();
         pushToHistory([]);
         addToast({ type: 'info', title: 'Drawings cleared' });
-    }, [pushToHistory, addToast, resetDrawingInteractionState]);
+    }, [drawings, pushToHistory, addToast, resetDrawingInteractionState]);
 
     const handleUndo = useCallback(() => {
         if (historyPointerRef.current > 0) {
@@ -1207,6 +1382,29 @@ setAllData(validData);
         }
 
     }, [pushToHistory, setToolDefaults, setCurrentColor]);
+
+    // Batch style edit for the style drawers: applies to EVERY selected
+    // drawing with a SINGLE history entry (per-id updateDrawingProperty calls
+    // would spam undo). Mirrors its toolDefaults + currentColor fan-out.
+    const applyStyleToSelection = useCallback((updates: { color?: string; strokeWidth?: number; strokeStyle?: LineStyleKey }) => {
+        const ids = selectedIds.length ? selectedIds : (selectedDrawingId ? [selectedDrawingId] : []);
+        if (ids.length === 0) return;
+        const types = new Set<string>();
+        drawings.filter(d => ids.includes(d.id)).forEach(d => types.add(d.type));
+        setDrawings(prev => {
+            const next = prev.map(d => (ids.includes(d.id) ? { ...d, ...updates } : d));
+            pushToHistory(next);
+            return next;
+        });
+        if (updates.color || updates.strokeWidth || updates.strokeStyle) {
+            setToolDefaults(prev => {
+                const next = { ...prev };
+                types.forEach(t => { next[t] = { ...(next[t] || {}), ...updates }; });
+                return next;
+            });
+        }
+        if (typeof updates.color === 'string') setCurrentColor(updates.color);
+    }, [selectedIds, selectedDrawingId, drawings, pushToHistory, setToolDefaults, setCurrentColor]);
 
     const handleToolbarColorChange = useCallback((color: string) => {
         if (selectedDrawingId) {
@@ -1337,16 +1535,8 @@ setAllData(validData);
         addToast({ type: 'success', title: 'Pasted', message: 'Drawing pasted at cursor' });
     }, [clipboard, getChartCoordinates, pushToHistory, addToast]);
 
-    const getSnappedPoint = useCallback((time: number, price: number, logical?: number): Point => {
-        if (!magnetMode || !allData.length) return { time, price, logical };
-        const candle = allData[Math.round(logical ?? 0)];
-        if (!candle) return { time, price, logical };
-        const levels = [candle.open, candle.high, candle.low, candle.close];
-        const closestLevel = levels.reduce((p, c) => Math.abs(c - price) < Math.abs(p - price) ? c : p);
-        return { time: candle.time, price: closestLevel, logical: Math.round(logical ?? 0) };
-    }, [magnetMode, allData]);
-
     const onMouseDown = (e: React.MouseEvent) => {
+        if ((e.target as Element)?.closest?.('[data-drawing-toolbar]')) return;
         if (!chartRef.current || !candlestickSeriesRef.current || e.button !== 0) return;
         if (contextMenu) setContextMenu(null);
 
@@ -1367,20 +1557,36 @@ setAllData(validData);
             return;
         }
 
-        // If clicking while a drawing is already in progress, finalize it
+        // If clicking while a drawing is already in progress, finalize it at
+        // THIS click (tap-tap drawing). The preview p2 is stale between clicks,
+        // so rebase it onto the click point — otherwise tap-tap creates a
+        // zero-length drawing.
         if (currentDrawing && (currentDrawing.type !== 'horizontal' && currentDrawing.type !== 'vertical')) {
-            const next = [...drawings, currentDrawing];
+            const snapEnd = snapPoint(x, y, coords.time, coords.price as any, coords.logical).point;
+            const finalized: any = { ...currentDrawing, p2: snapEnd };
+            const fdx = (snapEnd.logical ?? coords.logical ?? 0) - (currentDrawing.p1.logical ?? 0);
+            const fdy = (snapEnd.price ?? 0) - (currentDrawing.p1.price ?? 0);
+            if (Math.abs(fdx) < 0.5 && Math.abs(fdy) < 1e-9) {
+                // Second click landed on the anchor — keep the preview armed.
+                return;
+            }
+            const next = [...drawings, withOrigin(finalized)];
             setDrawings(next);
             pushToHistory(next);
-            setSelectedDrawingId(currentDrawing.id);
+            setSelectedIds([currentDrawing.id]);
             setCurrentDrawing(null);
-            setActiveTool('cursor');
             addToast({ type: 'success', title: 'Drawing placed', duration: 1000 });
+            finishToolAfterDraw();
             return;
         }
 
         if (activeTool === 'cursor') {
-            if (selectedDrawingId) setSelectedDrawingId(null);
+            // A press that began on a drawing already selected it in the layer;
+            // don't immediately clear it. Same guard for the floating toolbar.
+            const startedOnDrawing = (e.target as Element)?.closest?.('[data-drawing-hit]');
+            const startedOnToolbar = (e.target as Element)?.closest?.('[data-drawing-toolbar]');
+            if (startedOnToolbar || startedOnDrawing) return;
+            if (selectedDrawingId) setSelectedIds([]);
             return;
         }
         if (isLocked) {
@@ -1388,17 +1594,21 @@ setAllData(validData);
             return;
         }
 
-        const snapped = getSnappedPoint(coords.time, coords.price as any, coords.logical);
+        const snapRes = snapPoint(x, y, coords.time, coords.price as any, coords.logical);
+        const snapped = snapRes.point;
+        setSnapIndicator(snapRes.snapped && snapRes.snapY !== undefined ? { x, y: snapRes.snapY } : null);
         const toolStyle = toolDefaults[activeTool] || {};
 
-        let drawingProps: any = {
+        let drawingProps: any = withOrigin({
             id: Date.now().toString(),
             type: activeTool,
             p1: snapped,
             p2: snapped, // Initialize p2 same as p1 for immediate rendering
             ...toolStyle,
             color: toolStyle.color || currentColor || '#2962ff',
-        };
+        });
+        // Pause autoplay the moment a drawing starts (TradingView parity).
+        setIsPlaying(false);
 
         // Initialize Long/Short position tool with entry/target/stop
         if (activeTool === 'long' || activeTool === 'short') {
@@ -1418,6 +1628,17 @@ setAllData(validData);
             drawingProps.stop = isLong ? entryPrice - defaultRisk : entryPrice + defaultRisk;
         }
 
+        // Text tool (TradingView): a single click places it, already selected.
+        if (activeTool === 'text') {
+            drawingProps.text = drawingProps.text || 'Text';
+            const next = [...drawings, drawingProps];
+            setDrawings(next);
+            pushToHistory(next);
+            setSelectedIds([drawingProps.id]);
+            finishToolAfterDraw();
+            return;
+        }
+
         setCurrentDrawing(drawingProps);
     };
 
@@ -1431,6 +1652,16 @@ setAllData(validData);
         if (!coords) return;
 
         if (dragState && dragStartPos) {
+            // 4px dead-zone: a plain click on a selected drawing must not nudge
+            // it by 1-2px and pollute undo history.
+            const startDrag = dragStartPos as any;
+            if (typeof startDrag.startClientX === 'number' && typeof e.clientX === 'number') {
+                const movedPx = Math.hypot(e.clientX - startDrag.startClientX, (e.clientY ?? 0) - (startDrag.startClientY ?? 0));
+                if (movedPx < 4 && !dragMovedRef.current) return;
+                dragMovedRef.current = true;
+            } else {
+                dragMovedRef.current = true;
+            }
             const dPrice = coords.price - dragStartPos.price;
             const dTime = coords.time - dragStartPos.time;
             const dLog = (coords.logical ?? 0) - (dragStartPos.logical ?? 0);
@@ -1444,13 +1675,17 @@ setAllData(validData);
                 if (dragState.handle === 'move') {
                     const p1Base = initialData.initialP1;
                     const p2Base = initialData.initialP2;
+                    // Axis lock (TradingView): horizontal lines only move in
+                    // price, vertical lines only in time.
+                    const lockTime = d.type === 'horizontal';
+                    const lockPrice = d.type === 'vertical';
                     const getRebasedPoint = (base: any) => {
-                        const newLog = base.logical !== undefined ? Math.round(base.logical + dLog) : undefined;
-                        let newTime = base.time + dTime;
-                        if (newLog !== undefined && newLog >= 0 && newLog < allData.length) {
+                        const newLog = base.logical !== undefined ? Math.round(base.logical + (lockTime ? 0 : dLog)) : undefined;
+                        let newTime = lockTime ? base.time : base.time + dTime;
+                        if (!lockTime && newLog !== undefined && newLog >= 0 && newLog < allData.length) {
                              newTime = allData[newLog].time;
                         }
-                        return { time: newTime, price: base.price + dPrice, logical: newLog };
+                        return { time: newTime, price: base.price + (lockPrice ? 0 : dPrice), logical: newLog };
                     };
                     newD.p1 = getRebasedPoint(p1Base);
                     if (p2Base) newD.p2 = getRebasedPoint(p2Base);
@@ -1463,13 +1698,21 @@ setAllData(validData);
                     newD.target = coords.price;
                 } else if (dragState.handle === 'stop') {
                     newD.stop = coords.price;
+                } else if (dragState.handle === 'entry') {
+                    newD.entry = coords.price;
+                    newD.p1 = { ...newD.p1, price: coords.price };
                 } else {
-                    const snp = getSnappedPoint(coords.time, coords.price as any, coords.logical);
+                    const snp = snapPoint(x, y, coords.time, coords.price as any, coords.logical).point;
                     if (dragState.handle === 'p1') {
-                        newD.p1 = snp;
+                        // Axis lock per handle: horizontal p1 moves price only,
+                        // vertical time only.
+                        if (d.type === 'horizontal') newD.p1 = { ...newD.p1, price: snp.price };
+                        else if (d.type === 'vertical') newD.p1 = { ...snp, price: newD.p1.price };
+                        else newD.p1 = snp;
                         if (d.type === 'long' || d.type === 'short') newD.entry = snp.price;
                     } else if (dragState.handle === 'p2') {
-                        newD.p2 = snp;
+                        if (d.type === 'horizontal') newD.p2 = newD.p2 ? { ...newD.p2, price: snp.price } : { ...snp };
+                        else newD.p2 = snp;
                     }
                 }
                 return newD;
@@ -1477,7 +1720,9 @@ setAllData(validData);
             setTick(t => t + 1);
         }
         if (currentDrawing) {
-            const snp = getSnappedPoint(coords.time, coords.price as any, coords.logical);
+            const snapLive = snapPoint(x, y, coords.time, coords.price as any, coords.logical);
+            const snp = snapLive.point;
+            setSnapIndicator(snapLive.snapped && snapLive.snapY !== undefined ? { x, y: snapLive.snapY } : null);
 
             // For Long/Short tools, dynamically update target/stop based on mouse position
             if (currentDrawing.type === 'long' || currentDrawing.type === 'short') {
@@ -1500,19 +1745,32 @@ setAllData(validData);
                     stop: isLong ? entryPrice - risk : entryPrice + risk
                 } : null);
             } else if (currentDrawing.type === 'ray') {
+                // WEB-ONLY: rays stay locked to a horizontal line. Web's
+                // utils.getRayCoordinates documents this as intentional and the
+                // canvas renderer forces it, so the preview must match.
                 setCurrentDrawing(prev => prev ? {
                     ...prev,
                     p2: { ...snp, price: prev.p1.price }
                 } : null);
             } else {
-                setCurrentDrawing(prev => prev ? { ...prev, p2: snp } : null);
+                // One-click line tools keep their axis while the preview follows
+                // the cursor along the free axis.
+                const nextP2 = currentDrawing.type === 'horizontal'
+                    ? { ...snp, time: currentDrawing.p1.time, logical: currentDrawing.p1.logical }
+                    : currentDrawing.type === 'vertical'
+                        ? { ...snp, price: currentDrawing.p1.price }
+                        : snp;
+                setCurrentDrawing(prev => prev ? { ...prev, p2: nextP2 } : null);
             }
             setTick(t => t + 1);
         }
     };
 
     const handleMouseUp = () => {
-        if (dragState) pushToHistory(drawings);
+        // Only snapshot history when the drawing actually moved — a plain click
+        // on a selected drawing must leave history untouched.
+        if (dragState && dragMovedRef.current) pushToHistory(drawings);
+        dragMovedRef.current = false;
 
         if (currentDrawing) {
             // Horizontal and vertical tools are 1-click tools, so we finalize them immediately.
@@ -1532,27 +1790,60 @@ setAllData(validData);
                 // If it's a one-click tool OR a significant drag (dist > 5px), finalize it.
                 // Otherwise, keep it as an active preview (supporting click-move-click).
                 if (isOneClickTool || dist > 5) {
-                    const next = [...drawings, currentDrawing];
+                    const next = [...drawings, withOrigin(currentDrawing)];
                     setDrawings(next);
                     pushToHistory(next);
-                    setSelectedDrawingId(currentDrawing.id);
+                    setSelectedIds([currentDrawing.id]);
                     setCurrentDrawing(null);
-                    setActiveTool('cursor');
+                    finishToolAfterDraw();
                 }
             }
         }
         setDragState(null);
         setDragStartPos(null);
+        setSnapIndicator(null);
     };
 
-    const handleMouseDownHandle = useCallback((e: React.MouseEvent, drawingId: string, handle: 'p1' | 'p2' | 'move' | 'target' | 'stop') => {
-        if (!mousePos || isLocked) return;
-        const coords = getChartCoordinates(mousePos.x, mousePos.y);
+    // A click on a selected drawing selects it (and clears the context menu).
+    // NOTE: web's DrawingLayer emits this for mouse double-click only — it has
+    // no touch event plumbing — so this is the desktop path.
+    const handleDoubleClickDrawing = useCallback((drawing: Drawing) => {
+        setContextMenu(null);
+        setSelectedIds([drawing.id]);
+    }, []);
+
+    const handleMouseDownHandle = useCallback((e: React.MouseEvent, drawingId: string, handle: 'p1' | 'p2' | 'move' | 'target' | 'stop' | 'entry') => {
+        if (isLocked) return;
+        // Creation wins over dragging: with a drawing tool armed, presses that
+        // land on old drawings must fall through to the container so the NEW
+        // drawing starts — never grab/move the old one (body or handles).
+        if (activeTool !== 'cursor') return;
+        // Grab origin MUST come from the event itself. Touch paths synthesize a
+        // mouse event carrying the real finger location, but the old code read
+        // the cached `mousePos` state (stale on touch) — so dragStartPos was
+        // captured away from the finger and drawings jumped on grab.
+        const rect = chartContainerRef.current?.getBoundingClientRect();
+        let px: number | null = null;
+        let py: number | null = null;
+        if (rect && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+            px = e.clientX - rect.left;
+            py = e.clientY - rect.top;
+        } else if (mousePos) {
+            px = mousePos.x;
+            py = mousePos.y;
+        }
+        if (px === null || py === null) return;
+        setMousePos({ x: px, y: py });
+        const coords = getChartCoordinates(px, py);
         if (coords) {
             const drawing = drawings.find(d => d.id === drawingId);
             if (drawing) {
+                if (drawing.isLocked) return;
+                dragMovedRef.current = false;
                 setDragStartPos({
                     ...coords,
+                    startClientX: typeof e.clientX === 'number' ? e.clientX : undefined,
+                    startClientY: typeof e.clientY === 'number' ? e.clientY : undefined,
                     initialP1: { ...drawing.p1 },
                     initialP2: drawing.p2 ? { ...drawing.p2 } : undefined,
                     initialEntry: drawing.entry,
@@ -1562,17 +1853,597 @@ setAllData(validData);
                 setDragState({ drawingId, handle });
             }
         }
-    }, [mousePos, isLocked, getChartCoordinates, drawings]);
+    }, [mousePos, isLocked, activeTool, getChartCoordinates, drawings]);
 
+    // Suppress the native browser menu on the chart canvas. Right-click on a
+    // drawing is handled by DrawingLayer -> handleContextMenuDrawing.
     const handleContextMenuInternal = (e: React.MouseEvent) => {
         e.preventDefault();
-        if (activeTool !== 'cursor' || currentDrawing) { setActiveTool('cursor'); setCurrentDrawing(null); return; }
+        if (activeTool !== 'cursor' || currentDrawing) { setActiveTool('cursor'); setCurrentDrawing(null); resetAimRef.current(); return; }
         if (clipboard) setContextMenu({ x: e.clientX, y: e.clientY, drawing: { id: 'paste-dummy' } as any });
     };
 
     const handleContextMenuDrawing = useCallback((e: React.MouseEvent, drawing: Drawing) => {
         setContextMenu({ x: e.clientX, y: e.clientY, drawing });
     }, []);
+
+    // ── Touch drawing + placement cursor (TradingView aim model) ───────────
+    // While a drawing tool is armed on a coarse pointer, a single-finger drag
+    // moves a decoupled cursor (blue dot + crosshair, rendered below as an
+    // overlay because web CustomChart has no `placementCursor` prop) and a TAP
+    // commits at the cursor — the finger never covers the target. The desktop
+    // mouse flow is untouched: aimPlacement is false there.
+    const longPressTimerRef = useRef<number | null>(null);
+    const longPressTriggeredRef = useRef(false);
+    const touchStartClientRef = useRef<{ x: number; y: number } | null>(null);
+    const touchMovedRef = useRef(false);
+    // Drag dead-zone bookkeeping (shared by mouse and touch).
+    const dragMovedRef = useRef(false);
+    const snapHapticOnRef = useRef(false);
+    const lastEmptyTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+    // rAF-throttled tick: touchmove fires faster than React can re-render the
+    // SVG layer — coalesce per frame so low-end phones don't lag mid-drag.
+    const rafTickRef = useRef<number | null>(null);
+    const queueTick = useCallback(() => {
+        if (rafTickRef.current !== null) return;
+        rafTickRef.current = requestAnimationFrame(() => {
+            rafTickRef.current = null;
+            setTick(t => t + 1);
+        });
+    }, []);
+    useEffect(() => () => {
+        if (rafTickRef.current !== null) cancelAnimationFrame(rafTickRef.current);
+    }, []);
+
+    const getTouchCoords = useCallback((touch: Touch | React.Touch) => {
+        const rect = chartContainerRef.current?.getBoundingClientRect();
+        if (!rect) return null;
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        return { x, y, clientX: touch.clientX, clientY: touch.clientY };
+    }, []);
+
+    const clearLongPress = useCallback(() => {
+        if (longPressTimerRef.current !== null) {
+            window.clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    }, []);
+    useEffect(() => () => { clearLongPress(); }, [clearLongPress]);
+
+    // Pause replay the moment a drawing tool is armed: the chart must not scroll
+    // new bars under the aiming finger.
+    useEffect(() => {
+        if (activeTool !== 'cursor') setIsPlaying(false);
+    }, [activeTool]);
+
+    const resolvePlacementCursor = useCallback((x: number, y: number): PlacementCursorPoint | null => {
+        if (!chartRef.current || !candlestickSeriesRef.current) return null;
+        const c = getChartCoordinates(x, y);
+        if (!c) return null;
+        const r = snapPoint(x, y, c.time as number, c.price as number, c.logical);
+        // WYSIWYG dot: when magnet snaps, the dot must sit ON the snapped bar —
+        // not at the finger's x — or the drawing visibly shifts horizontally the
+        // moment it commits.
+        let cx = x;
+        if (r.snapped) {
+            const idx = Math.round((r.point as any).logical ?? (c.logical as number) ?? 0);
+            const bx = chartRef.current.timeScale().logicalToCoordinate(idx);
+            if (typeof bx === 'number' && Number.isFinite(bx)) cx = bx;
+        }
+        return {
+            x: cx,
+            y: r.snapped && r.snapY !== undefined ? r.snapY : y,
+            time: (r.point as any).time,
+            price: (r.point as any).price,
+            logical: (r.point as any).logical ?? (c.logical as number) ?? 0,
+            snapped: r.snapped,
+        };
+    }, [getChartCoordinates, snapPoint]);
+
+    const {
+        cursor: aimCursor, phase: aimPhase, cursorRef: aimCursorRef, phaseRef: aimPhaseRef,
+        beginAim, moveAim, endAim, setPhase: setAimPhase, reset: resetAim,
+    } = usePlacementCursor(
+        resolvePlacementCursor,
+        // Adaptive thumb gap: ~18% of chart height mid-chart, shrinking toward
+        // thumb clearance near the bottom edge. `dimensions` is declared below,
+        // so read it lazily at event time (see the hook's own docs).
+        (fingerYPx: number) => computeAimGap(fingerYPx, dimensions.height),
+    );
+    // Latest-ref: resetDrawingInteractionState is declared above this hook but
+    // still needs to call resetAim. Reading resetAim directly up there hits its
+    // TDZ and crashes first render, so it goes through this ref.
+    useEffect(() => {
+        resetAimRef.current = resetAim;
+    }, [resetAim]);
+
+    const aimPlacement = activeTool !== 'cursor' && IS_COARSE_POINTER && !isSelectBarMode && !isLocked;
+
+    // Shared first-point assembly for the touch paths: tool style plus
+    // long/short entry/target/stop defaults from the trailing 20-bar range.
+    const makeDrawingProps = useCallback((point: any): any => {
+        const toolStyle = (toolDefaults as any)[activeTool] || {};
+        const props: any = withOrigin({
+            id: Date.now().toString(),
+            type: activeTool,
+            p1: point,
+            p2: point,
+            ...toolStyle,
+            color: toolStyle.color || currentColor || '#2962ff',
+        });
+        if (activeTool === 'long' || activeTool === 'short') {
+            const isLong = activeTool === 'long';
+            const entryPrice = point.price;
+            const rrRatio = toolStyle.rr2 || 2;
+            const visibleData = allData.slice(Math.max(0, currentIndex - 19), currentIndex + 1);
+            const avgRange = visibleData.length > 0
+                ? visibleData.reduce((sum, cc) => sum + (cc.high - cc.low), 0) / visibleData.length
+                : entryPrice * 0.005;
+            const defaultRisk = avgRange || entryPrice * 0.005;
+            props.entry = entryPrice;
+            props.target = isLong ? entryPrice + (defaultRisk * rrRatio) : entryPrice - (defaultRisk * rrRatio);
+            props.stop = isLong ? entryPrice - defaultRisk : entryPrice + defaultRisk;
+        }
+        return props;
+    }, [activeTool, toolDefaults, currentColor, withOrigin, allData, currentIndex]);
+
+    // Snap-enter haptic for the aim cursor (mirrors the drag-path feedback).
+    const noteAimSnap = useCallback((c: PlacementCursorPoint | null) => {
+        if (!c) return;
+        if (c.snapped && !snapHapticOnRef.current) { snapHapticOnRef.current = true; hapticTick(5); }
+        if (!c.snapped) snapHapticOnRef.current = false;
+    }, []);
+
+    // Arm a two-point stub at the aim cursor (tap-tap model). One-click and text
+    // tools never enter this path.
+    const armAimStub = useCallback((): boolean => {
+        if (aimPhaseRef.current !== 'aim-p1') return false;
+        const tool = activeTool;
+        if (tool === 'horizontal' || tool === 'vertical' || tool === 'text') return false;
+        const c = aimCursorRef.current;
+        if (!c) return false;
+        const pt = { time: c.time, price: c.price, logical: c.logical };
+        const props = makeDrawingProps(pt);
+        setIsPlaying(false);
+        setCurrentDrawing(props);
+        setMousePos({ x: c.x, y: c.y });
+        setAimPhase('aim-p2');
+        return true;
+    }, [aimPhaseRef, aimCursorRef, setAimPhase, activeTool, makeDrawingProps, setIsPlaying, setCurrentDrawing]);
+
+    // Commit a tap at the aim cursor: p1 for one-click/text/two-point tools, p2
+    // finalize when a stub is armed. Aim drags commit nothing.
+    const commitAimTap = useCallback(() => {
+        const c = aimCursorRef.current;
+        if (!c || aimPhaseRef.current === 'idle') return;
+        const pt = { time: c.time, price: c.price, logical: c.logical };
+        const tool = activeTool;
+        const afterCommit = () => {
+            if (stickyMode) setAimPhase('aim-p1');
+            else resetAim();
+        };
+        if (aimPhaseRef.current === 'aim-p1') {
+            if (tool === 'horizontal' || tool === 'vertical') {
+                const props = makeDrawingProps(pt);
+                const final: any = tool === 'horizontal'
+                    ? { ...props, p1: { ...props.p1, price: pt.price }, p2: { ...props.p2, price: pt.price } }
+                    : { ...props, p1: { ...props.p1, time: pt.time, logical: pt.logical }, p2: { ...props.p2, time: pt.time, logical: pt.logical } };
+                const next = [...drawings, withOrigin(final)];
+                setDrawings(next);
+                pushToHistory(next);
+                setSelectedIds([props.id]);
+                setSnapIndicator(null);
+                snapHapticOnRef.current = false;
+                hapticTick(8);
+                finishToolAfterDraw();
+                afterCommit();
+                return;
+            }
+            if (tool === 'text') {
+                const props = makeDrawingProps(pt);
+                props.text = props.text || 'Text';
+                const nextT = [...drawings, props];
+                setDrawings(nextT);
+                pushToHistory(nextT);
+                setSelectedIds([props.id]);
+                hapticTick(8);
+                finishToolAfterDraw();
+                afterCommit();
+                return;
+            }
+            // Two-point tools: the first tap arms the stub at the cursor
+            // (tap-tap p1); the second tap finalizes via the aim-p2 path below.
+            hapticTick(8);
+            armAimStub();
+            return;
+        }
+        const cur = currentDrawing;
+        if (!cur) { setAimPhase('aim-p1'); return; }
+        // Screen-space minimum extent: a second point landing within 6px of the
+        // anchor (finger jitter, not intent) keeps the preview armed instead of
+        // committing a dot-sized drawing.
+        try {
+            const p1 = (cur as any).p1;
+            const p1x = chartRef.current?.timeScale()?.logicalToCoordinate?.(p1.logical ?? 0);
+            const p1y = candlestickSeriesRef.current?.priceToCoordinate?.(p1.price);
+            if (typeof p1x === 'number' && typeof p1y === 'number' && Number.isFinite(p1x) && Number.isFinite(p1y)) {
+                if (Math.hypot(c.x - p1x, c.y - p1y) < 6) return;
+            }
+        } catch { /* fall through to the data guard below */ }
+        const tdx = (pt.logical ?? 0) - ((cur as any).p1.logical ?? 0);
+        const tdy = (pt.price ?? 0) - ((cur as any).p1.price ?? 0);
+        if (Math.abs(tdx) < 0.5 && Math.abs(tdy) < 1e-9) return;
+        let finalized: any;
+        if (cur.type === 'long' || cur.type === 'short') {
+            const isLong = cur.type === 'long';
+            const entryPrice = (cur as any).entry ?? (cur as any).p1.price;
+            const mousePriceDist = Math.abs(pt.price - entryPrice);
+            const defaults = (toolDefaults as any)[cur.type] || {};
+            const rrRatio = defaults.rr2 || 2;
+            const visibleData = allData.slice(Math.max(0, currentIndex - 19), currentIndex + 1);
+            const avgRange = visibleData.length > 0 ? visibleData.reduce((sum, cc) => sum + (cc.high - cc.low), 0) / visibleData.length : entryPrice * 0.005;
+            const risk = mousePriceDist > 0 ? mousePriceDist : (avgRange || entryPrice * 0.005);
+            finalized = { ...cur, p2: pt, target: isLong ? entryPrice + (risk * rrRatio) : entryPrice - (risk * rrRatio), stop: isLong ? entryPrice - risk : entryPrice + risk };
+        } else {
+            finalized = { ...cur, p2: pt };
+        }
+        const next = [...drawings, withOrigin(finalized)];
+        setDrawings(next);
+        pushToHistory(next);
+        setSelectedIds([cur.id]);
+        setCurrentDrawing(null);
+        setSnapIndicator(null);
+        snapHapticOnRef.current = false;
+        hapticTick(8);
+        finishToolAfterDraw();
+        afterCommit();
+    }, [aimCursorRef, aimPhaseRef, setAimPhase, resetAim, activeTool, makeDrawingProps, drawings, withOrigin, pushToHistory, setSelectedIds, setCurrentDrawing, finishToolAfterDraw, setIsPlaying, hapticTick, toolDefaults, allData, currentIndex, stickyMode, currentDrawing, armAimStub]);
+
+    const onTouchStart = useCallback((e: React.TouchEvent) => {
+        if ((e.target as Element)?.closest?.('[data-drawing-toolbar]')) return;
+        // Two-finger tap = cancel the in-progress drawing (standard TV gesture).
+        if (e.touches.length === 2 && (currentDrawing || aimPhaseRef.current !== 'idle')) {
+            setCurrentDrawing(null);
+            placingOneClickRef.current = null;
+            setSnapIndicator(null);
+            resetAim();
+            clearLongPress();
+            setDragState(null);
+            setDragStartPos(null);
+            hapticTick(10);
+            return;
+        }
+        // Multi-touch (pinch zoom) must never start — or keep alive — a drawing drag.
+        if (e.touches.length !== 1) { clearLongPress(); setDragState(null); setDragStartPos(null); return; }
+        const touch = e.touches[0];
+        const coords = getTouchCoords(touch);
+        if (!coords) return;
+        // When a drawing tool is active pan is disabled (CustomChart disablePan),
+        // so prevent browser scroll/zoom and treat the gesture as drawing.
+        if (activeTool !== 'cursor' || isSelectBarMode) e.preventDefault();
+        touchStartClientRef.current = { x: touch.clientX, y: touch.clientY };
+        touchMovedRef.current = false;
+        longPressTriggeredRef.current = false;
+        clearLongPress();
+        const holdX = coords.clientX;
+        const holdY = coords.clientY;
+        // While aiming, press-hold-drag IS the gesture (no hold-to-cancel).
+        if (!aimPlacement) longPressTimerRef.current = window.setTimeout(() => {
+            longPressTriggeredRef.current = true;
+            // A horizontal/vertical placement in progress survives the hold: the
+            // ghost stays armed so lifting the finger still places the line at
+            // the release point (touchend finalizes it).
+            if (placingOneClickRef.current) { hapticTick(30); return; }
+            if (activeTool !== 'cursor' || currentDrawing) {
+                setActiveTool('cursor');
+                setCurrentDrawing(null);
+                placingOneClickRef.current = null;
+                resetAim();
+                return;
+            }
+            // Long-press mirrors right-click: hit-test the hold point and select.
+            const elAt = typeof document !== 'undefined'
+                ? document.elementFromPoint(holdX, holdY)?.closest?.('[data-drawing-hit]')
+                : null;
+            const idAt = elAt?.getAttribute?.('data-drawing-id') || null;
+            const target = (idAt && drawings.find(d => d.id === idAt))
+                || (selectedDrawingId && drawings.find(d => d.id === selectedDrawingId))
+                || null;
+            if (target) setSelectedIds([target.id]);
+            hapticTick(30);
+        }, 500);
+
+        if (!chartRef.current || !candlestickSeriesRef.current) return;
+        const chartCoords = getChartCoordinates(coords.x, coords.y);
+        if (!chartCoords) return;
+        if (isSelectBarMode) {
+            const foundIdx = Math.max(0, Math.min(allData.length - 1, Math.round(chartCoords.logical ?? 0)));
+            if (foundIdx !== currentIndex) setCurrentIdx(foundIdx);
+            return;
+        }
+        if (aimPlacement && !dragState) {
+            // Tap-tap model (touch): touch-down only seeds the aim cursor. The
+            // first tap arms p1 on lift (commitAimTap), the second finalizes p2;
+            // drags only move the cursor.
+            snapHapticOnRef.current = false;
+            const ac = beginAim(touch.identifier, coords.x, coords.y);
+            if (ac) {
+                setMousePos({ x: ac.x, y: ac.y });
+                noteAimSnap(ac);
+            }
+            return;
+        }
+        if (currentDrawing && (currentDrawing.type !== 'horizontal' && currentDrawing.type !== 'vertical')) {
+            // Second tap finalizes AT this tap (tap-tap drawing). Rebase p2 onto
+            // the tap point; a tap on the anchor keeps the preview armed.
+            const snapEndT = snapPoint(coords.x, coords.y, chartCoords.time as number, chartCoords.price as number, chartCoords.logical).point;
+            const tdx = (snapEndT.logical ?? 0) - ((currentDrawing as any).p1.logical ?? 0);
+            const tdy = (snapEndT.price ?? 0) - ((currentDrawing as any).p1.price ?? 0);
+            if (Math.abs(tdx) < 0.5 && Math.abs(tdy) < 1e-9) return;
+            const finalizedT: any = { ...currentDrawing, p2: snapEndT };
+            const next = [...drawings, withOrigin(finalizedT)];
+            setDrawings(next);
+            pushToHistory(next);
+            setSelectedIds([currentDrawing.id]);
+            setCurrentDrawing(null);
+            hapticTick(8);
+            finishToolAfterDraw();
+            return;
+        }
+        if (activeTool === 'cursor') {
+            // Double-tap empty chart = deselect + cancel preview (TV behaviour).
+            const prevEmpty = lastEmptyTapRef.current;
+            const nowEmpty = Date.now();
+            if (prevEmpty && nowEmpty - prevEmpty.t < 300 &&
+                Math.hypot(touch.clientX - prevEmpty.x, touch.clientY - prevEmpty.y) < 24) {
+                lastEmptyTapRef.current = null;
+                setSelectedIds([]);
+                setCurrentDrawing(null);
+                return;
+            }
+            lastEmptyTapRef.current = { t: nowEmpty, x: touch.clientX, y: touch.clientY };
+            return;
+        }
+        if (isLocked) return;
+        const snapResT = snapPoint(coords.x, coords.y, chartCoords.time as number, chartCoords.price as number, chartCoords.logical);
+        const snapped = snapResT.point;
+        setSnapIndicator(snapResT.snapped && snapResT.snapY !== undefined ? { x: coords.x, y: snapResT.snapY } : null);
+        if (snapResT.snapped && !snapHapticOnRef.current) { snapHapticOnRef.current = true; hapticTick(5); }
+        if (!snapResT.snapped) snapHapticOnRef.current = false;
+        const drawingProps: any = makeDrawingProps(snapped);
+        setIsPlaying(false);
+        hapticTick(8);
+        if (activeTool === 'text') {
+            drawingProps.text = drawingProps.text || 'Text';
+            const nextT = [...drawings, drawingProps];
+            setDrawings(nextT);
+            pushToHistory(nextT);
+            setSelectedIds([drawingProps.id]);
+            finishToolAfterDraw();
+            return;
+        }
+        setCurrentDrawing(drawingProps);
+        // One-click placement tools are placed on lift: remember the in-progress
+        // placement so a hold-aim never discards it.
+        placingOneClickRef.current = (activeTool === 'horizontal' || activeTool === 'vertical') ? activeTool : null;
+        setMousePos({ x: coords.x, y: coords.y });
+    }, [getTouchCoords, getChartCoordinates, snapPoint, activeTool, currentDrawing, drawings, isSelectBarMode, allData, currentIndex, isLocked, selectedDrawingId, pushToHistory, addToast, clearLongPress, finishToolAfterDraw, withOrigin, hapticTick, aimPlacement, dragState, beginAim, noteAimSnap, makeDrawingProps, aimPhaseRef, resetAim]);
+
+    const onTouchMove = useCallback((e: React.TouchEvent) => {
+        // Second finger down mid-gesture (pinch) cancels any drawing drag so
+        // zooming never moves a drawing.
+        if (e.touches.length !== 1) { setDragState(null); setDragStartPos(null); return; }
+        const touch = e.touches[0];
+        const coords = getTouchCoords(touch);
+        if (!coords) return;
+        // Cancel long-press if the finger drifts.
+        if (touchStartClientRef.current) {
+            const dx = touch.clientX - touchStartClientRef.current.x;
+            const dy = touch.clientY - touchStartClientRef.current.y;
+            if (Math.sqrt(dx * dx + dy * dy) > 10) { clearLongPress(); touchMovedRef.current = true; }
+        }
+        // If we are drawing or dragging a handle, suppress native scrolling.
+        if (activeTool !== 'cursor' || dragState || currentDrawing || isSelectBarMode) e.preventDefault();
+        setMousePos({ x: coords.x, y: coords.y });
+        const chartCoords = getChartCoordinates(coords.x, coords.y);
+        if (!chartCoords) return;
+        if (isSelectBarMode) {
+            const idx = Math.max(0, Math.min(allData.length - 1, Math.round((chartCoords.logical as number) ?? 0)));
+            if (idx !== currentIndex) setCurrentIdx(idx);
+            return;
+        }
+        if (aimPlacement && !dragState) {
+            // Aim drag: move the decoupled cursor (magnet applied inside the
+            // resolver). Tap-tap model: nothing arms or commits on move.
+            const mc = moveAim(touch.identifier, coords.x, coords.y);
+            if (mc) {
+                setMousePos({ x: mc.x, y: mc.y });
+                noteAimSnap(mc);
+            }
+            queueTick();
+            return;
+        }
+        if (dragState && dragStartPos) {
+            const startDragT = dragStartPos as any;
+            if (typeof startDragT.startClientX === 'number') {
+                const movedPxT = Math.hypot(touch.clientX - startDragT.startClientX, touch.clientY - (startDragT.startClientY ?? touch.clientY));
+                if (movedPxT < 4 && !dragMovedRef.current) return;
+                dragMovedRef.current = true;
+            } else {
+                dragMovedRef.current = true;
+            }
+            const dPrice = (chartCoords.price as number) - dragStartPos.price;
+            const dTime = (chartCoords.time as number) - dragStartPos.time;
+            const dLog = (chartCoords.logical ?? 0) - (dragStartPos.logical ?? 0);
+            const initialData = dragStartPos as any;
+            setDrawings(prev => prev.map(d => {
+                if (d.id !== dragState.drawingId) return d;
+                const newD: any = { ...d };
+                if (dragState.handle === 'move') {
+                    const p1Base = initialData.initialP1;
+                    const p2Base = initialData.initialP2;
+                    const lockTime = d.type === 'horizontal';
+                    const lockPrice = d.type === 'vertical';
+                    const getRebasedPoint = (base: any) => {
+                        const newLog = base.logical !== undefined ? Math.round(base.logical + (lockTime ? 0 : dLog)) : undefined;
+                        let newTime = lockTime ? base.time : base.time + dTime;
+                        if (!lockTime && newLog !== undefined && newLog >= 0 && newLog < allData.length) newTime = allData[newLog].time;
+                        return { time: newTime, price: base.price + (lockPrice ? 0 : dPrice), logical: newLog };
+                    };
+                    newD.p1 = getRebasedPoint(p1Base);
+                    if (p2Base) newD.p2 = getRebasedPoint(p2Base);
+                    if (d.type === 'long' || d.type === 'short') {
+                        newD.entry = (initialData.initialEntry || 0) + dPrice;
+                        newD.target = (initialData.initialTarget || 0) + dPrice;
+                        newD.stop = (initialData.initialStop || 0) + dPrice;
+                    }
+                } else if (dragState.handle === 'target') {
+                    newD.target = chartCoords.price;
+                } else if (dragState.handle === 'stop') {
+                    newD.stop = chartCoords.price;
+                } else if (dragState.handle === 'entry') {
+                    newD.entry = chartCoords.price;
+                    newD.p1 = { ...newD.p1, price: chartCoords.price };
+                } else {
+                    const snp = snapPoint(coords.x, coords.y, chartCoords.time as number, chartCoords.price as number, chartCoords.logical).point;
+                    if (dragState.handle === 'p1') { newD.p1 = snp; if (d.type === 'long' || d.type === 'short') newD.entry = snp.price; }
+                    else if (dragState.handle === 'p2') newD.p2 = snp;
+                }
+                return newD;
+            }));
+            queueTick();
+        }
+        if (currentDrawing) {
+            const snapLive = snapPoint(coords.x, coords.y, chartCoords.time as number, chartCoords.price as number, chartCoords.logical);
+            const snp = snapLive.point;
+            setSnapIndicator(snapLive.snapped && snapLive.snapY !== undefined ? { x: coords.x, y: snapLive.snapY } : null);
+            if (snapLive.snapped && !snapHapticOnRef.current) { snapHapticOnRef.current = true; hapticTick(5); }
+            if (!snapLive.snapped) snapHapticOnRef.current = false;
+            if (currentDrawing.type === 'long' || currentDrawing.type === 'short') {
+                const isLong = currentDrawing.type === 'long';
+                const entryPrice = (currentDrawing as any).entry ?? currentDrawing.p1.price;
+                const mousePriceDist = Math.abs(snp.price - entryPrice);
+                const defaults = (toolDefaults as any)[currentDrawing.type] || {};
+                const rrRatio = defaults.rr2 || 2;
+                const visibleData = allData.slice(Math.max(0, currentIndex - 19), currentIndex + 1);
+                const avgRange = visibleData.length > 0 ? visibleData.reduce((sum, c) => sum + (c.high - c.low), 0) / visibleData.length : entryPrice * 0.005;
+                const risk = mousePriceDist > 0 ? mousePriceDist : (avgRange || entryPrice * 0.005);
+                setCurrentDrawing(prev => prev ? { ...prev, p2: snp, target: isLong ? entryPrice + (risk * rrRatio) : entryPrice - (risk * rrRatio), stop: isLong ? entryPrice - risk : entryPrice + risk } as any : null);
+            } else {
+                const nextP2 = (currentDrawing as any).type === 'horizontal'
+                    ? { ...snp, time: (currentDrawing as any).p1.time, logical: (currentDrawing as any).p1.logical }
+                    : (currentDrawing as any).type === 'ray'
+                        ? { ...snp, price: (currentDrawing as any).p1.price }
+                        : (currentDrawing as any).type === 'vertical'
+                            ? { ...snp, price: (currentDrawing as any).p1.price }
+                            : snp;
+                setCurrentDrawing(prev => prev ? { ...prev, p2: nextP2 } as any : null);
+            }
+            queueTick();
+        }
+    }, [getTouchCoords, getChartCoordinates, snapPoint, activeTool, dragState, dragStartPos, currentDrawing, allData, currentIndex, toolDefaults, clearLongPress, queueTick, hapticTick, aimPlacement, moveAim, noteAimSnap, isSelectBarMode]);
+
+    const onTouchEnd = useCallback((e: React.TouchEvent) => {
+        clearLongPress();
+        const wasTap = !touchMovedRef.current;
+        touchStartClientRef.current = null;
+        touchMovedRef.current = false;
+        if (isSelectBarMode) {
+            if (wasTap && !longPressTriggeredRef.current) {
+                setCurrentIdx(currentIndex);
+                hapticTick(8);
+                setIsSelectBarMode(false);
+            }
+            longPressTriggeredRef.current = false;
+            setDragState(null);
+            setDragStartPos(null);
+            return;
+        }
+        // Placement-cursor model (touch): taps commit at the cursor — the first
+        // tap arms p1, the second tap finalizes p2 (tap-tap). Drags only moved
+        // the cursor, so a drag-lift arms p1 at the lift point.
+        if (aimPlacement && !dragState) {
+            const lift = e.changedTouches[0];
+            const liftCoords = lift ? getTouchCoords(lift) : null;
+            const kind = lift && liftCoords ? endAim(lift.identifier, liftCoords.x, liftCoords.y) : null;
+            // Skip when another finger is still down — pinch/multi-touch
+            // contaminates the gesture and must never commit.
+            if (kind && e.touches.length === 0) commitAimTap();
+            longPressTriggeredRef.current = false;
+            setDragState(null);
+            setDragStartPos(null);
+            return;
+        }
+        // One-click placement (horizontal/vertical): lifting the finger always
+        // places the line at the exact release point — even after a hold-aim.
+        if (placingOneClickRef.current && currentDrawing &&
+            (currentDrawing.type === 'horizontal' || currentDrawing.type === 'vertical')) {
+            const release = e.changedTouches[0];
+            let finalDrawing: any = { ...currentDrawing };
+            const rel = release ? getTouchCoords(release) : null;
+            const rc = rel ? getChartCoordinates(rel.x, rel.y) : null;
+            if (rel && rc) {
+                const snp = snapPoint(rel.x, rel.y, rc.time as number, rc.price as number, rc.logical).point;
+                if (currentDrawing.type === 'horizontal') {
+                    finalDrawing.p1 = { ...currentDrawing.p1, price: snp.price };
+                    finalDrawing.p2 = { ...((currentDrawing as any).p2 || currentDrawing.p1), price: snp.price };
+                } else {
+                    finalDrawing.p1 = { ...currentDrawing.p1, time: snp.time, logical: snp.logical };
+                    finalDrawing.p2 = { ...((currentDrawing as any).p2 || currentDrawing.p1), time: snp.time, logical: snp.logical };
+                }
+            }
+            const next = [...drawings, withOrigin(finalDrawing)];
+            setDrawings(next);
+            pushToHistory(next);
+            setSelectedIds([currentDrawing.id]);
+            setCurrentDrawing(null);
+            hapticTick(8);
+            finishToolAfterDraw();
+            placingOneClickRef.current = null;
+            longPressTriggeredRef.current = false;
+            setDragState(null);
+            setDragStartPos(null);
+            setSnapIndicator(null);
+            snapHapticOnRef.current = false;
+            return;
+        }
+        placingOneClickRef.current = null;
+        if (longPressTriggeredRef.current) {
+            longPressTriggeredRef.current = false;
+            setDragState(null);
+            setDragStartPos(null);
+            return;
+        }
+        if (dragState && dragMovedRef.current) pushToHistory(drawings);
+        dragMovedRef.current = false;
+        if (currentDrawing) {
+            const isOneClickTool = currentDrawing.type === 'horizontal' || currentDrawing.type === 'vertical';
+            const rect = chartContainerRef.current?.getBoundingClientRect();
+            if (rect && chartRef.current && candlestickSeriesRef.current) {
+                const p1x = chartRef.current.timeScale().logicalToCoordinate((currentDrawing as any).p1.logical ?? 0) ?? 0;
+                const p1y = candlestickSeriesRef.current.priceToCoordinate((currentDrawing as any).p1.price);
+                const p2x = mousePos?.x ?? p1x;
+                const p2y = mousePos?.y ?? p1y;
+                const dist = Math.sqrt(Math.pow(p2x - p1x, 2) + Math.pow(p2y - p1y, 2));
+                if (isOneClickTool || dist > 5) {
+                    const next = [...drawings, withOrigin(currentDrawing)];
+                    setDrawings(next);
+                    pushToHistory(next);
+                    setSelectedIds([currentDrawing.id]);
+                    setCurrentDrawing(null);
+                    hapticTick(8);
+                    finishToolAfterDraw();
+                }
+                // A lift without dragging KEEPS the stub armed so the next tap
+                // can finalize it — discarding here made touch tap-tap impossible.
+            }
+        }
+        setDragState(null);
+        setDragStartPos(null);
+        setSnapIndicator(null);
+        snapHapticOnRef.current = false;
+    }, [clearLongPress, dragState, drawings, currentDrawing, mousePos, pushToHistory, finishToolAfterDraw, isSelectBarMode, currentIndex, activeTool, withOrigin, hapticTick, getTouchCoords, getChartCoordinates, snapPoint, aimPlacement, endAim, commitAimTap]);
 
     const [tick, setTick] = useState(0);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -1702,7 +2573,12 @@ setAllData(validData);
         'KeyS': 'short',
         'KeyF': 'fib',
         'KeyC': 'channel',
+        'KeyW': 'text',
+        // WEB-ONLY: 'KeyX' also arms the text tool (pre-existing web binding).
         'KeyX': 'text',
+        // NOTE: 'KeyU' (measure) is deliberately NOT bound. The measure
+        // renderer + getDrawingMeasure/formatMeasureLabel are missing from web
+        // (utils.ts / CustomChart.tsx), so a measure drawing would be invisible.
     };
 
     // Global Keyboard Shortcuts
@@ -1736,8 +2612,8 @@ setAllData(validData);
             // Toggle lock with L (when not drawing)
             if (e.code === 'KeyL' && !e.ctrlKey && !e.metaKey && e.shiftKey) {
                 e.preventDefault();
-                setIsLocked(!isLocked);
-                addToast({ type: 'info', title: 'Drawings', message: isLocked ? 'Unlocked' : 'Locked', duration: 1000 });
+                toggleLockedCb();
+                addToast({ type: 'info', title: 'Drawings', message: toolbarLocked ? 'Unlocked' : 'Locked', duration: 1000 });
             }
 
             // Undo/Redo with Ctrl/Cmd
@@ -1750,21 +2626,42 @@ setAllData(validData);
                 handleRedo();
             }
 
-            // Delete selected drawing
+            // Delete selected drawing(s)
             if (e.code === 'Delete' || e.code === 'Backspace') {
-                if (selectedDrawingId && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+                if (selectedIds.length && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
                     e.preventDefault();
-                    setDrawings(drawings.filter(d => d.id !== selectedDrawingId));
-                    pushToHistory(drawings.filter(d => d.id !== selectedDrawingId));
-                    setSelectedDrawingId(null);
+                    const next = drawings.filter(d => !selectedIds.includes(d.id));
+                    setDrawings(next);
+                    pushToHistory(next);
+                    setSelectedIds([]);
+                    setStyleDrawer(null);
                     addToast({ type: 'info', title: 'Deleted' });
+                }
+            }
+
+            // TradingView clipboard: Ctrl+D duplicate, Ctrl+C copy, Ctrl+V paste
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
+                e.preventDefault();
+                duplicateSelected();
+            }
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') {
+                const sel = drawings.filter(d => selectedIds.includes(d.id));
+                if (sel.length) { e.preventDefault(); setClipboard(sel[0]); }
+            }
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
+                if (clipboard && mousePos) {
+                    e.preventDefault();
+                    handlePasteDrawing(mousePos.x, mousePos.y);
                 }
             }
 
             // Escape to deselect or exit modes
             if (e.code === 'Escape') {
-                setSelectedDrawingId(null);
+                setStyleDrawer(null);
+                setSelectedIds([]);
                 setCurrentDrawing(null); // Cancel active drawing
+                placingOneClickRef.current = null;
+                resetAimRef.current();
                 setIsSelectBarMode(false);
                 setActiveTool('cursor');
             }
@@ -1772,10 +2669,11 @@ setAllData(validData);
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [centerChart, magnetMode, isLocked, selectedDrawingId, handleUndo, handleRedo, drawings, pushToHistory, addToast]);
+    }, [centerChart, magnetMode, toolbarLocked, toggleLockedCb, selectedIds, handleUndo, handleRedo, drawings, pushToHistory, addToast, duplicateSelected, clipboard, mousePos, handlePasteDrawing]);
 
     return (
         <div className={`w-full h-full flex flex-col overflow-hidden font-sans ${isDarkMode ? 'bg-black text-zinc-200' : 'bg-white text-slate-900'}`} onMouseUp={handleMouseUp}>
+            {!isFullscreenCanvas && (
             <div className={`h-16 shrink-0 border-b flex items-center justify-between px-8 z-50 relative shadow-sm ${isDarkMode ? 'border-zinc-800 bg-black/95 backdrop-blur-sm' : 'border-slate-200 bg-white/95 backdrop-blur-sm'}`}>
                 <div className="flex items-center gap-3 w-[18rem]">
                     {(!showWelcome || allData.length > 0) && (
@@ -1883,6 +2781,15 @@ setAllData(validData);
                     )}
                     <div className={`w-px h-6 ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
                     <button
+                        onClick={toggleFullscreenCanvas}
+                        title="Fullscreen chart (locks landscape)"
+                        aria-label="Fullscreen chart"
+                        aria-pressed={isFullscreenCanvas}
+                        className={`p-2 rounded-lg transition-all ${isFullscreenCanvas ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}
+                    >
+                        <Maximize size={18} />
+                    </button>
+                    <button
                         onClick={() => setIsWatchlistOpen(!isWatchlistOpen)}
                         title="Toggle Watchlist Sidebar"
                         className={`p-2 rounded-lg ${isWatchlistOpen ? 'bg-black text-white' : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}
@@ -1891,22 +2798,33 @@ setAllData(validData);
                     </button>
                 </div>
             </div>
+            )}
 
             <div className={`flex-1 flex relative overflow-hidden min-h-0 group ${isDarkMode ? 'bg-black' : 'bg-slate-50'}`}>
-                <>
-                <DrawingToolbar
+                <div
+                    ref={chartContainerRef}
+                    className="relative flex-1 w-full h-full min-w-0 outline-none"
+                    style={{ touchAction: (activeTool !== 'cursor' || isSelectBarMode) ? 'none' : undefined }}
+                    onContextMenu={handleContextMenuInternal}
+                    onMouseDown={onMouseDown}
+                    onMouseMove={onMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onTouchStart={onTouchStart}
+                    onTouchMove={onTouchMove}
+                    onTouchEnd={onTouchEnd}
+                >
+                {!showWelcome && allData.length > 0 && (
+                <DrawingToolbarV2
                     activeTool={activeTool}
                     setActiveTool={setActiveTool}
                     clearDrawings={clearDrawings}
                     magnetMode={magnetMode}
-                    toggleMagnetMode={() => setMagnetMode(!magnetMode)}
-                    isLocked={isLocked}
-                    toggleLocked={() => setIsLocked(!isLocked)}
+                    toggleMagnetMode={toggleMagnetModeCb}
+                    isLocked={toolbarLocked}
+                    toggleLocked={toggleLockedCb}
                     orientation={toolbarOrientation}
-                    toggleOrientation={() => setToolbarOrientation(prev => prev === 'horizontal' ? 'vertical' : 'horizontal')}
+                    toggleOrientation={toggleToolbarOrientationCb}
                     isDarkMode={isDarkMode}
-                    style={{ left: `${toolbarPos.x}px`, top: `${toolbarPos.y}px` }}
-                    onPositionChange={setToolbarPos}
                     onUndo={handleUndo}
                     onRedo={handleRedo}
                     canUndo={historyPointer > 0}
@@ -1918,20 +2836,155 @@ setAllData(validData);
                     setStrokeWidth={handleToolbarStrokeWidthChange}
                     setStrokeStyle={handleToolbarStrokeStyleChange}
                     selectedDrawingId={selectedDrawingId}
+                    selectedIds={selectedIds}
+                    onDeleteSelected={deleteSelected}
+                    drawingsCount={drawings.length}
+                    stickyMode={stickyMode}
+                    toggleStickyMode={() => setStickyMode((v: boolean) => !v)}
                 />
-                <div
-                    ref={chartContainerRef}
-                    className="relative flex-1 w-full h-full min-w-0 outline-none"
-                    onContextMenu={handleContextMenuInternal}
-                    onMouseDown={onMouseDown}
-                    onMouseMove={onMouseMove}
-                    onMouseUp={handleMouseUp}
-                >
+                )}
                     <ChartErrorBoundary>
+                        {/* Armed-tool chip (TradingView): obvious draw mode + on-screen cancel */}
+                        {!showWelcome && allData.length > 0 && activeTool !== 'cursor' && (
+                            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-full bg-[#2962ff] text-white shadow-lg shadow-black/40 max-w-[calc(100%-120px)]">
+                                <span className="text-[11px] font-bold whitespace-nowrap overflow-hidden text-ellipsis">
+                                    {TOOL_LABELS[activeTool] || activeTool} — {IS_COARSE_POINTER
+                                        ? (activeTool === 'horizontal' || activeTool === 'vertical' || activeTool === 'text'
+                                            ? 'tap to place'
+                                            : (aimPhase === 'aim-p2' ? 'tap to set point 2/2' : 'tap to set point 1/2'))
+                                        : (activeTool === 'horizontal' || activeTool === 'vertical' || activeTool === 'text' ? 'tap once' : 'tap two points')}
+                                </span>
+                                <button
+                                    onClick={() => { setActiveTool('cursor'); setCurrentDrawing(null); placingOneClickRef.current = null; resetAim(); }}
+                                    aria-label="Cancel drawing tool"
+                                    className="w-7 h-7 grid place-items-center rounded-full bg-white/20 hover:bg-white/30 active:scale-95 touch-manipulation shrink-0"
+                                >
+                                    <X size={13} strokeWidth={2.5} />
+                                </button>
+                            </div>
+                        )}
+                        {/* Selection quick-actions (TradingView edit flyout) — also the
+                            entry point for the colour / width / line-style drawers. */}
+                        {!showWelcome && allData.length > 0 && selectedDrawing && activeTool === 'cursor' && !isSelectBarMode && !styleDrawer && (
+                            <div
+                                data-drawing-toolbar
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                className={`absolute top-2 left-1/2 -translate-x-1/2 z-40 flex items-center gap-0.5 p-1 rounded-2xl border shadow-xl backdrop-blur-xl overflow-x-auto no-scrollbar ${isDarkMode ? 'bg-black/85 border-white/10' : 'bg-white/90 border-slate-200'}`}>
+                                <button
+                                    onClick={() => setStyleDrawer('color')}
+                                    title="Line color"
+                                    aria-label="Line color"
+                                    className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
+                                >
+                                    <Palette size={16} />
+                                    <span className="text-[8px] font-bold leading-none">Color</span>
+                                </button>
+                                {selectedDrawing.type !== 'text' && (
+                                    <button
+                                        onClick={() => setStyleDrawer('width')}
+                                        title="Line width"
+                                        aria-label="Line width"
+                                        className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
+                                    >
+                                        <Minus size={16} strokeWidth={Math.min(4, Math.max(1.5, selectedDrawing.strokeWidth || 1))} />
+                                        <span className="text-[8px] font-bold leading-none">Width</span>
+                                    </button>
+                                )}
+                                {selectedDrawing.type !== 'text' && (
+                                    <button
+                                        onClick={() => setStyleDrawer('style')}
+                                        title="Line style"
+                                        aria-label="Line style"
+                                        className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
+                                    >
+                                        <span className={`w-4 border-t-[3px] border-current ${selectedDrawing.strokeStyle === 'dashed' ? 'border-dashed' : selectedDrawing.strokeStyle === 'dotted' ? 'border-dotted' : 'border-solid'}`} />
+                                        <span className="text-[8px] font-bold leading-none">Line</span>
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => updateDrawingProperty(selectedDrawing.id, { isLocked: !selectedDrawing.isLocked })}
+                                    title={selectedDrawing.isLocked ? 'Unlock' : 'Lock'}
+                                    aria-label={selectedDrawing.isLocked ? 'Unlock' : 'Lock'}
+                                    className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
+                                >
+                                    {selectedDrawing.isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+                                    <span className="text-[8px] font-bold leading-none">{selectedDrawing.isLocked ? 'Locked' : 'Lock'}</span>
+                                </button>
+                                <button
+                                    onClick={() => duplicateSelected()}
+                                    title="Duplicate"
+                                    aria-label="Duplicate drawing"
+                                    className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
+                                >
+                                    <Copy size={16} />
+                                    <span className="text-[8px] font-bold leading-none">Copy</span>
+                                </button>
+                                <button
+                                    onClick={() => { const n = selectedIds.length; deleteSelected(); setStyleDrawer(null); addToast({ type: 'info', title: n > 1 ? `${n} drawings deleted` : 'Drawing deleted', message: 'Tap Undo in the toolbar to restore.' }); }}
+                                    title="Delete"
+                                    aria-label="Delete drawing"
+                                    className="min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl text-rose-500 hover:bg-rose-500/10 active:scale-95 touch-manipulation"
+                                >
+                                    <Trash2 size={16} />
+                                    <span className="text-[8px] font-bold leading-none">Delete</span>
+                                </button>
+                                <button
+                                    onClick={() => { setSelectedIds([]); setStyleDrawer(null); }}
+                                    title="Deselect"
+                                    aria-label="Deselect drawing"
+                                    className={`min-w-[40px] min-h-[44px] px-1 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-500 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100'}`}
+                                >
+                                    <X size={16} />
+                                    <span className="text-[8px] font-bold leading-none">Close</span>
+                                </button>
+                            </div>
+                        )}
+                        {/* Aim cursor + magnet snap dot. Rendered here (not in
+                            CustomChart) because web CustomChart exposes no
+                            placementCursor/snapIndicator props. */}
+                        {aimCursor && aimPlacement && (
+                            <div className="absolute inset-0 z-[45] pointer-events-none">
+                                <div
+                                    className="absolute"
+                                    style={{
+                                        left: aimCursor.x - 13, top: aimCursor.y - 13,
+                                        width: 26, height: 26, borderRadius: 9999,
+                                        background: aimCursor.snapped ? 'rgba(16,185,129,0.25)' : 'rgba(41,98,255,0.25)',
+                                        border: `2px solid ${aimCursor.snapped ? '#10b981' : '#2962ff'}`,
+                                    }}
+                                />
+                                <div
+                                    className="absolute"
+                                    style={{
+                                        left: aimCursor.x - 4, top: aimCursor.y - 4,
+                                        width: 8, height: 8, borderRadius: 9999,
+                                        background: aimCursor.snapped ? '#10b981' : '#2962ff',
+                                        boxShadow: '0 0 6px rgba(0,0,0,0.5)',
+                                    }}
+                                />
+                                <div className="absolute" style={{ left: aimCursor.x - 30, top: aimCursor.y, width: 60, height: 1, background: `${aimCursor.snapped ? '#10b981' : '#2962ff'}80` }} />
+                                <div className="absolute" style={{ left: aimCursor.x, top: aimCursor.y - 30, width: 1, height: 60, background: `${aimCursor.snapped ? '#10b981' : '#2962ff'}80` }} />
+                            </div>
+                        )}
+                        {snapIndicator && (
+                            <div
+                                className="absolute z-[45] pointer-events-none rounded-full"
+                                style={{
+                                    left: snapIndicator.x - (IS_COARSE_POINTER ? 7 : 5),
+                                    top: snapIndicator.y - (IS_COARSE_POINTER ? 7 : 5),
+                                    width: IS_COARSE_POINTER ? 14 : 10,
+                                    height: IS_COARSE_POINTER ? 14 : 10,
+                                    background: '#f59e0b',
+                                    boxShadow: '0 0 6px rgba(0,0,0,0.5)',
+                                }}
+                            />
+                        )}
                         <CustomChart
                             data={allData.slice(0, currentIndex + 1)}
                             trades={history as any}
-                            drawings={drawings}
+                            drawings={visibleDrawings}
                             isDarkMode={isDarkMode}
                             symbol={symbol}
                             timeframe={timeframe}
@@ -1943,7 +2996,7 @@ setAllData(validData);
                             onViewStateChange={handleViewStateChange}
                             initialViewState={chartViewState}
                             disablePan={activeTool !== 'cursor'}                        >
-                            <DrawingLayer drawings={drawings} currentDrawing={currentDrawing} selectedDrawingId={selectedDrawingId} hoveredDrawingId={hoveredDrawingId} mousePos={mousePos} chart={chartRef.current} series={candlestickSeriesRef.current} containerWidth={dimensions.width - 60 /* price-scale width (CustomChart PADDING_RIGHT) — overlay must stop at the plot edge */} containerHeight={dimensions.height} activeTool={activeTool} isSelectBarMode={isSelectBarMode} onMouseDownHandle={handleMouseDownHandle} onSelectDrawing={setSelectedDrawingId} onHoverDrawing={setHoveredDrawingId} onContextMenuDrawing={handleContextMenuDrawing} tick={tick} isLocked={isLocked} isDarkMode={isDarkMode} />
+                            <DrawingLayer drawings={visibleDrawings} currentDrawing={currentDrawing} selectedDrawingId={selectedDrawingId} hoveredDrawingId={hoveredDrawingId} mousePos={mousePos} chart={chartRef.current} series={candlestickSeriesRef.current} containerWidth={dimensions.width - PRICE_SCALE_WIDTH /* price-scale width (CustomChart PADDING_RIGHT) — overlay must stop at the plot edge */} containerHeight={dimensions.height} activeTool={activeTool} isSelectBarMode={isSelectBarMode} onMouseDownHandle={handleMouseDownHandle} onSelectDrawing={handleSelectDrawing} onHoverDrawing={setHoveredDrawingId} onDoubleClickDrawing={handleDoubleClickDrawing} onContextMenuDrawing={handleContextMenuDrawing} tick={tick} isLocked={isLocked} isDarkMode={isDarkMode} />
                         </CustomChart>
                     </ChartErrorBoundary>
 
@@ -2040,7 +3093,6 @@ setAllData(validData);
                         }}
                     />
                 </div>
-                </>
 
                 {/* TradingView-style Watchlist Sidebar (matches ChartGrid) */}
                 <div className={`${isWatchlistOpen ? 'w-72 translate-x-0' : 'w-0 translate-x-full'} shrink-0 border-l flex flex-col overflow-hidden transition-all duration-300 ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200'}`}>
@@ -2071,6 +3123,7 @@ setAllData(validData);
                 </div>
             </div>
 
+            {!isFullscreenCanvas && (
             <div className={`h-16 shrink-0 border-t flex items-center px-8 justify-between relative z-20 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white'}`}>
                     <div className="flex items-center gap-3">
                     </div>
@@ -2128,6 +3181,46 @@ setAllData(validData);
                         )}
                     </div>
                 </div>
+            )}
+            {/* Fullscreen exit affordance — the header/footer are hidden in
+                fullscreen canvas, so this floating control is the way out. */}
+            {isFullscreenCanvas && (
+                <button
+                    onClick={toggleFullscreenCanvas}
+                    aria-label="Exit fullscreen chart"
+                    title="Exit fullscreen chart"
+                    className="fixed right-3 bottom-3 z-[120] w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-xl border border-white/10 bg-black/60 hover:bg-black/80 text-zinc-100 hover:text-white transition-all active:scale-95 touch-manipulation shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
+                >
+                    <Minimize size={18} strokeWidth={2.5} />
+                </button>
+            )}
+            {/* Selection-pill style drawers: color stays open for live trying,
+                width/style close on pick (single-tap actions). */}
+            <ColorDrawer
+                open={styleDrawer === 'color'}
+                onClose={() => setStyleDrawer(null)}
+                isDarkMode={isDarkMode}
+                subtitle={selectedIds.length > 1 ? `${selectedIds.length} drawings` : (selectedDrawing ? (TOOL_LABELS[selectedDrawing.type] || selectedDrawing.type) : undefined)}
+                value={selectedDrawing?.color || '#2962ff'}
+                onPick={(color) => applyStyleToSelection({ color })}
+                buzz={hapticTick}
+            />
+            <WidthDrawer
+                open={styleDrawer === 'width'}
+                onClose={() => setStyleDrawer(null)}
+                isDarkMode={isDarkMode}
+                subtitle={selectedIds.length > 1 ? `${selectedIds.length} drawings` : (selectedDrawing ? (TOOL_LABELS[selectedDrawing.type] || selectedDrawing.type) : undefined)}
+                value={selectedDrawing?.strokeWidth || 1}
+                onPick={(strokeWidth) => { applyStyleToSelection({ strokeWidth }); setStyleDrawer(null); hapticTick(8); }}
+            />
+            <LineStyleDrawer
+                open={styleDrawer === 'style'}
+                onClose={() => setStyleDrawer(null)}
+                isDarkMode={isDarkMode}
+                subtitle={selectedIds.length > 1 ? `${selectedIds.length} drawings` : (selectedDrawing ? (TOOL_LABELS[selectedDrawing.type] || selectedDrawing.type) : undefined)}
+                value={selectedDrawing?.strokeStyle || 'solid'}
+                onPick={(strokeStyle) => { applyStyleToSelection({ strokeStyle }); setStyleDrawer(null); hapticTick(8); }}
+            />
             {contextMenu && (
                 <div className="fixed z-[500] w-48 rounded-xl border shadow-2xl overflow-hidden" style={{ left: contextMenu.x, top: contextMenu.y }}>
                     <div className={`flex flex-col p-1 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>
@@ -2141,7 +3234,7 @@ setAllData(validData);
                                 <button onClick={() => { handleDuplicateDrawing(contextMenu.drawing); setContextMenu(null); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left ${isDarkMode ? 'hover:bg-white/5 text-zinc-300' : 'hover:bg-slate-50 text-slate-600'}`}><StepForward size={14} /> Duplicate</button>
                                 <button onClick={() => { updateDrawingProperty(contextMenu.drawing.id, { isLocked: !contextMenu.drawing.isLocked }); setContextMenu(null); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left ${isDarkMode ? 'hover:bg-white/5 text-zinc-300' : 'hover:bg-slate-50 text-slate-600'}`}>{contextMenu.drawing.isLocked ? <Unlock size={14} /> : <Lock size={14} />} {contextMenu.drawing.isLocked ? 'Unlock' : 'Lock'}</button>
                                 <div className={`h-px mx-2 my-1 ${isDarkMode ? 'bg-black' : 'bg-slate-100'}`} />
-                                <button onClick={() => { setDrawings(drawings.filter(d => d.id !== contextMenu.drawing.id)); pushToHistory(drawings.filter(d => d.id !== contextMenu.drawing.id)); setContextMenu(null); setSelectedDrawingId(null); addToast({ type: 'info', title: 'Deleted' }); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left text-rose-500 hover:bg-rose-500/10"><Trash2 size={14} /> Remove</button>
+                                <button onClick={() => { setDrawings(drawings.filter(d => d.id !== contextMenu.drawing.id)); pushToHistory(drawings.filter(d => d.id !== contextMenu.drawing.id)); setContextMenu(null); setSelectedIds([]); setStyleDrawer(null); addToast({ type: 'info', title: 'Deleted' }); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left text-rose-500 hover:bg-rose-500/10"><Trash2 size={14} /> Remove</button>
                             </>
                         )}
                     </div>

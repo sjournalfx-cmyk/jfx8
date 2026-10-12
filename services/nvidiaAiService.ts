@@ -1,8 +1,16 @@
-import { Trade, UserProfile, DailyBias } from "../types";
+import { Trade, UserProfile, DailyBias, Note, Goal } from "../types";
 import { calculateStats } from "../lib/statsUtils";
+import { overallComplianceRate, topViolation, costOfViolations } from "../lib/disciplineChecklist";
 import { cleanAssistantResponse, isInsideThinkingBlock } from "../lib/thinkingCleaner";
 
+// Web is same-origin only (no native shell, no absolute backend host), so the
+// base URL stays relative exactly like the rest of the web api/* surface.
 const BASE_URL = "/api/nvidia";
+// Zen proxy route for the free-model tier. NOTE: the free -> real model remap
+// table (ZEN_FREE_REMAP) lives server-side in api/zen.ts, which is NOT ported to
+// this repo yet. Until it lands, selecting a FREE model here 404s at the edge.
+const ZEN_BASE_URL = "/api/zen";
+const ZEN_FREE_MODELS = new Set(["big-pickle","mimo-v2.5-free","ling-3.0-flash-fin-free","nemotron-3-ultra-free","nemotron-3.5-lightning-free","muse-spark-1.3-contributor-free","muse-spark-1.2-contributor-free"]);
 export const NVIDIA_CHAT_MODEL_ID = "nvidia/nemotron-3.5-lightning-30b-a3b";
 // Bullet-proofing: automatic fallback when the primary model is deprecated,
 // rate-limited upstream, times out, or returns an empty answer. Verified live
@@ -80,6 +88,23 @@ export type AiAttemptOptions = {
   timeoutMs?: number;
   firstTokenTimeoutMs?: number;
   retryDelayMs?: number;
+  /** Extra private context for Mentor mode (ignored by Research mode). */
+  extraContext?: MentorExtraContextInput;
+};
+
+/** Raw extra inputs the UI may pass for Mentor mode. Everything is optional;
+ *  whatever is present gets summarized into the mentor system prompt. */
+export type MentorExtraContextInput = {
+  notes?: Note[];
+  goals?: Goal[];
+  openPositions?: Array<{
+    symbol: string;
+    side: string;
+    volume: number;
+    openPrice: number;
+    currentPrice: number;
+    profit: number;
+  }>;
 };
 
 export const classifyAiError = (error: any): AiErrorCode => {
@@ -123,6 +148,29 @@ export const describeAiError = (error: any): string => {
       return "Failed to generate response. Please try again.";
   }
 };
+
+export type ModelId =
+  | "nvidia/nemotron-3-ultra-550b-a55b"
+  | "muse-spark-1.2-contributor-free"
+  | "z-ai/glm-5.3-flash"
+  | "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+  | "meta/llama-3.2-11b-vision-instruct"
+  | typeof NVIDIA_CHAT_MODEL_ID
+  | typeof NVIDIA_FALLBACK_MODEL_ID;
+
+export const CHAT_MODELS: { id: string; label: string; desc: string; badge: string }[] = [
+  { id: "nvidia/nemotron-3-super-120b-a12b", label: "Nemotron 3.5 Super", desc: "Balanced reasoning & speed", badge: "FAST" },
+  { id: "nvidia/nemotron-3-ultra-550b-a55b", label: "Nemotron 3.5 Ultra", desc: "Strongest reasoning", badge: "POWERFUL" },
+  { id: "z-ai/glm-5.3-flash", label: "GLM 5.3 Flash", desc: "Ultra-fast responses", badge: "FLASH" },
+  { id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", label: "Nemotron 3 Nano 30B", desc: "Fastest reasoning 30B", badge: "FAST" },
+  { id: "meta/llama-3.2-11b-vision-instruct", label: "Llama 3.2 11B Vision", desc: "Vision + fast text", badge: "LIGHTNING" },
+  { id: "big-pickle", label: "Big Pickle (Zen Free)", desc: "Free - stealth model", badge: "FREE" },
+  { id: "mimo-v2.5-free", label: "MiMo V2.5 Free", desc: "Free - Xiaomi", badge: "FREE" },
+  { id: "ling-3.0-flash-fin-free", label: "Ling 3.0 Flash Fin Free", desc: "Free - finance tuned", badge: "FREE" },
+  { id: "nemotron-3-ultra-free", label: "Nemotron 3 Ultra Free", desc: "Free - NVIDIA", badge: "FREE" },
+  { id: "nemotron-3.5-lightning-free", label: "Nemotron 3.5 Lightning Free", desc: "Free - NVIDIA", badge: "FREE" },
+  { id: "muse-spark-1.3-contributor-free", label: "Muse Spark 1.3 Free", desc: "Free - Meta", badge: "FREE" },
+];
 
 export const MODAL_MODELS = {
   deepseek: {
@@ -221,11 +269,132 @@ const buildCompactAnalyticsSnapshot = (analyticsSnapshot: any = null) => {
   };
 };
 
+const stripHtmlText = (html?: string | null): string => {
+  if (!html) return "";
+  return html.replace(/<[^>]*>?/gm, " ").replace(/\s+/g, " ").trim();
+};
+
+const CHECKLIST_TEMPLATES_KEY = "jfx_checklist_templates";
+const ACTIVE_CHECKLIST_TEMPLATE_KEY = "jfx_active_checklist_template";
+
+/** Read the trader's active rules checklist (pre-entry / in-trade / post-trade
+ *  rules). Local-only read; returns null when no template exists. */
+const readActiveChecklistTemplate = ():
+  | { name: string; items: { text: string; phase: string }[] }
+  | null => {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(CHECKLIST_TEMPLATES_KEY);
+    if (!raw) return null;
+    const templates = JSON.parse(raw);
+    if (!Array.isArray(templates) || templates.length === 0) return null;
+    const activeId = window.localStorage.getItem(ACTIVE_CHECKLIST_TEMPLATE_KEY);
+    const active =
+      templates.find((t: any) => t && t.id === activeId) ??
+      templates.find((t: any) => t && t.isActive) ??
+      templates[0];
+    if (!active || !Array.isArray(active.items)) return null;
+    const items = active.items
+      .filter((item: any) => item && item.text)
+      .map((item: any) => ({
+        text: truncateText(String(item.text), 120),
+        phase: String(item.phase || "pre-entry"),
+      }));
+    if (items.length === 0) return null;
+    return { name: String(active.name || "Trading Checklist"), items };
+  } catch {
+    return null;
+  }
+};
+
+const summarizeNote = (note: Note) => {
+  const listText = (note.listItems ?? [])
+    .map((item) => item?.text)
+    .filter(Boolean)
+    .join("; ");
+  const tableText = (note.tableData?.rows ?? [])
+    .flatMap((row) => row.map((cell) => cell?.text))
+    .filter(Boolean)
+    .join(" | ");
+  const content =
+    stripHtmlText(note.content) || listText || tableText || "";
+  return {
+    title: truncateText(note.title || "Untitled", 80),
+    content: truncateText(content, 400) || null,
+    tags: (note.tags ?? []).slice(0, 6),
+    date: note.date || null,
+    pinned: Boolean(note.isPinned),
+  };
+};
+
+const summarizeGoal = (goal: Goal) => {
+  const achievedMilestones = (goal.milestones ?? []).filter((m) => m?.isAchieved).length;
+  const totalMilestones = (goal.milestones ?? []).length;
+  return {
+    title: truncateText(goal.title || "Untitled goal", 100),
+    type: goal.type || null,
+    status: goal.status || null,
+    target: goal.targetValue ?? null,
+    progress:
+      goal.manualProgress ?? (totalMilestones > 0 ? `${achievedMilestones}/${totalMilestones} milestones` : null),
+    endDate: goal.endDate || null,
+    description: truncateText(stripHtmlText(goal.description), 200) || null,
+  };
+};
+
+/** Summarize rules, compliance, notebook, goals and live positions for the
+ *  mentor system prompt. Sizes are capped so the bundle stays ~10-30KB. */
+const buildMentorExtraContext = (
+  trades: Trade[],
+  extra?: MentorExtraContextInput
+) => {
+  const template = readActiveChecklistTemplate();
+  const allNotes = Array.isArray(extra?.notes)
+    ? extra.notes.filter((n) => n && !n.isTrashed && !n.isArchived)
+    : [];
+  const orderedNotes = [
+    ...allNotes.filter((n) => n.isPinned),
+    ...allNotes.filter((n) => !n.isPinned),
+  ].slice(0, 8);
+  const allGoals = Array.isArray(extra?.goals) ? extra.goals : [];
+  const orderedGoals = [
+    ...allGoals.filter((g) => g && g.status === "active"),
+    ...allGoals.filter((g) => g && g.status !== "active"),
+  ].slice(0, 6);
+  const positions = Array.isArray(extra?.openPositions)
+    ? extra.openPositions.slice(0, 10)
+    : [];
+
+  return {
+    rules: template
+      ? { activeChecklist: template.name, items: template.items }
+      : null,
+    compliance: {
+      overallComplianceRate: overallComplianceRate(trades),
+      topViolation: topViolation(trades),
+      costOfViolations: costOfViolations(trades)
+        .slice(0, 5)
+        .map((v) => ({
+          tag: v.tag,
+          count: v.count,
+          wins: v.wins,
+          winRate: v.winRate,
+          totalPnl: v.totalPnl,
+          avgPnl: v.avgPnl,
+        })),
+    },
+    notebook: orderedNotes.map(summarizeNote),
+    goals: orderedGoals.map(summarizeGoal),
+    liveAccount: positions.length > 0 ? { openPositions: positions } : null,
+  };
+};
+
 const buildMentorDataSummary = (
   trades: Trade[],
   userProfile: UserProfile | null,
   dailyBias: DailyBias[] = [],
-  analyticsSnapshot: any = null
+  analyticsSnapshot: any = null,
+  extra?: MentorExtraContextInput
 ) => {
   const sortedTrades = [...trades].sort((a, b) => {
     const dateTimeA = new Date(`${a.date}T${a.time || "00:00"}`);
@@ -291,17 +460,36 @@ const buildMentorDataSummary = (
       emotionPnl: emotionData,
       dailyBias: dailyBias.slice(-5),
     },
-    recentTrades: sortedTrades.slice(0, 8).map((trade) => ({
+    recentTrades: sortedTrades.slice(0, 15).map((trade) => ({
       id: trade.ticketId || trade.id.slice(0, 8),
       date: trade.date,
       pair: trade.pair,
       direction: trade.direction,
+      entry: trade.entryPrice ?? null,
+      exit: trade.exitPrice ?? null,
+      stopLoss: trade.stopLoss ?? null,
+      takeProfit: trade.takeProfit ?? null,
+      lots: trade.lots ?? null,
+      rr: trade.rr ?? null,
       pnl: Number(trade.pnl.toFixed(2)),
       result: trade.result,
+      session: trade.session || null,
+      setup: trade.setupName || null,
+      rating: trade.rating ?? null,
+      tags: (trade.tags ?? []).slice(0, 6),
+      emotions: (trade.emotions ?? []).slice(0, 6),
       emotion: trade.mindset || "Neutral",
       mistake: trade.tradingMistake || "",
       adherence: trade.planAdherence || "No Plan",
+      adherenceRate: trade.adherenceRate ?? null,
+      grade: trade.executionGrade ?? null,
+      violations: (trade.behaviorTags ?? []).slice(0, 6),
+      entryNotes: truncateText(stripHtmlText(trade.notes), 500) || null,
+      exitNotes: truncateText(stripHtmlText(trade.exitComment), 300) || null,
+      hasVoiceNote: Boolean(trade.voiceNote),
+      hasScreenshots: Boolean(trade.beforeScreenshot || trade.afterScreenshot),
     })),
+    extraContext: buildMentorExtraContext(trades, extra),
     analytics: buildCompactAnalyticsSnapshot(analyticsSnapshot),
   };
 };
@@ -389,6 +577,17 @@ CORE RULES
 - Do not invent trades, numbers, or account settings.
 - Never include internal reasoning or chain-of-thought.
 
+GROUNDING (use the full context below — rules, compliance, notebook, goals, trade notes)
+- The context includes the trader's own rules checklist, per-trade compliance
+  (adherence %, execution grades, violation tags), notebook entries, active
+  goals, live open positions, and entry/exit notes on recent trades.
+- When coaching, cite specifics: trade dates and pairs, the trader's own words
+  from entry/exit notes, which rule was broken and what it cost in P&L.
+- Connect patterns across sources (e.g. a notebook entry about impatience plus
+  FOMO violations on losing trades means more than either alone).
+- If asked about something not present in the context, say it is unavailable
+  rather than inventing it.
+
 RESPONSE MODES
 - If this is a deep analysis request (${isSpecialAnalysis}), use exact section tags when the prompt asks for them.
 - If strategy plan mode is ${isPlanMode}, favor structure, rules, and checklists over narrative.
@@ -421,6 +620,7 @@ export const buildAiRequestPayload = ({
   history = [],
   modelType = "deepseek",
   isPlanMode = false,
+  extraContext,
 }: {
   query: string;
   trades: Trade[];
@@ -431,6 +631,8 @@ export const buildAiRequestPayload = ({
   history?: HistoryMessage[];
   modelType?: ModalModelType;
   isPlanMode?: boolean;
+  /** Extra Mentor-mode context (notes, goals, positions). Ignored in Research. */
+  extraContext?: MentorExtraContextInput;
 }) => {
   const modelConfig = MODAL_MODELS[modelType];
   const assistantMode = modelConfig.assistantMode;
@@ -456,7 +658,7 @@ export const buildAiRequestPayload = ({
   if (assistantMode === "research") {
     messages.push({ role: "system", content: buildResearchSystemPrompt() });
   } else {
-    const mentorDataSummary = buildMentorDataSummary(trades, userProfile, dailyBias, analyticsSnapshot);
+    const mentorDataSummary = buildMentorDataSummary(trades, userProfile, dailyBias, analyticsSnapshot, extraContext);
     messages.push({
       role: "system",
       content: buildMentorSystemPrompt(query, userProfile, mentorDataSummary, isPlanMode, isSpecialAnalysis),
@@ -527,6 +729,10 @@ async function chatCompletion(
   timeoutMs = 25000,
   firstTokenTimeoutMs: number = AI_TIMEOUTS.firstTokenMs
 ): Promise<string> {
+  // Free-tier catalogue entries route through the Zen proxy instead of NVIDIA.
+  const isZen = ZEN_FREE_MODELS.has(model);
+  const url = isZen ? ZEN_BASE_URL : BASE_URL;
+  // Web keeps the strict budget: no native-network headroom is added here.
   const combined = createCombinedSignal(signal, timeoutMs);
   // First-token watchdog: a connection that never yields anything stalls the
   // whole UX. Firing it trips the same timeout path below, which retries /
@@ -540,7 +746,7 @@ async function chatCompletion(
     const token = await getSessionToken();
     let response: Response;
     try {
-      response = await fetch(BASE_URL, {
+      response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -770,6 +976,8 @@ async function completeWithFallback(
   const firstTokenTimeoutMs = attemptOpts.firstTokenTimeoutMs ?? AI_TIMEOUTS.firstTokenMs;
   const retryDelayMs = attemptOpts.retryDelayMs ?? AI_TIMEOUTS.retryDelayMs;
 
+  // If user picked a custom chat model from the drawer, use it as primary (localStorage)
+  try { const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('jfx_ai_chat_model_id') : null; if (stored) { const parsed = JSON.parse(stored); const id = typeof parsed === 'string' ? parsed : String(parsed); if (id && id !== modelId) modelId = id; } } catch {}
   const attempt = (id: string, tokens: number) =>
     chatCompletion(id, messages, tokens, onStream, signal, timeoutMs, firstTokenTimeoutMs);
 
@@ -869,6 +1077,7 @@ export const modalResearchService = {
         history,
         modelType,
         isPlanMode,
+        extraContext: opts.extraContext,
       });
 
       const streaming = typeof onStream === "function";
