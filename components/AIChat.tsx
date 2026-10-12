@@ -552,7 +552,7 @@ const MessageRow = React.memo(({ message, isDarkMode, userProfile, renderMessage
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className={`group flex w-full px-4 py-2 hover:bg-zinc-50/50 dark:hover:bg-white/5 transition-colors ${isUser ? 'bg-zinc-50/30 dark:bg-white/[0.02]' : ''}`}
+      className={`group flex w-full px-4 py-2 hover:bg-zinc-50/50 dark:hover:bg-white/5 transition-colors ${isUser ? 'bg-zinc-100 dark:bg-[#0a0a0a]' : ''}`}
     >
       <div className="flex gap-4 max-w-4xl mx-auto w-full">
         {/* Avatar */}
@@ -857,7 +857,23 @@ const RESEARCH_QUICK_PROMPTS: ResearchPrompt[] = [
   { title: "Macro Lens", icon: <TrendingUp size={16} />, prompt: "Explain how a trader should research macro drivers before taking a directional trade in forex or indices, without relying on live headlines.", color: 'text-violet-500', desc: 'Top-down context building' },
 ];
 
-const RESEARCH_STARTERS = RESEARCH_QUICK_PROMPTS.slice(0, 2);
+// Provider pill shown next to each model badge in the drawer sheet.
+// CHAT_MODELS is the shared catalogue (services/nvidiaAiService); the provider
+// labels live here so the sheet can attribute every tier the way the APK does.
+const CHAT_MODEL_PROVIDERS: Record<string, string> = {
+  'nvidia/nemotron-3-super-120b-a12b': 'NVIDIA',
+  'nvidia/nemotron-3-ultra-550b-a55b': 'NVIDIA',
+  'z-ai/glm-5.3-flash': 'Z-AI',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 'NVIDIA',
+  'meta/llama-3.2-11b-vision-instruct': 'Meta',
+  'muse-spark-1.2-contributor-free': 'Zen / Meta',
+  'muse-spark-1.3-contributor-free': 'Zen / Meta',
+  'big-pickle': 'Zen',
+  'mimo-v2.5-free': 'Zen / Xiaomi',
+  'ling-3.0-flash-fin-free': 'Zen',
+  'nemotron-3-ultra-free': 'Zen / NVIDIA',
+  'nemotron-3.5-lightning-free': 'Zen / NVIDIA',
+};
 
 const FORGE_ITEMS = [
   { title: "Strategy Roadmap", icon: <Workflow size={20} />, desc: "Logic & decision trees", prompt: "Generate a visual decision tree for my current trading strategy." },
@@ -956,7 +972,7 @@ const formatForexFactoryCalendarMarkdown = (events: ForexFactoryEvent[]): string
   return md;
 };
 
-// --- Slash Commands ---
+// --- Slash Commands --
 const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, notes = [], goals = [], onAddNote, onOpenSettings, onBackToHome }) => {
   // Full mentor context: notebook + goals ride as props, live open positions
   // come from the already-connected EA session. Rules checklist is read from
@@ -2464,27 +2480,21 @@ ${strategyProfile.whyITrade}`;
   }, [isDarkMode, renderStructuredContent]);
 
   return (
-    <div className={`flex flex-col h-full ${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}>
-      {/* Header - ChatGPT Style */}
-      <header className={`sticky top-0 z-50 flex items-center justify-between px-4 h-14 border-b ${
-        isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200'
-      }`}>
-        <div className="flex items-center gap-3 min-w-0">
+    <div className={`flex flex-col h-full w-full max-w-full overflow-hidden overflow-x-hidden ${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}>
+      {/* Header — minimal, back to home */}
+      <header className={`shrink-0 flex items-center justify-between px-3 h-[52px] border-b ${isDarkMode ? 'bg-[#000000] border-zinc-900' : 'bg-white border-slate-200'}`}>
+        <div className="flex items-center gap-2 min-w-0">
           {onBackToHome && (
-            <button onClick={onBackToHome} className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'hover:bg-zinc-900 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'}`} aria-label="Back to home">
+            <button onClick={onBackToHome} className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'hover:bg-zinc-900 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500'}`} aria-label="Back to home">
               <ArrowLeft size={18} />
             </button>
           )}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-black dark:bg-black flex items-center justify-center shadow-lg shadow-black/20">
-              <AssistantIcon size={16} className="text-white" />
+          <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0">
+              <AssistantIcon size={13} className="text-black" />
             </div>
-            <div className="flex flex-col">
-              <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+            <h2 className={`text-[14px] font-semibold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                 {assistantLabel}
               </h2>
-            </div>
-          </div>
         </div>
         
         {/* Model Switcher & New Chat */}
@@ -2537,7 +2547,7 @@ ${strategyProfile.whyITrade}`;
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            className={`flex-1 overflow-y-auto p-6 ${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}
+            className={`flex-1 overflow-y-auto p-4 sm:p-6 pb-24 sm:pb-6 ${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}
           >
             {/* Progress Bar */}
             <div className="max-w-2xl mx-auto mb-8">
@@ -3008,9 +3018,10 @@ ${strategyProfile.whyITrade}`;
         )}
       </AnimatePresence>
 
-      {/* Main Chat Area - Simple ChatGPT-style */}
+      {/* Main Chat Area — vertical scroll, no horizontal scroll, zoomed-out minimal */}
       {!showWizard && (
-      <main ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar relative">
+      <main ref={chatContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar relative overscroll-y-contain w-full max-w-full min-w-0">
+        <div className="w-full max-w-full min-w-0 overflow-x-hidden">
         <AnimatePresence mode="popLayout">
           {messages.length === 0 && !showWizard ? (
             <motion.div 
@@ -3028,27 +3039,6 @@ ${strategyProfile.whyITrade}`;
                   ? 'Research markets, setups, and risk ideas without touching private trading data.'
                   : 'Use your journal context for performance coaching, psychology work, and strategy architecture.'}
               </p>
-              
-              {/* Quick Start Options */}
-              {isResearchMode && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full">
-                  {RESEARCH_STARTERS.map((item) => (
-                    <button
-                      key={item.title}
-                      onClick={() => handleSend(item.prompt)}
-                      className={`w-full min-w-0 p-4 rounded-xl border text-left transition-all ${
-                        isDarkMode ? 'bg-black border-zinc-800 hover:border-zinc-700' : 'bg-white border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={item.color}>{item.icon}</span>
-                        <span className={`text-sm font-medium whitespace-normal break-normal ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{item.title}</span>
-                      </div>
-                      <p className={`text-xs leading-relaxed whitespace-normal break-normal ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{item.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
             </motion.div>
           ) : (
             <div key="chat-messages" className="space-y-0">
@@ -3129,13 +3119,14 @@ ${strategyProfile.whyITrade}`;
             )}
           </AnimatePresence>
         </div>
+        </div>
       </main>
       )}
 
-      {/* Chat Input Area - ChatGPT Style */}
+      {/* Chat Input Area — minimal ChatGPT / Claude style */}
       {!showWizard && (
-      <div className={`${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}>
-        <div className="max-w-4xl mx-auto px-4 py-4">
+      <div className={`sticky bottom-0 z-40 safe-area-inset-bottom ${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}>
+        <div className="max-w-[760px] mx-auto px-3 sm:px-4 py-3">
           
           {/* Features Menu */}
           <AnimatePresence>
@@ -3144,7 +3135,7 @@ ${strategyProfile.whyITrade}`;
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
-                className={`features-menu mb-4 p-4 rounded-2xl shadow-lg ${
+                className={`features-menu mb-4 p-4 rounded-2xl shadow-lg max-h-[40vh] overflow-y-auto custom-scrollbar ${
                   isDarkMode ? 'bg-black/95' : 'bg-slate-50/95'
                 }`}
               >
@@ -3161,7 +3152,7 @@ ${strategyProfile.whyITrade}`;
                 </div>
                 {isResearchMode ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {RESEARCH_STARTERS.map((item) => (
+                    {RESEARCH_QUICK_PROMPTS.map((item) => (
                       <button
                         key={item.title}
                         onClick={() => { void handleSend(item.prompt); setShowFeaturesMenu(false); }}
@@ -3216,7 +3207,7 @@ ${strategyProfile.whyITrade}`;
                 initial={{ opacity: 0, y: 10, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.98 }}
-                className={`forge-menu mb-4 p-4 rounded-2xl border ${
+                className={`forge-menu mb-4 p-4 rounded-2xl border max-h-[40vh] overflow-y-auto custom-scrollbar ${
                   isDarkMode ? 'bg-black border-zinc-700' : 'bg-slate-50 border-slate-200'
                 }`}
               >
@@ -3256,10 +3247,10 @@ ${strategyProfile.whyITrade}`;
             )}
           </AnimatePresence>
 
-            {/* Input Area - ChatGPT Style */}
-            <div className={`relative rounded-[22px] border shadow-sm ${
+            {/* Input pill — single rounded bar */}
+            <div className={`relative rounded-[24px] border flex items-center shadow-sm ${
               isDarkMode 
-                ? 'bg-black/95 border-zinc-700 focus-within:border-emerald-500' 
+                ? 'bg-zinc-900 border-zinc-800 focus-within:border-zinc-700' 
                 : 'bg-white border-slate-200 focus-within:border-slate-300'
             }`}>
               {(isRecording || pendingVoiceClip) && (
@@ -3372,7 +3363,7 @@ ${strategyProfile.whyITrade}`;
                     backgroundColor: isDarkMode ? ['rgba(16, 185, 129, 0.12)', 'rgba(16, 185, 129, 0.22)', 'rgba(16, 185, 129, 0.12)'] : ['rgba(16, 185, 129, 0.08)', 'rgba(16, 185, 129, 0.16)', 'rgba(16, 185, 129, 0.08)']
                   } : {}}
                   transition={{ repeat: Infinity, duration: 1.4 }}
-                  className={`shrink-0 flex items-center gap-2 px-3 py-2.5 rounded-2xl border transition-colors ${
+                  className={`shrink-0 flex items-center gap-2 px-3 py-2.5 rounded-2xl border min-h-[44px] transition-colors ${
                     isRecording || isTranscribing
                       ? (isDarkMode ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-emerald-200 text-emerald-700 bg-emerald-50')
                       : (isDarkMode ? 'border-zinc-700 text-zinc-300 hover:bg-black' : 'border-slate-200 text-slate-700 hover:bg-slate-50')
@@ -3419,7 +3410,7 @@ ${strategyProfile.whyITrade}`;
                     voiceClip: pendingVoiceClip,
                   } : {})} 
                   disabled={(!isGenerating && !canSendMessage) || isRecording || isTranscribing} 
-                  className={`shrink-0 p-2.5 rounded-2xl transition-all active:scale-95 ${
+                  className={`shrink-0 p-2.5 rounded-2xl min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95 ${
                     isGenerating
                       ? (isDarkMode ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-slate-900 text-white hover:bg-slate-800')
                       : (canSendMessage
@@ -3437,24 +3428,10 @@ ${strategyProfile.whyITrade}`;
               </div>
             </div>
             
-            <div className="mt-2 flex flex-col gap-2">
-              <div className={`flex items-start gap-2 text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                {(isRecording || isTranscribing) && (
-                  isTranscribing
-                    ? <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin text-amber-500" />
-                    : <CircleDot size={14} className="mt-0.5 shrink-0 text-emerald-500" />
-                )}
-                <span>{isRecording || isTranscribing ? <span className="font-medium md:hidden">{voiceStatusLabel}: </span> : null}{voiceStatusHint}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div className={`text-xs font-medium ${isCreditWarning ? 'text-red-500' : isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+            <div className="mt-2 flex items-center justify-start">
+              <div className={`text-[11px] font-medium ${isCreditWarning ? 'text-red-500' : isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
                   {getCurrentCreditLabel()}
                 </div>
-                <div className={`text-right text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
-                  <p>{isResearchMode ? 'Research mode uses public context only.' : 'Mentor mode can use your journal, trade, and account context.'}</p>
-                  <p>AI can make mistakes. Verify important information before acting on it.</p>
-                </div>
-              </div>
             </div>
         </div>
       </div>
@@ -3488,7 +3465,7 @@ ${strategyProfile.whyITrade}`;
                   const active = selectedChatModelId === m.id;
                   return (
                     <button key={m.id} onClick={() => { setSelectedChatModelId(m.id); setShowModelDrawer(false); addToast({ type: 'info', title: 'Model Changed', message: `Model: ${m.label}` }); }} className={`w-full text-left px-4 py-3.5 rounded-2xl border flex items-center justify-between transition-all ${active ? (isDarkMode ? 'bg-white text-black border-white' : 'bg-slate-900 text-white border-slate-900') : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900')}`}>
-                      <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold flex items-center gap-2 flex-wrap">{m.label} <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold tracking-widest ${active ? 'bg-white/20' : isDarkMode ? 'bg-zinc-700 text-zinc-300' : 'bg-slate-200 text-slate-600'}`}>{m.badge}</span></div><div className={`text-xs mt-0.5 ${active ? 'opacity-70' : isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{m.desc}</div><div className={`text-[10px] mt-1 font-mono truncate ${active ? 'opacity-50' : 'opacity-40'}`}>{m.id}</div></div>
+                      <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold flex items-center gap-2 flex-wrap">{m.label} <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold tracking-widest ${active ? 'bg-white/20' : isDarkMode ? 'bg-zinc-700 text-zinc-300' : 'bg-slate-200 text-slate-600'}`}>{m.badge}</span>{CHAT_MODEL_PROVIDERS[m.id] && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium tracking-wide ${active ? 'bg-black/10 text-black/60' : isDarkMode ? 'bg-zinc-700/60 text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>{CHAT_MODEL_PROVIDERS[m.id]}</span>}</div><div className={`text-xs mt-0.5 ${active ? 'opacity-70' : isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{m.desc}</div><div className={`text-[10px] mt-1 font-mono truncate ${active ? 'opacity-50' : 'opacity-40'}`}>{m.id}</div></div>
                       {active && <Check size={18} className="shrink-0 ml-3" />}
                     </button>
                   );
@@ -3498,7 +3475,6 @@ ${strategyProfile.whyITrade}`;
           </>
         )}
       </AnimatePresence>
-
       </div>
   );
 };

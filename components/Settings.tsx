@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   User,
   Globe,
@@ -6,7 +6,6 @@ import {
   Save,
   Trash2,
   CreditCard,
-  Lock,
   Mail,
   CheckCircle2,
   Copy,
@@ -28,8 +27,6 @@ import {
   FileText,
 } from 'lucide-react';
 import { UserProfile, EASession, Portfolio } from '../types';
-import { PortfolioSwitcher } from './PortfolioSwitcher';
-import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
 import { Select } from './Select';
 import { normalizeThemePreference } from '../lib/theme';
@@ -77,11 +74,17 @@ interface SettingsProps {
   tradesCount?: number;
   onDeduplicate?: () => Promise<void>;
   initialTab?: SettingsTab;
+  /** Tabs hidden from the section nav (e.g. mobile hides Appearance, Developer Tools, Help). */
+  hiddenTabs?: SettingsTab[];
+  /** Mobile: increment to trigger handleSave from the floating save button. Desktop never passes this. */
+  saveSignal?: number;
+  /** Mobile: notified whenever the effective settings tab changes (to hide the save FAB on tabs with nothing to save). */
+  onSettingsTabChange?: (tab: SettingsTab) => void;
   migrationVersion?: string;
-  eaSession?: EASession | null;
   /** Needed by the diagnostics panel (plan limits, portfolio + queue state). */
   userId?: string | null;
   offlineQueueCount?: number;
+  eaSession?: EASession | null;
   portfolios?: Portfolio[];
   activePortfolioId?: string | null;
   defaultPortfolioId?: string | null;
@@ -90,13 +93,6 @@ interface SettingsProps {
   onSelectPortfolioId?: (id: string) => void;
   onAddPortfolio?: (input: { name: string; description?: string; purpose?: Portfolio['purpose']; source?: Portfolio['source']; startingBalance?: number; currency?: string }) => Promise<Portfolio>;
   onRemovePortfolio?: (id: string) => Promise<void>;
-  /** Tabs to hide entirely. The mobile shell hides account/appearance/help and
-   *  drives those surfaces from the drawer instead. */
-  hiddenTabs?: SettingsTab[];
-  /** Bumping this value saves. The mobile FAB owns Save, so it signals instead
-   *  of rendering the inline button (which .mobile-settings hides anyway). */
-  saveSignal?: number;
-  onSettingsTabChange?: (tab: SettingsTab) => void;
 }
 
 const tabs: Array<{ id: SettingsTab; label: string; shortLabel: string; icon: React.ElementType; desc: string }> = [
@@ -108,6 +104,9 @@ const tabs: Array<{ id: SettingsTab; label: string; shortLabel: string; icon: Re
   { id: 'developer-tools', label: 'Developer Tools', shortLabel: 'Dev Tools', icon: Code2, desc: 'API keys and integrations' },
   { id: 'help', label: 'Help & Feedback', shortLabel: 'Help', icon: HelpCircle, desc: 'Docs and support' },
 ];
+
+import { PortfolioSwitcher } from './PortfolioSwitcher';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 
 const profileOptions = {
   tradingStyle: ['Scalper', 'Day Trader', 'Swing Trader', 'Investor'],
@@ -142,9 +141,10 @@ const Settings: React.FC<SettingsProps> = ({
   tradesCount = 0,
   onDeduplicate,
   initialTab = 'profile',
+  hiddenTabs = [],
+  saveSignal = 0,
+  onSettingsTabChange,
   eaSession,
-  userId,
-  offlineQueueCount = 0,
   portfolios = [],
   activePortfolioId = null,
   defaultPortfolioId = null,
@@ -153,16 +153,14 @@ const Settings: React.FC<SettingsProps> = ({
   onSelectPortfolioId,
   onAddPortfolio,
   onRemovePortfolio,
-  hiddenTabs = [],
-  saveSignal = 0,
-  onSettingsTabChange,
+  userId = null,
+  offlineQueueCount = 0,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const visibleTabs = tabs.filter((t) => !hiddenTabs.includes(t.id));
   const effectiveTab = hiddenTabs.includes(activeTab) ? (visibleTabs[0]?.id ?? 'profile') : activeTab;
   // Mobile rail can scroll when squeezed: keep the active chip in view.
-  // Scroll ONLY the aside rail container directly so parent containers
-  // (main/window) NEVER shift horizontally.
+  // We scroll ONLY the aside rail container directly so parent containers (main/window) NEVER shift horizontally.
   const railRef = useRef<HTMLElement | null>(null);
   const activeTabBtnRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -201,6 +199,7 @@ const Settings: React.FC<SettingsProps> = ({
 
   useEffect(() => {
     setActiveTab(hiddenTabs.includes(initialTab) ? (visibleTabs[0]?.id ?? 'profile') : initialTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTab]);
 
   useEffect(() => {
@@ -302,7 +301,6 @@ const Settings: React.FC<SettingsProps> = ({
   }`;
 
   const compactLabelClass = 'text-[10px] font-black uppercase tracking-[0.2em] opacity-50 block mb-1.5';
-
 
   const currentTab = tabs.find((tab) => tab.id === effectiveTab) ?? visibleTabs[0] ?? tabs[0];
 
@@ -732,11 +730,13 @@ const Settings: React.FC<SettingsProps> = ({
                           </button>
                           <button
                             onClick={() => {
-                              const newKey = `JFX-${Math.floor(1000 + Math.random() * 9000)}-${Math.random()
-                                .toString(36)
-                                .substring(2, 6)
-                                .toUpperCase()}`;
-                              setFormData({ ...formData, syncKey: newKey });
+                              if (!window.confirm('Regenerate the sync key? Already-paired Bridge apps must be updated with the new key (and saved) before they sync again.')) return;
+                              const rand = () => {
+                                const bytes = new Uint8Array(4);
+                                crypto.getRandomValues(bytes);
+                                return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase().slice(0, 4);
+                              };
+                              setFormData({ ...formData, syncKey: `JFX-${rand()}-${rand()}` });
                             }}
                             className={`rounded-xl border px-2.5 py-2.5 transition-all ${
                               isDarkMode
@@ -1045,52 +1045,7 @@ const Settings: React.FC<SettingsProps> = ({
             )}
 
             {effectiveTab === 'security' && (
-              <div className="space-y-5">
-                <div className="mt-5">
-                  <DiagnosticsPanel
-                    isDarkMode={isDarkMode}
-                    userId={userId}
-                    plan={formData.plan}
-                    tradesThisMonth={tradesThisMonth}
-                    tradesCount={tradesCount}
-                    tradeCounts={tradeCounts}
-                    portfolios={portfolios}
-                    activePortfolioId={activePortfolioId}
-                    offlineQueueCount={offlineQueueCount}
-                  />
-                </div>
-                <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div className="flex items-start gap-3.5">
-                      <div className="rounded-xl bg-amber-500/10 p-2.5 text-amber-500">
-                        <Lock size={18} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold">Two-factor authentication</p>
-                        <p className="mt-1 text-sm opacity-60">Account-level protection is handled through your login provider.</p>
-                      </div>
-                    </div>
-                    <div className="rounded-full border px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] opacity-60">
-                      Enabled
-                    </div>
-                  </div>
-                </section>
-
-                <section className={`rounded-xl border p-3.5 ${isDarkMode ? 'border-white/[0.08] bg-black' : 'border-slate-200 bg-white'}`}>
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <p className="text-sm font-bold">Session control</p>
-                      <p className="mt-1 text-sm opacity-60">Use sign out to end this device session immediately.</p>
-                    </div>
-                    <button
-                      onClick={onLogout}
-                      className="rounded-xl bg-rose-500 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-rose-400"
-                    >
-                      Sign Out Now
-                    </button>
-                  </div>
-                </section>
-              </div>
+              <div className="space-y-5" />
             )}
 
             {effectiveTab === 'developer-tools' && (
@@ -1303,6 +1258,22 @@ const Settings: React.FC<SettingsProps> = ({
                   )}
                 </section>
               </div>
+            )}
+
+            {effectiveTab === 'security' && (
+            <div className="mt-5">
+              <DiagnosticsPanel
+                isDarkMode={isDarkMode}
+                userId={userId}
+                plan={formData.plan}
+                tradesThisMonth={tradesThisMonth}
+                tradesCount={tradesCount}
+                tradeCounts={tradeCounts}
+                portfolios={portfolios}
+                activePortfolioId={activePortfolioId}
+                offlineQueueCount={offlineQueueCount}
+              />
+            </div>
             )}
 
             {effectiveTab !== 'security' && effectiveTab !== 'developer-tools' && (

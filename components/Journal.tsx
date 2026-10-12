@@ -21,6 +21,9 @@ import { TradeChecklistPanel, GradePill } from './discipline/TradeChecklistPanel
 import { useChecklistTemplates } from '../lib/useChecklistTemplates';
 import { computeAdherence, derivePlanAdherence, gradeFor, isViolationTag } from '../lib/disciplineChecklist';
 
+// Set false to fall back to the legacy Link Trades modal below (kept intact).
+const USE_NEW_LINK_CARD = true;
+
 interface JournalProps {
   isDarkMode: boolean;
   trades: Trade[];
@@ -525,13 +528,13 @@ const MiniCalendar = ({ year, month, trades, isDarkMode, onClick, currencySymbol
     };
 
     return (
-        <div onClick={onClick} className={`p-5 rounded-2xl border cursor-pointer transition-all hover:shadow-xl ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
+        <div onClick={onClick} className={`p-5 rounded-2xl border cursor-pointer transition-all hover:scale-[1.02] hover:shadow-xl ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
             <div className="flex justify-between items-center mb-4">
                 <h4 className={`text-sm font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{new Date(year, month).toLocaleString('default', { month: 'long' })}</h4>
                 {monthTrades.length > 0 && (<span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isDarkMode ? 'bg-black text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>{monthTrades.length} Trades</span>)}
             </div>
             <div className="grid grid-cols-7 gap-1.5">
-                {['S','M','T','W','T','F','S'].map((d, i) => (<div key={`wd-${i}`} className="text-[9px] font-bold opacity-30 text-center">{d}</div>))}
+                {['S','M','T','W','T','F','S'].map((d, i) => (<div key={`${d}-${i}`} className="text-[9px] font-bold opacity-30 text-center">{d}</div>))}
                 {blanks.map(b => <div key={`b-${b}`} />)}
                 {days.map(d => { 
                     const style = getDayStyle(d); 
@@ -652,41 +655,41 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
     return (
         <div className="h-full flex flex-col">
             <div className={`flex flex-col md:flex-row md:items-center justify-between px-4 py-2.5 gap-3 border-b shrink-0 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-100 bg-white'}`}>
-                <div className="flex items-center gap-3">
-                    <div className={`flex items-center p-0.5 rounded-lg border ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-slate-50 border-slate-200'}`}>
-                        <button onClick={prev} className={`p-1 rounded hover:bg-opacity-10 ${isDarkMode ? 'hover:bg-white text-zinc-400' : 'hover:bg-black text-slate-500'}`}><ChevronLeft size={15} /></button>
-                        <span className={`w-32 text-center font-bold text-xs ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{mode === 'month' ? currentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : year}</span>
-                        <button onClick={next} className={`p-1 rounded hover:bg-opacity-10 ${isDarkMode ? 'hover:bg-white text-zinc-400' : 'hover:bg-black text-slate-500'}`}><ChevronRight size={15} /></button>
+                <div className="flex items-center gap-3 order-2 md:order-1 w-full md:w-auto justify-between md:justify-start">
+                    <div className={`flex-1 flex items-center justify-center p-0.5 rounded-lg border h-[30px] ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-slate-50 border-slate-200'}`}>
+                        <button onClick={prev} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center ${isDarkMode ? 'hover:bg-white hover:bg-opacity-10 text-zinc-400' : 'hover:bg-black hover:bg-opacity-10 text-slate-500'}`}><ChevronLeft size={12} /></button>
+                        <span className={`w-32 text-center font-bold text-[11px] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{mode === 'month' ? currentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : year}</span>
+                        <button onClick={next} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center ${isDarkMode ? 'hover:bg-white hover:bg-opacity-10 text-zinc-400' : 'hover:bg-black hover:bg-opacity-10 text-slate-500'}`}><ChevronRight size={12} /></button>
                     </div>
-                    <div className={`flex rounded-lg border overflow-hidden p-0.5 gap-0.5 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className={`flex-1 flex rounded-lg border overflow-hidden p-0.5 gap-0.5 h-[30px] items-center justify-center ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-slate-50'}`}>
                          <button onClick={() => setMode('month')} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'month' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Month</button>
                          <button onClick={() => setMode('year')} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'year' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Year</button>
                     </div>
                 </div>
                 {mode === 'month' && (
-                    <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1.5 animate-in fade-in slide-in-from-right-4">
-                        <div className="flex flex-col items-end">
+                    <div className="grid grid-cols-3 gap-x-2 gap-y-3 py-1 order-1 md:order-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-4 sm:gap-y-1.5 sm:py-0 animate-in fade-in slide-in-from-right-4">
+                        <div className="flex flex-col sm:items-end">
                             <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Winning Days</span>
                             <div className="flex items-center gap-1">
                                 <Trophy size={12} className="text-amber-500" />
                                 <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winDays}</span>
                             </div>
                         </div>
-                        <div className="flex flex-col items-end">
+                        <div className="flex flex-col sm:items-end">
                             <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Losing Days</span>
                             <div className="flex items-center gap-1">
                                 <TrendingDown size={12} className="text-rose-500" />
                                 <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.lossDays}</span>
                             </div>
                         </div>
-                        <div className="flex flex-col items-end">
+                        <div className="flex flex-col sm:items-end">
                             <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Winning Trades</span>
                             <div className="flex items-center gap-1">
                                 <CheckCircle size={12} className="text-emerald-500" />
                                 <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winTrades}</span>
                             </div>
                         </div>
-                        <div className="flex flex-col items-end">
+                        <div className="flex flex-col sm:items-end">
                             <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Losing Trades</span>
                             <div className="flex items-center gap-1">
                                 <XCircle size={12} className="text-rose-500" />
@@ -694,14 +697,14 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
                             </div>
                         </div>
                         <div className={`w-px h-6 hidden lg:block ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
-                        <div className="flex flex-col items-end">
+                        <div className="flex flex-col sm:items-end">
                             <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Net P&L</span>
                             <span className={`font-mono font-bold text-sm ${monthlyStats.totalPnL > 0 ? 'text-teal-500' : monthlyStats.totalPnL < 0 ? 'text-rose-500' : isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
                                 {monthlyStats.totalPnL > 0 ? '+' : ''}{userProfile.currencySymbol}{Math.abs(monthlyStats.totalPnL).toLocaleString()}
                             </span>
                         </div>
                         <div className={`w-px h-6 hidden lg:block ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
-                        <div className="flex flex-col items-end">
+                        <div className="flex flex-col sm:items-end">
                             <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Win Rate</span>
                             <div className="flex items-center gap-1"><Activity size={12} className="text-purple-500" /><span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winRate.toFixed(0)}%</span></div>
                         </div>
@@ -709,7 +712,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
                 )}
             </div>
 
-            <div className={`flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-4 ${isDarkMode ? 'bg-[#000000]' : 'bg-slate-50/50'}`}>
+            <div className={`flex-1 overflow-y-auto custom-scrollbar px-0 py-3 sm:py-4 pb-24 sm:pb-4 ${isDarkMode ? 'bg-[#000000]' : 'bg-slate-50/50'}`}>
                 {mode === 'month' && (
                     <div className={`mb-3 border-t border-l border-r rounded-xl overflow-hidden transition-all duration-300 ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200 shadow-sm'}`}>
                         <button 
@@ -784,13 +787,13 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
                             if (dx < 0) next(); else prev();
                         }}
                     >
-                        <div className="grid grid-cols-7 gap-2 text-center mb-2">
+                        <div className="grid grid-cols-7 gap-1 text-center mb-2">
                             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
                                 <div key={d} className="text-[10px] font-bold uppercase opacity-40">{d}</div>
                             ))}
                         </div>
-                        <div className="grid grid-cols-7 gap-2 auto-rows-fr">
-                            {blanks.map(b => <div key={`blank-${b}`} className="min-h-[70px] sm:min-h-[80px]" />)}
+                        <div className="grid grid-cols-7 gap-1 auto-rows-fr">
+                            {blanks.map(b => <div key={`blank-${b}`} className="min-h-[92px] sm:min-h-[80px]" />)}
                             {days.map(day => { 
                                 const dayTrades = getTradesForDay(day); 
                                 const hasTrades = dayTrades.length > 0; 
@@ -820,7 +823,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
                                         disabled={!hasTrades}
                                         aria-label={hasTrades ? `View ${dayTrades.length} ${dayTrades.length === 1 ? 'trade' : 'trades'} on ${dateStrForDay(day)}` : `No trades on ${dateStrForDay(day)}`}
                                         onClick={() => { if (!hasTrades) return; try { haptic.selection(); } catch {} setSelectedDateStr(dateStrForDay(day)); }}
-                                        className={`relative rounded-lg border p-1.5 sm:p-2 flex flex-col items-center justify-center min-h-[70px] sm:min-h-[80px] transition-all duration-200 overflow-hidden group w-full text-center ${getBgColor()} ${hasTrades ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'} ${isDarkMode ? 'hover:border-zinc-600' : 'hover:shadow-md hover:-translate-y-0.5'} ${isCurrentDay ? 'ring-1.5 ring-indigo-500 ring-offset-1 ring-offset-[#000000]' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01]`}>
+                                        className={`relative rounded-lg border p-1.5 sm:p-2 flex flex-col items-center justify-center min-h-[92px] sm:min-h-[80px] transition-all duration-200 overflow-hidden group w-full text-center ${getBgColor()} ${hasTrades ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'} ${isDarkMode ? 'hover:border-zinc-600' : 'hover:shadow-md hover:-translate-y-0.5'} ${isCurrentDay ? 'ring-1.5 ring-indigo-500 ring-offset-1 ring-offset-[#000000]' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01]`}>
                                         <div className="absolute top-1.5 right-2 z-10">
                                             <span className={`text-[9px] font-bold ${isCurrentDay ? 'text-indigo-400 font-black' : isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{day}</span>
                                         </div>
@@ -830,7 +833,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
                                                 <div className={`text-xs sm:text-sm font-mono font-bold tracking-tight ${isPositive ? 'text-emerald-500' : isNegative ? 'text-rose-500' : (isDarkMode ? 'text-zinc-400' : 'text-slate-600')}`}>
                                                     {dayPnL >= 0 ? '+' : '-'}{userProfile.currencySymbol}{Math.abs(dayPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </div>
-                                                <div className={`text-[9px] font-bold uppercase tracking-wider opacity-40 ${isDarkMode ? 'text-white' : 'text-black'}`}>
+                                                <div className={`text-[8px] font-bold uppercase tracking-wider opacity-40 whitespace-nowrap ${isDarkMode ? 'text-white' : 'text-black'}`}>
                                                     {dayTrades.length} {dayTrades.length === 1 ? 'Trade' : 'Trades'}
                                                 </div>
                                             </div>
@@ -1003,7 +1006,24 @@ const MobileTradeCard: React.FC<{ trade: Trade; onToggle: () => void; isSelected
     );
 };
 
-const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, onBatchUpdateTrades, onDeleteTrades, onEditTrade, userProfile, onViewChange, isLoading = false, offlineQueue = [], isDemoMode = false, portfolios = [], activePortfolioId, defaultPortfolioId, activePortfolioName, onSelectPortfolioId }) => {
+const Journal: React.FC<JournalProps> = ({ 
+    isDarkMode, 
+    trades, 
+    onUpdateTrade, 
+    onBatchUpdateTrades, 
+    onDeleteTrades, 
+    onEditTrade, 
+    userProfile, 
+    onViewChange, 
+    isLoading = false, 
+    offlineQueue = [], 
+    isDemoMode = false,
+    portfolios = [],
+    activePortfolioId,
+    defaultPortfolioId,
+    activePortfolioName,
+    onSelectPortfolioId,
+}) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
     const [expandedTradeId, setExpandedTradeId] = useState<string | null>(null);
@@ -1603,6 +1623,18 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                     <p className="text-xs opacity-50 italic">No entry comments recorded.</p>
                                 )}
                             </div>
+                            {trade.voiceNote && (
+                                <div className="mt-2 pt-2 border-t border-dashed border-current/10 shrink-0">
+                                    <h5 className="text-[9px] font-black uppercase tracking-widest opacity-40 mb-1">Voice Note</h5>
+                                    {isAudioSource(trade.voiceNote) ? (
+                                    <AudioNote src={trade.voiceNote} className="w-full h-8" />
+                                    ) : (
+                                        <p className="text-xs leading-relaxed whitespace-pre-wrap opacity-90">
+                                            {trade.voiceNote}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <div className={`p-3.5 h-[140px] min-w-0 rounded-xl border flex flex-col overflow-hidden ${isDarkMode ? 'bg-black/20 border-zinc-800 text-zinc-300' : 'bg-white border-slate-200 text-slate-700'}`}>
                             <div className="flex items-center justify-between mb-1.5 shrink-0">
@@ -1656,6 +1688,8 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
             </div>
         </div>
     );
+
+    // MobileTradeCard — Clean minimalist row matching exact design (Pair + Direction · Date on left, PnL on right, divider line below)
 
     const renderTradeRow = (trade: Trade, isGrouped = false, isFirst = false, isLast = false, rowKey?: string) => (
         <React.Fragment key={rowKey || `${isGrouped ? 'grouped' : 'standalone'}-${trade.id}-${trade.date}-${trade.time}`}>
@@ -1970,18 +2004,18 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                     />
                 ) : null;
             })()}
-            <header className="mb-4 flex flex-col md:flex-row md:items-end justify-between gap-3">
+            <header className="mb-4 flex flex-col gap-1">
                 <div>
                     <div className="flex items-center gap-2 mb-1">
-                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Trade Journal</h1>
+                        <h1 className="text-[22px] font-black tracking-tight leading-none">Trade Journal</h1>
                         {isDemoMode && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border border-amber-500/30 bg-amber-500/10 text-amber-300">
-                                Demo Mode
+                            <span className="px-2 py-1 rounded-full text-[10px] font-black tracking-widest border border-amber-500/30 bg-amber-500/10 text-amber-300">
+                                Demo
                             </span>
                         )}
                     </div>
-                    <p className={`text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
-                        {isDemoMode ? 'Sample trades covering a recent three-month period are loaded for review.' : 'Detailed history of your market execution.'}
+                    <p className={`text-[13px] font-medium leading-relaxed ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
+                        {isDemoMode ? 'Sample trades — 3 months loaded.' : 'Your market execution history.'}
                     </p>
                 </div>
                 {selectedIds.length > 0 ? (
@@ -2016,23 +2050,24 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                         <button onClick={handleBulkDelete} className="py-1.5 px-3 rounded flex items-center gap-1.5 text-xs font-bold transition-all bg-rose-500 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20"><Trash2 size={14} /> Delete Selected</button>
                     </div>
                 ) : (
-                    <div className="flex gap-2">
-                        <div className={`flex rounded-lg border overflow-hidden p-0.5 gap-0.5 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2 w-full sm:w-auto overflow-x-auto no-scrollbar snap-x snap-mandatory sm:snap-none max-[360px]:flex-col max-[360px]:overflow-visible">
+                        <div className={`flex rounded-lg border overflow-hidden p-0.5 gap-0.5 w-full sm:w-auto ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-white'}`}>
                             <button 
                                 onClick={() => setViewMode('list')} 
                                 aria-label="Switch to List View"
-                                className={`py-1.5 px-2.5 rounded flex items-center gap-1.5 text-xs font-bold transition-all ${viewMode === 'list' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                className={`h-11 min-h-[44px] py-1.5 px-2.5 rounded flex flex-1 justify-center items-center gap-1.5 text-xs font-bold transition-all sm:flex-none ${viewMode === 'list' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                             >
                                 <List size={14} /> List
                             </button>
                             <button 
                                 onClick={() => setViewMode('calendar')} 
                                 aria-label="Switch to Calendar View"
-                                className={`py-1.5 px-2.5 rounded flex items-center gap-1.5 text-xs font-bold transition-all ${viewMode === 'calendar' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                className={`h-11 min-h-[44px] py-1.5 px-2.5 rounded flex flex-1 justify-center items-center gap-1.5 text-xs font-bold transition-all sm:flex-none ${viewMode === 'calendar' ? 'bg-[#FF4F00] text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                             >
                                 <CalendarIcon size={14} /> Calendar
                             </button>
                         </div>
+                        {viewMode === 'list' && (
                         <div className="relative">
                             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                             <input 
@@ -2042,9 +2077,10 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 placeholder="Search pair, tag or asset..." 
                                 value={searchTerm} 
                                 onChange={(e) => setSearchTerm(e.target.value)} 
-                                className={`pl-8 pr-3 py-1.5 rounded-lg border text-xs outline-none w-48 sm:w-56 ${isDarkMode ? 'bg-[#000000] border-[#27272a] focus:border-blue-500' : 'bg-white border-slate-200'}`} 
+                                className={`pl-8 pr-3 h-11 min-h-[44px] rounded-lg border text-xs outline-none w-full sm:w-56 ${isDarkMode ? 'bg-[#000000] border-[#27272a] focus:border-blue-500' : 'bg-white border-slate-200'}`} 
                             />
                         </div>
+                        )}
                         <div className="relative">
                             {/* Outer control is a div — nesting a <button> inside a
                                 <button> is invalid HTML and the inner clear action
@@ -2395,10 +2431,10 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 })
                             )}
                             {visibleGroupCount < groupedTrades.length && (
-                                <div className="flex justify-center py-4">
+                                <div className="hidden sm:flex justify-center py-4">
                                     <button
                                         onClick={() => setVisibleGroupCount(c => c + GROUP_PAGE_SIZE)}
-                                        className={`h-10 px-6 rounded-xl text-[12px] font-black tracking-wide active:scale-95 transition-all ${isDarkMode ? 'bg-white text-black hover:bg-zinc-200' : 'bg-black text-white hover:bg-zinc-800'}`}
+                                        className="h-10 px-6 rounded-xl bg-white/[0.06] text-white text-[12px] font-black tracking-wide active:scale-95 transition-all"
                                     >
                                         Show more ({groupedTrades.length - visibleGroupCount} groups left)
                                     </button>
@@ -2411,8 +2447,8 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                 )}
             </div>
 
-            {/* Link Setup Modal */}
-            {isLinkModalOpen && (
+            {/* Link Setup Modal — new minimal card (old modal kept below as fallback) */}
+            {isLinkModalOpen && USE_NEW_LINK_CARD && (
                 <LinkTradesCard
                     count={selectedIds.length}
                     setupName={draftSetupName}
@@ -2422,9 +2458,68 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                     mixedState={selectedSetupSummary?.mixedSetupState}
                     alreadyLinked={selectedSetupSummary?.hasExistingSetup && !selectedSetupSummary?.mixedSetupState}
                     isDarkMode={isDarkMode}
-                    onClose={() => setIsLinkModalOpen(false)}
+                    onClose={() => { setIsLinkModalOpen(false); setSelectedIds([]); }}
                     onConfirm={handleLinkSelected}
                 />
+            )}
+            {isLinkModalOpen && !USE_NEW_LINK_CARD && (
+                <div className="fixed inset-0 z-[300] flex items-center justify-center p-6">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setIsLinkModalOpen(false); setSelectedIds([]); }} />
+                    <div className={`relative w-full max-w-md p-8 rounded-[32px] border shadow-2xl ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200'}`}>
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="p-2.5 rounded-2xl bg-violet-500/10 text-violet-500">
+                                <Link size={24} />
+                            </div>
+                            <h3 className="text-2xl font-black tracking-tight">Link Trades</h3>
+                        </div>
+                        <p className={`text-sm mb-8 leading-relaxed ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+                            These {selectedIds.length} trades will be linked together into a strategic cluster in your journal.
+                        </p>
+                        <div className="space-y-4 mb-8">
+                            <div>
+                                <label className="text-[10px] font-black uppercase tracking-widest opacity-50 block mb-2">
+                                    Setup Name
+                                </label>
+                                <input
+                                    type="text"
+                                    value={draftSetupName}
+                                    onChange={(e) => setDraftSetupName(e.target.value)}
+                                    placeholder={selectedSetupSummary?.setupName || 'EURUSD 3-Trade Setup'}
+                                    maxLength={80}
+                                    className={`w-full px-4 py-3 rounded-2xl border text-sm outline-none ${isDarkMode ? 'bg-[#000000] border-[#27272a] text-zinc-100 focus:border-violet-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500'}`}
+                                />
+                                <p className={`mt-2 text-[11px] ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
+                                    A readable name makes the setup easier to find later in both Journal and Desktop Bridge.
+                                </p>
+                            </div>
+                            {selectedSetupSummary?.mixedSetupState && (
+                                <div className="p-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 text-amber-100 text-sm leading-relaxed">
+                                    Some selected trades are already linked to different setups. Linking will replace those existing links with this new setup name.
+                                </div>
+                            )}
+                            {selectedSetupSummary?.hasExistingSetup && !selectedSetupSummary.mixedSetupState && (
+                                <div className="p-4 rounded-2xl border border-violet-500/20 bg-violet-500/10 text-violet-100 text-sm leading-relaxed">
+                                    These trades are already linked together. Linking again will create a fresh setup cluster.
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => { setIsLinkModalOpen(false); setSelectedIds([]); }}
+                                className={`flex-1 py-4 rounded-2xl font-black text-sm transition-all ${isDarkMode ? 'bg-black text-white hover:bg-black' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={handleLinkSelected}
+                                disabled={!draftSetupName.trim() || selectedIds.length < 2}
+                                className="flex-1 py-4 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-2xl font-black text-sm transition-all shadow-xl shadow-violet-500/20"
+                            >
+                                Link Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
             {pendingBreakSetupId && (
                 <ConfirmationModal

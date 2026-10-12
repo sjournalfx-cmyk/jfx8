@@ -12,6 +12,7 @@ import { dataService, isTradeInPortfolio } from '../services/dataService';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Trade, EASession, EADeal, EAPosition, Portfolio } from '../types';
 import OpenPositions from './OpenPositions';
+import { CtraderPositionRow } from './CtraderPositionRow';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useConnectionMode } from '../hooks/useConnectionMode';
 import { EA_BRIDGE_URL } from '../lib/constants';
@@ -19,7 +20,33 @@ import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
 import { parseMTTradeCSV } from '../lib/trade-import';
 import { hasActiveSession as hasCtraderSession } from '../services/ctraderService';
+import { isNative } from '../lib/capacitor';
 import { persistentGetSync, persistentSet } from '../lib/persistentStore';
+
+/**
+ * Instrument-aware pip-size lookup used for the live pending-trade pip readout.
+ * Falls back to standard forex (0.0001) for unrecognised symbols. Mirrors
+ * jfx-mobile/lib/tradeDirectionRepair.ts getPipSize, inlined here because the
+ * web repo has no tradeDirectionRepair pip helper to import.
+ */
+const getPipSize = (pair: string): number => {
+    const upper = (pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    // Indices (GER40, US30, US500, NAS100, UK100, JP225, EU50, etc.)
+    if (/^(GER|DE|DAX|US|NAS|UK|FTSE|JP|NIK|EU|SX|AUS|HK|FR|ES|IT|CH|SE|NL|SPX|DJI|NDX)\d/.test(upper) ||
+        upper.includes('500') || upper.includes('100') || upper.includes('225') ||
+        upper.endsWith('INDEX') || upper.endsWith('IDX')) {
+        return 0.1;
+    }
+    if (upper.includes('XAUUSD') || upper.includes('GOLD')) return 0.01;
+    if (upper.includes('XAGUSD') || upper.includes('SILVER')) return 0.001;
+    if (upper.includes('WTI') || upper.includes('BRENT') || upper.includes('USOIL') ||
+        upper.includes('UKOIL') || upper.includes('CRUDE') || upper.includes('OIL')) return 0.01;
+    if (upper.includes('BTC') || upper.includes('ETH') || upper.includes('XBT') ||
+        upper.includes('CRYPTO') || upper.includes('COIN')) return 1;
+    if (upper.includes('JPY')) return 0.01;
+    return 0.0001;
+};
 
 interface BridgeProps {
     isDarkMode: boolean;
@@ -541,8 +568,8 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                                         <p className="text-[11px] text-zinc-500 mt-1">Any broker below connects via cTrader ID OAuth.</p>
                                     </div>
                                 </div>
-                                <button onClick={() => setShowCtraderBrokers(false)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white shrink-0">
-                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                                <button onClick={() => setShowCtraderBrokers(false)} className="w-8 h-8 rounded-xl flex items-center justify-center text-zinc-400 hover:text-white shrink-0">
+                                     <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                                 </button>
                             </div>
                             <div className="relative">
@@ -665,10 +692,14 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
         return () => clearInterval(timer);
     }, []);
 
-    // Local Headless MT5 Polling:
+    // Local Headless MT5 Polling (desktop-only):
     // Tier 1: Try MQL5 socket bridge at localhost:8888 (Docker headless mode)
     // Tier 2: Fallback to Vite dev-server /api/mt5/* routes (Python direct mode)
+    // Skipped in the native app shell: localhost there is the phone itself
+    // (the bridge runs on the user's PC) and there is no dev server, so both
+    // tiers can never succeed — polling would only spam connection errors.
     useEffect(() => {
+        if (isNative) return;
         let isActive = true;
 
         const fetchFromSocketBridge = async (controller: AbortController) => {
@@ -1119,7 +1150,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
                                 <div className="space-y-2 overflow-y-auto custom-scrollbar flex-1 pr-1 -mr-1">
                                     {pendingTrades.length > 0 ? (
                                         pendingTrades.map((trade: any) => {
-                                            const pipSize = trade.symbol?.includes('JPY') ? 0.01 : 0.0001;
+                                            const pipSize = getPipSize(trade.symbol || '');
                                             const pipMov = trade.entry_price ? (trade.type === 'BUY' ? trade.price - trade.entry_price : trade.entry_price - trade.price) / pipSize : 0;
                                             return (
                                                 <div key={trade.ticket} className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-amber-500/30 transition-all group">
@@ -1602,6 +1633,11 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     const [autoSync, setAutoSync] = useState<boolean>(() => {
         try { return localStorage.getItem('jfx_ctrader_autosync') !== 'off'; } catch { return true; }
     });
+    const toggleAutoSync = () => {
+        const next = !autoSync;
+        setAutoSync(next);
+        try { localStorage.setItem('jfx_ctrader_autosync', next ? 'on' : 'off'); } catch { /* blocked */ }
+    };
     const promptShownForRef = useRef<number | null>(null);
     const guidedCancelRef = useRef(false);
     const knownDealIdsRef = useRef<Set<number>>(new Set());
@@ -1836,7 +1872,8 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         let done = 0;
         const savedAll: Trade[] = [];
         const okDealIds: number[] = [];
-        // chunks are only progress granularity — one parent sync at the end
+        // batchAddTrades now runs the SAME per-row engine as History singles
+        // (bounded pool inside), so chunks are only progress granularity.
         const CHUNK = 200;
         for (let i = 0; i < pending.length; i += CHUNK) {
             if (opts?.isCancelled?.()) break;
@@ -2256,6 +2293,24 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         }
     };
 
+    const refreshOpenPositions = async () => {
+        if (selectedAccountId == null) return;
+        const acc = accounts.find((a: any) => a.ctidTraderAccountId === selectedAccountId);
+        const isDemo = acc ? !!acc.isDemo : true;
+        const { getPositions } = await import('../services/ctraderService');
+        const fresh = await getPositions(selectedAccountId, isDemo);
+        setAccountPositions(fresh || []);
+    };
+
+    const handleSavePositionSltp = async (pos: any, stopLoss?: number, takeProfit?: number) => {
+        if (selectedAccountId == null) throw new Error('No cTrader account selected.');
+        const acc = accounts.find((a: any) => a.ctidTraderAccountId === selectedAccountId);
+        const isDemo = acc ? !!acc.isDemo : true;
+        const { amendPositionSltp } = await import('../services/ctraderService');
+        await amendPositionSltp(selectedAccountId, Number(pos.positionId), { stopLoss, takeProfit, isDemo });
+        await refreshOpenPositions();
+    };
+
     const handleSelectAccount = async (acc: any) => {
         const id = acc.ctidTraderAccountId;
         if (selectedAccountId === id) {
@@ -2397,8 +2452,8 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     const handleDisconnect = async () => {
         try {
             const { logout } = await import('../services/ctraderService');
-            logout();
-            try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
+            await logout();
+            try { if (userId) localStorage.setItem(`jfx_connection_mode_${userId}`, 'none'); } catch { /* blocked */ }
             manualBackToListRef.current = false;
             promptShownForRef.current = null;
             knownSeededForRef.current = null;
@@ -2556,6 +2611,80 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     }, [authState]);
 
     // Real-time Event Listener Setup
+    // --- Live P&L: keep open positions fresh while the Positions tab is visible.
+    // Subscribes to the held symbols only; on ticks, re-pulls positions
+    // (throttled, lightweight — never the full details fetch, so no spinner).
+    const heldSymbolKey = useMemo(() => {
+        try {
+            return [...new Set((accountPositions || []).map((p: any) => Number(p.symbolId)).filter((n: number) => Number.isFinite(n)))]
+                .sort((a, b) => a - b).join(',');
+        } catch { return ''; }
+    }, [accountPositions]);
+
+    const [heldSpotTicks, setHeldSpotTicks] = useState<Record<string, { bid?: number; ask?: number }>>({});
+    const livePosRefresh = useRef({ last: 0, inFlight: false });
+    const livePosSpotsRef = useRef<{ accountId: number; isDemo: boolean; ids: number[] } | null>(null);
+    useEffect(() => {
+        if (selectedAccountId == null || activeTab !== 'positions' || !heldSymbolKey) return;
+        const ids = heldSymbolKey.split(',').map(Number);
+        const currentAcc = accounts.find((a: any) => a.ctidTraderAccountId === selectedAccountId);
+        const wsIsDemo = currentAcc ? !!currentAcc.isDemo : true;
+        let unsubListener: (() => void) | null = null;
+        let cancelled = false;
+        livePosSpotsRef.current = { accountId: selectedAccountId, isDemo: wsIsDemo, ids };
+
+        const throttledRefresh = async () => {
+            const now = Date.now();
+            const st = livePosRefresh.current;
+            if (st.inFlight || now - st.last < 2000) return;
+            st.last = now;
+            st.inFlight = true;
+            try {
+                const { getPositions } = await import('../services/ctraderService');
+                if (cancelled) return;
+                const fresh = await getPositions(selectedAccountId, wsIsDemo).catch(() => null);
+                if (!cancelled && fresh) setAccountPositions(fresh);
+            } finally {
+                st.inFlight = false;
+            }
+        };
+
+        import('../services/ctraderService').then(({ addCtraderListener, PT, subscribeToSpots }) => {
+            if (cancelled) return;
+            unsubListener = addCtraderListener((payloadType, payload, envIsDemo) => {
+                if (envIsDemo !== wsIsDemo) return;
+                if (payloadType !== PT.SPOT_EVENT) return;
+                const symId = Number(payload?.symbolId);
+                if (!ids.includes(symId)) return;
+                const b = payload?.bid !== undefined && payload.bid !== null && payload.bid !== '' ? Number(payload.bid) : undefined;
+                const a = payload?.ask !== undefined && payload.ask !== null && payload.ask !== '' ? Number(payload.ask) : undefined;
+                setHeldSpotTicks((prev) => ({
+                    ...prev,
+                    [String(symId)]: {
+                        bid: b ?? prev[String(symId)]?.bid,
+                        ask: a ?? prev[String(symId)]?.ask,
+                    },
+                }));
+                void throttledRefresh();
+            });
+            subscribeToSpots(selectedAccountId, ids, wsIsDemo).catch(() => {});
+            // Prime immediately so P&L never sits stale after opening the tab.
+            void throttledRefresh();
+        });
+
+        return () => {
+            cancelled = true;
+            if (unsubListener) unsubListener();
+            const cur = livePosSpotsRef.current;
+            livePosSpotsRef.current = null;
+            if (cur) {
+                import('../services/ctraderService').then((svc) => {
+                    svc.unsubscribeFromSpots(cur.accountId, cur.ids, cur.isDemo).catch(() => {});
+                }).catch(() => {});
+            }
+        };
+    }, [selectedAccountId, activeTab, heldSymbolKey, accounts]);
+
     useEffect(() => {
         if (!selectedAccountId) return;
         
@@ -2619,6 +2748,9 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         setErrorMsg('');
         try {
             const { getAuthorizeUrl } = await import('../services/ctraderService');
+            // New explicit consent intent — drop any stale connection-mode
+            // preference so the OAuth return lands on the cTrader terminal.
+            try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
             window.location.href = getAuthorizeUrl();
         } catch (e: any) {
             setErrorMsg(e.message || 'Failed to initiate cTrader connection');
@@ -2763,10 +2895,25 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                     )}
 
                     {authState === 'connecting' && (
-                        <div className="flex items-center justify-center py-8">
-                            <div className="flex flex-col items-center gap-3">
-                                <Loader2 size={24} className="animate-spin text-[#FF4F00]" />
-                                <p className="text-xs text-zinc-400">Redirecting to cTrader ID...</p>
+                        <div className="space-y-3 py-1">
+                            <div className="flex items-center gap-2.5 py-2">
+                                <Loader2 size={18} className="animate-spin text-[#FF4F00] shrink-0" />
+                                <div className="min-w-0">
+                                    <p className="text-[13px] font-semibold text-white leading-tight">Waiting for authorization…</p>
+                                    <p className="text-[11px] text-zinc-500 leading-tight mt-0.5">
+                                        Approve in your browser — you'll return here automatically.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-center">
+                                <button
+                                    type="button"
+                                    onClick={() => { setAuthState('idle'); setErrorMsg(''); }}
+                                    className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                                >
+                                    Cancel
+                                </button>
                             </div>
                         </div>
                     )}
@@ -2816,14 +2963,10 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                     setDetailsError('');
                                     setActiveTab('positions');
                                 };
-                                const toggleAutoSync = () => {
-                                    const next = !autoSync;
-                                    setAutoSync(next);
-                                    try { localStorage.setItem('jfx_ctrader_autosync', next ? 'on' : 'off'); } catch { /* blocked */ }
-                                };
 
-                                // Done — collapse to a single success row. Only when nothing is
-                                // pending in EITHER range, so users can't get stuck.
+                                // Done — collapse to a single success row (no stats grid, toggle, or footnotes).
+                                // Only fully collapse when nothing is pending in EITHER range; otherwise
+                                // surface the other range's pending count so users can't get stuck.
                                 if (!isBulkAdding && rangePending.length === 0) {
                                     const otherPending = importRange === '30d' ? pendingAll - pending30 : 0;
                                     return (
@@ -3073,7 +3216,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                             )}
 
                             {/* --- Account details sub-panel --- */}
-                            {selectedAccountId != null && (
+                            {selectedAccountId != null && !showImportPrompt && (
                                         <div className="mt-4 rounded-xl border border-white/5 bg-black overflow-hidden">
                                             {/* Header */}
                                             <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-black">
@@ -3339,14 +3482,60 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                         {/* Tab Content: POSITIONS & PENDING ORDERS */}
                                                         {activeTab === 'positions' && (
                                                             <div className="space-y-4">
-                                                                <div className="rounded-xl border border-white/5 bg-black px-4 py-5 text-center">
-                                                                    <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">Open Positions</p>
-                                                                    <p className="mt-2 text-sm text-zinc-400">Under development</p>
-                                                                </div>
-
-                                                                <div className="rounded-xl border border-white/5 bg-black px-4 py-5 text-center">
-                                                                    <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">Pending Orders</p>
-                                                                    <p className="mt-2 text-sm text-zinc-400">Under development</p>
+                                                                <div>
+                                                                    {accountPositions.length === 0 && pendingOrders.length === 0 ? (
+                                                                        <div className="text-center py-6 px-4 rounded-xl border border-white/5 bg-black">
+                                                                            <p className="text-[11px] text-zinc-500 leading-relaxed">No open positions. Open positions track here live — they join your journal when closed.</p>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="max-h-[320px] overflow-y-auto custom-scrollbar">
+                                                                            {accountPositions.map((p: any, idx: number) => {
+                                                                                const sym = symbolsList.find((s: any) => s.symbolId?.toString() === String(p.symbolId));
+                                                                                return (
+                                                                                    <CtraderPositionRow
+                                                                                        key={`pos_${p.positionId ?? idx}`}
+                                                                                        position={p}
+                                                                                        symbolName={getSymbolName(p)}
+                                                                                        digits={sym && Number.isFinite(Number(sym.digits)) ? Number(sym.digits) : undefined}
+                                                                                        liveBid={heldSpotTicks[String(p.symbolId)]?.bid}
+                                                                                        liveAsk={heldSpotTicks[String(p.symbolId)]?.ask}
+                                                                                        onClose={(pos: any) => handleClosePosition(Number(pos.positionId), Number(pos.volume) || 0, !!accounts.find((a: any) => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
+                                                                                        onSaveSltp={handleSavePositionSltp}
+                                                                                    />
+                                                                                );
+                                                                            })}
+                                                                            {pendingOrders.length > 0 && (
+                                                                                <p className="text-[10px] font-semibold text-zinc-500 pt-2 pb-0.5">Pending ({pendingOrders.length})</p>
+                                                                            )}
+                                                                            {pendingOrders.map((o: any, idx: number) => {
+                                                                                const trigger = o.limitPrice ?? o.stopPrice;
+                                                                                return (
+                                                                                    <div key={`ord_${o.orderId ?? idx}`} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                                                                                        <div className="min-w-0 pr-3 flex-1">
+                                                                                            <h3 className="text-[13px] font-bold uppercase tracking-tight leading-tight text-white truncate">{o.symbol || getSymbolName(o)}</h3>
+                                                                                            <p className="text-[11px] leading-tight mt-0.5 text-zinc-500 capitalize">{o.tradeSide === 'sell' ? 'Sell' : 'Buy'} {String(o.orderType || '').replace('_', ' ')} · {Number(o.volume || 0).toFixed(2)}</p>
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-2 shrink-0">
+                                                                                            <span className="text-[11px] font-semibold tabular-nums text-zinc-500">
+                                                                                                {trigger !== undefined ? `@ ${trigger}` : 'Market'}
+                                                                                            </span>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => handleCancelOrder(Number(o.orderId), !!accounts.find((a: any) => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
+                                                                                                className="p-1 text-zinc-500 hover:text-rose-400 transition-colors"
+                                                                                                title="Cancel pending order"
+                                                                                            >
+                                                                                                <X size={13} />
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    )}
+                                                                    {autoSync && (accountPositions.length > 0 || pendingOrders.length > 0) && (
+                                                                        <p className="text-[10px] text-zinc-600 pt-1.5">Auto-sync on · new closes join your journal automatically.</p>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         )}
@@ -3355,7 +3544,17 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                         {activeTab === 'history' && (
                                                             <div>
                                                                 <div className="flex items-center justify-between mb-2">
-                                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Deal Execution History</p>
+                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                        <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Deal Execution History</p>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={toggleAutoSync}
+                                                                            className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors shrink-0"
+                                                                            title="Automatically journal new closed deals"
+                                                                        >
+                                                                            Auto-sync: <span className={autoSync ? 'text-emerald-400 font-semibold' : 'font-semibold'}>{autoSync ? 'On' : 'Off'}</span>
+                                                                        </button>
+                                                                    </div>
                                                                     <div className="flex items-center gap-2">
                                                                         {bulkResult && <span className="text-[10px] font-bold text-emerald-400">{bulkResult}</span>}
                                                                         {importedTradeIds.length > 0 && (
@@ -3424,14 +3623,14 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                                     return (
                                                                                         <tr key={`${d.dealId}_${idx}`} className="hover:bg-white/[0.02] transition-colors">
                                                                                             <td className="py-2.5 px-3 font-bold text-white">{getSymbolName(d)}</td>
-                                                                                            <td className="py-2.5 px-3 font-bold text-white capitalize">{d.tradeSide === 'sell' ? 'Long' : 'Short'}</td>
+                                                                                            <td className="py-2.5 px-3 font-bold text-white capitalize">{d.tradeSide === 'sell' ? 'Short' : 'Long'}</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{formattedTime}</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{d.entryPrice !== undefined ? d.entryPrice : (d.price || '-')}</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{d.price || '-'}</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{Number(d.volume || 0).toFixed(2)} Lots</td>
                                                                                             <td className="py-2.5 px-3 font-bold text-white tabular-nums">{formattedVol}</td>
                                                                                             <td className={`py-2.5 px-3 font-bold tabular-nums ${netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                                                                {netProfit.toFixed(2)}
+                                                                                                {netProfit > 0 ? '+' : ''}{netProfit.toFixed(2)}
                                                                                             </td>
                                                                                             <td className="py-2.5 px-3 text-right">
                                                                                                 <button
@@ -3591,13 +3790,19 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                             {/* Empty state — fetch completed but no accounts returned */}
                             {!isFetchingAccounts && accounts.length === 0 && !errorMsg && (
                                 <div className="text-center py-6 space-y-3">
-                                    <p className="text-xs text-zinc-500">No accounts found. Make sure your cTrader ID has linked trading accounts.</p>
+                                    <p className="text-[11px] text-zinc-500 leading-relaxed">No accounts found on this cTrader ID. If you just created a trading account, re-connect and approve it on the Spotware page.</p>
                                     <button
                                         onClick={handleFetchAccounts}
                                         className="w-full py-2.5 rounded-xl bg-[#FF4F00] text-white text-sm font-medium hover:bg-[#FF4F00]/90 flex items-center justify-center gap-2 transition-all"
                                     >
                                         <RefreshCw size={14} />
                                         Retry
+                                    </button>
+                                    <button
+                                        onClick={handleConnect}
+                                        className="w-full py-2.5 rounded-xl border border-[#FF4F00]/40 text-[#FF4F00] text-sm font-medium hover:bg-[#FF4F00]/10 flex items-center justify-center gap-2 transition-all"
+                                    >
+                                        Connect with cTrader ID
                                     </button>
                                 </div>
                             )}
