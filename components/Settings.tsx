@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, EASession, Portfolio } from '../types';
 import { PortfolioSwitcher } from './PortfolioSwitcher';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
 import { Select } from './Select';
 import { normalizeThemePreference } from '../lib/theme';
@@ -78,6 +79,9 @@ interface SettingsProps {
   initialTab?: SettingsTab;
   migrationVersion?: string;
   eaSession?: EASession | null;
+  /** Needed by the diagnostics panel (plan limits, portfolio + queue state). */
+  userId?: string | null;
+  offlineQueueCount?: number;
   portfolios?: Portfolio[];
   activePortfolioId?: string | null;
   defaultPortfolioId?: string | null;
@@ -139,6 +143,8 @@ const Settings: React.FC<SettingsProps> = ({
   onDeduplicate,
   initialTab = 'profile',
   eaSession,
+  userId,
+  offlineQueueCount = 0,
   portfolios = [],
   activePortfolioId = null,
   defaultPortfolioId = null,
@@ -1040,6 +1046,19 @@ const Settings: React.FC<SettingsProps> = ({
 
             {effectiveTab === 'security' && (
               <div className="space-y-5">
+                <div className="mt-5">
+                  <DiagnosticsPanel
+                    isDarkMode={isDarkMode}
+                    userId={userId}
+                    plan={formData.plan}
+                    tradesThisMonth={tradesThisMonth}
+                    tradesCount={tradesCount}
+                    tradeCounts={tradeCounts}
+                    portfolios={portfolios}
+                    activePortfolioId={activePortfolioId}
+                    offlineQueueCount={offlineQueueCount}
+                  />
+                </div>
                 <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-start gap-3.5">

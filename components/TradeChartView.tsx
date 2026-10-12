@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { RefreshCw, ChevronDown, AlertTriangle, Clock, Settings, Cloud, CloudCheck } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
+import { RefreshCw, ChevronDown, AlertTriangle, Clock, Settings, Cloud, CloudCheck, FlaskConical } from 'lucide-react';
 import { Trade, Candle } from '../types';
 import {
   fetchCtraderCandles,
@@ -9,6 +9,7 @@ import {
 } from '../services/ctraderService';
 import { dataService } from '../services/dataService';
 import CustomChart from './CustomChart';
+const TradeReplayOverlay = lazy(() => import('./TradeReplayOverlay'));
 import { Drawing } from './backtest/types';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -85,6 +86,52 @@ type Status = 'idle' | 'loading' | 'done' | 'error' | 'no-auth' | 'no-times';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+const REPLAY_DRAWINGS_KEY = 'jfx_backtest_drawings';
+
+const normKeyPart = (v: unknown): string => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/**
+ * Everything drawn in BacktestLab persists globally under
+ * `jfx_backtest_drawings`. Mirror its visibility rule: drawings scoped to
+ * another symbol/timeframe (syncAllTimeframes === false with a foreign
+ * originKey) stay hidden; everything else renders here, READ-ONLY.
+ * Index anchors (`logical`) are stripped so points resolve by wall-clock
+ * time against THIS candle array (indices differ per dataset).
+ */
+const readReplayDrawings = (pair: string, timeframe: string): Drawing[] => {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(REPLAY_DRAWINGS_KEY);
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const homeKey = `${normKeyPart(pair)}_${normKeyPart(timeframe)}`;
+  const out: Drawing[] = [];
+  for (const d of parsed as any[]) {
+    if (!d || typeof d !== 'object') continue;
+    if (!d.p1 || !Number.isFinite(Number(d.p1?.time)) || !Number.isFinite(Number(d.p1?.price))) continue;
+    if (d.syncAllTimeframes === false) {
+      const origin = normKeyPart(d.originKey || '');
+      if (!origin || origin !== homeKey) continue;
+    }
+    const p1 = { time: Number(d.p1.time), price: Number(d.p1.price) };
+    const p2 =
+      d.p2 && Number.isFinite(Number(d.p2?.time)) && Number.isFinite(Number(d.p2?.price))
+        ? { time: Number(d.p2.time), price: Number(d.p2.price) }
+        : undefined;
+    out.push({ ...d, p1, p2 } as Drawing);
+  }
+  return out;
+};
+
 const TradeChartView: React.FC<TradeChartViewProps> = ({
   trade,
   isDarkMode,
@@ -93,8 +140,8 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
 }) => {
   const defaultTF = autoTimeframe(trade);
   const [timeframe, setTimeframe] = useState<string>(defaultTF);
-  const [candlesBefore, setCandlesBefore] = useState(30);
-  const [candlesAfter, setCandlesAfter] = useState(15);
+  const [candlesBefore, setCandlesBefore] = useState(600);
+  const [candlesAfter, setCandlesAfter] = useState(200);
   const [candles, setCandles] = useState<Candle[]>(() => {
     if (trade.chartCandles && trade.chartCandles.length >= 2) {
       return normalizeCandleScale(trade.chartCandles, trade);
@@ -111,13 +158,26 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
     return Boolean(trade.chartCandles && trade.chartCandles.length >= 2);
   });
   const [errorMsg, setErrorMsg] = useState('');
+  const [showReplayOverlay, setShowReplayOverlay] = useState(false);
+  // Replay drawings overlay (read-only — no selection, drag, or toolbar here).
+  const [replayDrawings, setReplayDrawings] = useState<Drawing[]>(() => readReplayDrawings(trade.pair, timeframe));
+  useEffect(() => {
+    const refresh = () => setReplayDrawings(readReplayDrawings(trade.pair, timeframe));
+    refresh();
+    window.addEventListener('storage', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener('storage', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [trade.pair, timeframe]);
   const [tfMenuOpen, setTfMenuOpen] = useState(false);
   const fetchIdRef = useRef(0); // abort stale fetches
   // Persist-once guard: onSaveCandles → App.setTrades → new trade object →
   // fetchCandles recreated → effect refires. Without this every chart open
   // fires a heavy full-row updateTrade write of chart_candles.
   const savedSigRef = useRef<string | null>(null);
-  const persistOnce = (list: any[], tf: string) => {
+  const persistOnce = (list: Candle[], tf: string) => {
     const sig = `${trade.id}:${tf}:${list.length}`;
     if (savedSigRef.current === sig) return;
     savedSigRef.current = sig;
@@ -213,8 +273,10 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
   // ── Fetch from cTrader & Persist ──────────────────────────────────────────
 
   const fetchCandles = useCallback(async (tf: string, before: number, after: number, force: boolean = false) => {
-    // 1. Guard: check existing cloud / saved candles on trade if not forced
-    if (!force && trade.chartCandles && trade.chartCandles.length >= 2 && (trade.chartTimeframe === tf || !trade.chartTimeframe)) {
+    const minRequiredCount = Math.max(before + after, 700);
+
+    // 1. Guard: check existing cloud / saved candles on trade if not forced and sufficiently deep
+    if (!force && trade.chartCandles && trade.chartCandles.length >= minRequiredCount && (trade.chartTimeframe === tf || !trade.chartTimeframe)) {
       setCandles(normalizeCandleScale(trade.chartCandles, trade));
       setStatus('done');
       setIsSavedToCloud(true);
@@ -223,10 +285,10 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
 
     // Historical chart data is deliberately omitted from the journal list
     // query. Load it only when this chart is opened.
-    if (!force && (!trade.chartCandles || trade.chartCandles.length < 2)) {
+    if (!force && (!trade.chartCandles || trade.chartCandles.length < minRequiredCount)) {
       try {
         const stored = await dataService.getTradeChartCandles(trade.id);
-        if (stored?.candles && stored.candles.length >= 2 && (stored.timeframe === tf || !stored.timeframe)) {
+        if (stored?.candles && stored.candles.length >= minRequiredCount && (stored.timeframe === tf || !stored.timeframe)) {
           setCandles(normalizeCandleScale(stored.candles, trade));
           setStatus('done');
           setIsSavedToCloud(true);
@@ -237,13 +299,13 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
       }
     }
 
-    // 2. Guard: check local cache if not forced
+    // 2. Guard: check local cache if not forced and sufficiently deep
     if (!force) {
       try {
         const cachedRaw = localStorage.getItem(getTradeCandlesCacheKey(trade.id));
         if (cachedRaw) {
           const parsed = JSON.parse(cachedRaw);
-          if (parsed && Array.isArray(parsed.candles) && parsed.candles.length >= 2 && parsed.timeframe === tf) {
+          if (parsed && Array.isArray(parsed.candles) && parsed.candles.length >= minRequiredCount && parsed.timeframe === tf) {
             const cachedCandles = normalizeCandleScale(parsed.candles, trade);
             setCandles(cachedCandles);
             setStatus('done');
@@ -355,7 +417,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
 
   // ── Render helpers ───────────────────────────────────────────────────────
 
-  const btnBase = `px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all`;
+  const btnBase = `px-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shrink-0`;
   const btnActive = isDarkMode
     ? 'bg-zinc-800 text-white'
     : 'bg-slate-200 text-slate-900';
@@ -449,7 +511,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
           isDarkMode ? 'border-zinc-800 bg-black/40' : 'border-slate-100 bg-slate-50'
         }`}
       >
-        {/* Left: symbol + direction badge + cloud status */}
+        {/* Left: symbol + direction badge + cloud status + replay */}
         <div className="flex items-center gap-2 min-w-0">
           <span className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>
             {trade.pair}
@@ -463,6 +525,25 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
           >
             {trade.direction}
           </span>
+
+          {/* Replay Trade — opens the fullscreen replay analysis overlay. */}
+          <button
+            onClick={() => setShowReplayOverlay(true)}
+            disabled={status !== 'done' || candles.length < 2}
+            title="Open trade in replay mode for analysis"
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 shrink-0 whitespace-nowrap min-h-[44px] ${
+              status === 'done' && candles.length >= 2
+                ? isDarkMode
+                  ? 'bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800/80'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200'
+                : isDarkMode
+                  ? 'bg-zinc-900/50 text-zinc-600 cursor-not-allowed border border-zinc-800/30'
+                  : 'bg-slate-100/50 text-zinc-400 cursor-not-allowed border border-slate-200/50'
+            }`}
+          >
+            <FlaskConical size={16} className="shrink-0 text-indigo-400" />
+            <span className="leading-none whitespace-nowrap">Replay Trade</span>
+          </button>
 
           {/* Cloud Synced indicator */}
           {isSavedToCloud && status === 'done' && (
@@ -575,7 +656,7 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
         <CustomChart
           data={candles}
           trades={status === 'done' ? [trade] : []}
-          drawings={[]}
+          drawings={replayDrawings}
           isDarkMode={isDarkMode}
           showGrid={true}
           disablePan={false}
@@ -588,6 +669,24 @@ const TradeChartView: React.FC<TradeChartViewProps> = ({
         {/* Status overlay (loading / error / no-auth / no-times) */}
         {renderOverlay()}
       </div>
+
+      {/* Fullscreen Replay Trade overlay */}
+      {showReplayOverlay && (
+        <Suspense fallback={null}>
+          <TradeReplayOverlay
+            trade={trade}
+            candles={candles}
+            timeframe={timeframe}
+            isDarkMode={isDarkMode}
+            onClose={() => setShowReplayOverlay(false)}
+            onTimeframeChange={(newTf) => {
+              setTimeframe(newTf);
+              fetchCandles(newTf, candlesBefore, candlesAfter, true);
+            }}
+            isFetchingTimeframe={status === 'loading'}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

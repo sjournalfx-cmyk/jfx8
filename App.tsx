@@ -25,6 +25,7 @@ import { usePortfolios } from './hooks/usePortfolios';
 import { useCtraderLiveBalance } from './hooks/useCtraderLiveBalance';
 import { modalResearchService } from './services/nvidiaAiService';
 import { ToastProvider, useToast } from './components/ui/Toast';
+import { OfflineBlocker, useNetworkStatus } from './components/OfflineBlocker';
 import { BrandedLoader } from './components/ui/BrandedLoader';
 import { MobileBlocker } from './components/ui/MobileBlocker';
 import { MobileLayout } from './components/mobile/MobileLayout';
@@ -1720,6 +1721,16 @@ const onLogout = async () => {
                 initialTab={settingsTab}
                 migrationVersion={currentMigrationVersion}
                 eaSession={activeEaSession}
+                userId={userId}
+                offlineQueueCount={offlineQueue.length}
+                portfolios={portfolios}
+                activePortfolioId={activePortfolioId}
+                defaultPortfolioId={defaultPortfolioId}
+                canAddPortfolio={canAddPortfolio}
+                tradeCounts={tradeCounts}
+                onSelectPortfolioId={setActivePortfolioId}
+                onAddPortfolio={handleAddPortfolioAndConnect}
+                onRemovePortfolio={handleRemovePortfolio}
               />
             )}
           </Suspense>
@@ -1753,9 +1764,16 @@ const onLogout = async () => {
 
 const App: React.FC = () => {
   const handleAnnotationAdd = (_annotation: Annotation) => {};
+  const { isOnline, isChecking, checkConnection } = useNetworkStatus();
 
   return (
     <ToastProvider>
+      {!isOnline && (
+        <OfflineBlocker
+          isChecking={isChecking}
+          onRetry={checkConnection}
+        />
+      )}
       <AppContent />
       {import.meta.env.DEV && (
         <Agentation 
