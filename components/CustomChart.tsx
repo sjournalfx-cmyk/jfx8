@@ -1,7 +1,8 @@
 
 import React, { useEffect, useRef, useLayoutEffect, useCallback, useState, useMemo } from 'react';
+import { ArrowRightToLine } from 'lucide-react';
 import { Candle, Trade, Drawing, Point } from '../types';
-import { getRayCoordinates, timeToLogicalIndex } from './backtest/utils';
+import { getRayCoordinates, extendSegmentToBounds, timeToLogicalIndex, positionToolMinWidth } from './backtest/utils';
 
 interface CustomChartProps {
   data: Candle[];
@@ -19,18 +20,35 @@ interface CustomChartProps {
   onViewStateChange?: (viewState: any) => void;
   initialViewState?: any;
   isSelectBarMode?: boolean;
+  selectBarIndex?: number | null;
+  onSelectBarMove?: (index: number) => void;
   disablePan?: boolean;
-  // When true (Trade History chart), the viewport auto-fits once per
-  // dataset so entry/exit markers start on-screen instead of clipped left.
-  autoFitTrades?: boolean;
   children?: React.ReactNode;
+  autoFitTrades?: boolean;
+  // Drawing-tool overlays (TradingView parity): selection + hover highlight,
+  // live-measure preview while drawing, and magnet snap indicator.
+  selectedIds?: string[];
+  selectedDrawingId?: string | null;
+  hoveredDrawingId?: string | null;
+  previewDrawing?: Drawing | null;
+  previewMouse?: { x: number; y: number } | null;
+  snapIndicator?: { x: number; y: number } | null;
+  // Placement cursor (TradingView-mobile aim model): blue dot + full crosshair
+  // following the finger while a drawing tool is armed on touch.  Hosts only
+  // set this on the touch aim path, so desktop hover is unaffected.
+  placementCursor?: { x: number; y: number; snapped?: boolean } | null;
+  showScrollToRealtime?: boolean;
+  onScrollToRealtime?: () => void;
+  // Extra prices that must stay inside the auto y-domain even while their
+  // markers are still hidden.  Lets a progressive surface (replay) reserve the
+  // vertical range up front so nothing shifts when a marker appears.
+  priceAnchors?: number[];
 }
 
-// Exported for the mobile shell (components/mobile/CtraderChartView) so the
-// cTrader chart and its drawing overlays share the same insets. Values are
-// the desktop defaults — changing them here moves every desktop chart.
 export const PADDING_RIGHT = 60;
-export const PADDING_BOTTOM = 26;
+// Lifted so the bottom date axis + lower price-scale labels sit a little
+// higher with breathing room above the mobile replay dock.
+export const PADDING_BOTTOM = 30;
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -90,12 +108,11 @@ const parseTradeTimeSec = (value: unknown): number | null => {
     if (typeof value === 'string') {
         const trimmed = value.trim();
         if (!trimmed) return null;
-        // Try as-is first (ISO with millis, e.g. cTrader toISOString()).
-        // Fall back to MT4/MT5 "2026.01.05 09:15:00" dot format.
-        let ms = Date.parse(trimmed);
-        if (!Number.isFinite(ms)) ms = Date.parse(trimmed.replace(/\./g, '/'));
-        if (!Number.isFinite(ms)) return null;
-        return Math.floor(ms / 1000);
+        const ms = Date.parse(trimmed);
+        if (Number.isFinite(ms)) return Math.floor(ms / 1000);
+        const alt = Date.parse(trimmed.replace(/\./g, '/'));
+        if (!Number.isFinite(alt)) return null;
+        return Math.floor(alt / 1000);
     }
     return null;
 };
@@ -113,12 +130,19 @@ const findClosestCandleIndex = (candles: { time: number }[], targetSec: number |
             best = i;
         }
     }
+    // Guard: if the closest candle is too far from the target time, the trade
+    // probably falls outside the loaded data range.  Use 50× the average bar
+    // interval as the tolerance so we don't place an arrow on a wrong bar.
+    if (best >= 0 && candles.length >= 2) {
+        const avgInterval = Math.abs(candles[candles.length - 1].time - candles[0].time) / (candles.length - 1);
+        if (avgInterval > 0 && minDiff > avgInterval * 50) return -1;
+    }
     return best;
 };
 
 const clampY = (y: number, chartHeight: number): number => {
     if (!Number.isFinite(y)) return chartHeight / 2;
-    return Math.max(4, Math.min(chartHeight - 4, y));
+    return Math.max(18, Math.min(chartHeight - 22, y));
 };
 
 const CustomChart: React.FC<CustomChartProps> = ({
@@ -136,9 +160,21 @@ const CustomChart: React.FC<CustomChartProps> = ({
   onViewStateChange,
   initialViewState,
   isSelectBarMode,
+  selectBarIndex,
+  onSelectBarMove,
   disablePan,
+  children,
+  selectedIds,
+  selectedDrawingId,
+  hoveredDrawingId,
+  previewDrawing,
+  previewMouse,
+  snapIndicator,
+  placementCursor,
+  showScrollToRealtime = true,
+  onScrollToRealtime,
   autoFitTrades = false,
-  children
+  priceAnchors,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -165,10 +201,12 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
   // TradingView-style crosshair position (screen coords inside the canvas).
   const crosshairRef = useRef<{ x: number; y: number } | null>(null);
+  // True when the crosshair was last set by a touch contact. Touch uses the
+  // aim cursor + drawing preview instead — rendering the hover crosshair too
+  // would paint a second, stale set of dashed lines at the finger (it never
+  // receives a mouse-leave to clear it). Mouse (desktop) is unaffected.
+  const crosshairTouchRef = useRef(false);
 
-  // Trade History auto-fit: fit the entry→exit window once per dataset so
-  // markers start on-screen. Reset whenever the dataset signature changes;
-  // any manual pan/zoom disables it until the next dataset.
   const autoFitSigRef = useRef<string | null>(null);
   const userInteractedRef = useRef(false);
 
@@ -204,25 +242,35 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
   const getY = useCallback((price: number) => {
     const { height, minPrice, maxPrice } = viewState.current;
-    if (isNaN(minPrice) || isNaN(maxPrice) || minPrice === maxPrice) return 0;
     const chartHeight = height - PADDING_BOTTOM;
+    // A collapsed / non-finite range has no meaningful mapping.  Centre the
+    // result instead of returning 0, which used to slam geometry into the top
+    // edge for a frame and read as a corrupted chart.
+    if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || maxPrice === minPrice) {
+      return Math.max(0, chartHeight / 2);
+    }
+    if (!Number.isFinite(price) || !Number.isFinite(chartHeight) || chartHeight <= 0) {
+      return Math.max(0, chartHeight / 2);
+    }
     const priceRange = maxPrice - minPrice || 1;
     return chartHeight - ((price - minPrice) / priceRange) * chartHeight;
   }, [chartRevision]);
 
   const getPriceFromY = useCallback((y: number) => {
     const { height, minPrice, maxPrice } = viewState.current;
-    if (isNaN(minPrice) || isNaN(maxPrice) || minPrice === maxPrice) return 0;
+    if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || maxPrice === minPrice) return 0;
     const chartHeight = height - PADDING_BOTTOM;
+    if (!Number.isFinite(chartHeight) || chartHeight <= 0) return minPrice;
     const priceRange = maxPrice - minPrice || 1;
     return minPrice + ((chartHeight - y) / chartHeight) * priceRange;
   }, [chartRevision]);
 
   const getIndexFromX = useCallback((x: number) => {
     const { width, offsetX, scaleX } = viewState.current;
-    if (isNaN(scaleX) || scaleX === 0) return 0;
+    if (!Number.isFinite(scaleX) || scaleX === 0) return 0;
     const chartWidth = width - PADDING_RIGHT;
-    return (x - (chartWidth - offsetX)) / scaleX + (data.length - 1);
+    const out = (x - (chartWidth - offsetX)) / scaleX + (data.length - 1);
+    return Number.isFinite(out) ? out : 0;
   }, [data.length, chartRevision]);
 
   // Mock "Chart/Series" objects for compatibility with existing DrawingLayer
@@ -294,10 +342,15 @@ const CustomChart: React.FC<CustomChartProps> = ({
             viewState.current.scaleX = (viewState.current.width - PADDING_RIGHT) / Math.max(data.length, 1);
             viewState.current.isManualPriceRange = false;
             setChartRevision(r => r + 1);
+            draw();
+            notifyViewStateChange();
           },
           scrollToRealtime: () => {
             viewState.current.offsetX = 0;
+            viewState.current.isManualPriceRange = false;
             setChartRevision(r => r + 1);
+            draw();
+            notifyViewStateChange();
           },
           applyOptions: (options: any) => {
             if (options.barSpacing !== undefined) {
@@ -359,56 +412,43 @@ const CustomChart: React.FC<CustomChartProps> = ({
   // Keep the ref in sync without causing re-renders
   useEffect(() => { mockApiRef.current = mockApi; }, [mockApi]);
 
-  // Auto-fit the trade window once per dataset (Trade History only). Fits
-  // entry→exit plus context so markers are on-screen on first paint without
-  // fighting manual pan/zoom afterwards. Runs inside draw() so container
-  // width is always known (effects can fire before ResizeObserver sets it).
-  const maybeAutoFitTradeWindow = useCallback(() => {
-    if (!autoFitTrades || data.length < 2 || !trades || trades.length === 0) return;
-    if (viewState.current.width <= 0) return;
-    const sigParts: string[] = [String(data.length), String(data[0]?.time ?? ''), String(data[data.length - 1]?.time ?? '')];
-    for (const t of trades) {
-      sigParts.push(`${(t as any)?.id ?? ''}:${(t as any)?.openTime ?? ''}:${(t as any)?.closeTime ?? ''}`);
-    }
-    const sig = sigParts.join('|');
-    if (autoFitSigRef.current === sig) return;
-    if (userInteractedRef.current && autoFitSigRef.current !== null) return;
-
-    let minIdx = Infinity;
-    let maxIdx = -Infinity;
-    for (const t of trades) {
-      if (!t) continue;
-      const eSec = parseTradeTimeSec((t as any).openTime ?? (t as any).open_time ?? (t as any).time);
-      const xSec = parseTradeTimeSec((t as any).closeTime ?? (t as any).close_time);
-      const ei = findClosestCandleIndex(data, eSec);
-      const xi = findClosestCandleIndex(data, xSec);
-      if (ei >= 0) { minIdx = Math.min(minIdx, ei); maxIdx = Math.max(maxIdx, ei); }
-      if (xi >= 0) { minIdx = Math.min(minIdx, xi); maxIdx = Math.max(maxIdx, xi); }
-    }
-    if (!Number.isFinite(minIdx) || !Number.isFinite(maxIdx)) return;
-
-    const chartWidth = viewState.current.width - PADDING_RIGHT;
-    if (chartWidth <= 0) return;
-    const CONTEXT = 8;
-    const fromIdx = Math.max(0, Math.floor(minIdx) - CONTEXT);
-    const toIdx = Math.min(data.length - 1, Math.ceil(maxIdx) + CONTEXT);
-    const span = Math.max(1, toIdx - fromIdx + 1);
-    // Fit the window, keeping bars readable (same 0.5–200 bounds as zoom).
-    const fittedScaleX = Math.max(0.5, Math.min(200, chartWidth / span));
-    viewState.current.scaleX = fittedScaleX;
-    // Anchor so toIdx sits at the right edge: getX(toIdx) = chartWidth.
-    viewState.current.offsetX = (data.length - 1 - toIdx) * fittedScaleX * -1;
-    autoFitSigRef.current = sig;
-    userInteractedRef.current = false;
-  }, [autoFitTrades, data, trades]);
-
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || data.length === 0) return;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    maybeAutoFitTradeWindow();
+    if (autoFitTrades && viewState.current.width > 0 && trades && trades.length > 0) {
+      const sigParts: string[] = [String(data.length), String(data[0]?.time ?? ''), String(data[data.length - 1]?.time ?? '')];
+      for (const t of trades) {
+        sigParts.push(`${(t as any)?.id ?? ''}:${(t as any)?.openTime ?? ''}:${(t as any)?.closeTime ?? ''}`);
+      }
+      const sig = sigParts.join('|');
+      if (autoFitSigRef.current !== sig && !(userInteractedRef.current && autoFitSigRef.current !== null)) {
+        let minIdx = Infinity;
+        let maxIdx = -Infinity;
+        for (const t of trades) {
+          if (!t) continue;
+          const ei = findClosestCandleIndex(data, parseTradeTimeSec((t as any).openTime ?? (t as any).open_time ?? (t as any).time ?? (t as any).entry_time));
+          const xi = findClosestCandleIndex(data, parseTradeTimeSec((t as any).closeTime ?? (t as any).close_time ?? (t as any).exit_time));
+          if (ei >= 0) { minIdx = Math.min(minIdx, ei); maxIdx = Math.max(maxIdx, ei); }
+          if (xi >= 0) { minIdx = Math.min(minIdx, xi); maxIdx = Math.max(maxIdx, xi); }
+        }
+        if (Number.isFinite(minIdx) && Number.isFinite(maxIdx)) {
+          const fitWidth = viewState.current.width - PADDING_RIGHT;
+          if (fitWidth > 0) {
+            const CONTEXT = 8;
+            const fromIdx = Math.max(0, Math.floor(minIdx) - CONTEXT);
+            const toIdx = Math.min(data.length - 1, Math.ceil(maxIdx) + CONTEXT);
+            const span = Math.max(1, toIdx - fromIdx + 1);
+            viewState.current.scaleX = Math.max(0.5, Math.min(200, fitWidth / span));
+            viewState.current.offsetX = (data.length - 1 - toIdx) * viewState.current.scaleX * -1;
+            autoFitSigRef.current = sig;
+            userInteractedRef.current = false;
+          }
+        }
+      }
+    }
 
     const { width, height, scaleX, offsetX, isManualPriceRange, manualMinPrice, manualMaxPrice } = viewState.current;
     const chartWidth = width - PADDING_RIGHT;
@@ -417,9 +457,10 @@ const CustomChart: React.FC<CustomChartProps> = ({
     const intervalSec = getInterval();
 
     // TradingView-style crosshair (hover state), only active when enabled.
+    // Never touch-driven: fingers use the aim cursor + preview instead.
     const crossPos = crosshairRef.current;
     const isDragging = mouse.current.isDown;
-    const showCross = tradingView && crossPos !== null && !isDragging &&
+    const showCross = tradingView && crossPos !== null && !isDragging && !crosshairTouchRef.current &&
       crossPos.x >= 0 && crossPos.x <= chartWidth && crossPos.y >= 0 && crossPos.y <= chartHeight;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -452,21 +493,33 @@ const CustomChart: React.FC<CustomChartProps> = ({
       dataMax = 100;
     }
 
-    // Keep trade entry/exit prices inside the auto range so marker tips are
-    // never projected outside the plot and clipped away. Manual ranges are
-    // left alone (user explicitly zoomed the price scale).
-    if (!isManualPriceRange && trades && trades.length > 0) {
-      for (const t of trades) {
-        if (!t) continue;
-        const ep = Number((t as any).entryPrice ?? (t as any).entry ?? (t as any).price);
-        const xp = Number((t as any).exitPrice ?? (t as any).exit);
-        if (Number.isFinite(ep) && ep > 0) {
-          if (ep < dataMin) dataMin = ep;
-          if (ep > dataMax) dataMax = ep;
-        }
-        if (Number.isFinite(xp) && xp > 0) {
-          if (xp < dataMin) dataMin = xp;
-          if (xp > dataMax) dataMax = xp;
+    // Prices that must be inside the y-domain regardless of marker visibility.
+    // `priceAnchors` lets a progressive surface (replay) reserve the range from
+    // the first frame so the chart never rescales when a marker appears.
+    if (!isManualPriceRange) {
+      const candleSpan = dataMax - dataMin || 1;
+      const isOnScale = (p: number) =>
+        Number.isFinite(p) && p > 0 &&
+        p >= dataMin - candleSpan * 0.5 &&
+        p <= dataMax + candleSpan * 0.5;
+
+      const expand = (p: number) => {
+        if (!isOnScale(p)) return;
+        if (p < dataMin) dataMin = p;
+        if (p > dataMax) dataMax = p;
+      };
+
+      if (priceAnchors) for (const p of priceAnchors) expand(Number(p));
+
+      if (trades && trades.length > 0) {
+        // Only expand for trade prices that are reasonably close to the candle
+        // data.  Off-scale prices (e.g. lot size stored in entryPrice by
+        // mistake, or a different symbol's scale) would otherwise compress the
+        // entire chart into a tiny band.
+        for (const t of trades) {
+          if (!t) continue;
+          expand(Number((t as any).entryPrice ?? (t as any).entry ?? (t as any).price));
+          expand(Number((t as any).exitPrice ?? (t as any).exit));
         }
       }
     }
@@ -491,7 +544,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
     }
 
     const { minPrice, maxPrice } = viewState.current;
-    if (isNaN(minPrice) || isNaN(maxPrice)) return;
+    if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) return;
 
     // 2. Clear
     ctx.fillStyle = '#000000';
@@ -520,6 +573,10 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
     data.slice(start, end + 1).forEach((candle, i) => {
       const idx = start + i;
+      // Skip malformed bars instead of painting NaN/Inf geometry, which
+      // silently corrupts the canvas for the rest of the frame.
+      if (!Number.isFinite(candle.open) || !Number.isFinite(candle.close) ||
+        !Number.isFinite(candle.high) || !Number.isFinite(candle.low)) return;
       const x = getX(idx);
       const yOpen = getY(candle.open);
       const yClose = getY(candle.close);
@@ -544,8 +601,63 @@ const CustomChart: React.FC<CustomChartProps> = ({
       ctx.strokeRect(bodyX, bodyTop, candleWidth, bodyHeight);
     });
 
+    // 4a. Select-Bar cut preview — TradingView-style draggable vertical line (move left/right then click to cut)
+    if (isSelectBarMode && selectBarIndex !== null && selectBarIndex >= 0 && selectBarIndex < data.length) {
+      const sx = getX(selectBarIndex);
+      if (sx >= 0 && sx <= chartWidth) {
+        // Shade the future (to be hidden) to the right of the cut
+        ctx.fillStyle = isDarkMode ? 'rgba(0,0,0,0.42)' : 'rgba(148,163,184,0.16)';
+        ctx.fillRect(sx + 1, 0, Math.max(0, chartWidth - sx - 1), chartHeight);
+        // Dashed vertical cut line
+        ctx.save();
+        ctx.strokeStyle = '#2962ff';
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(Math.round(sx) + 0.5, 0);
+        ctx.lineTo(Math.round(sx) + 0.5, chartHeight);
+        ctx.stroke();
+        ctx.restore();
+        // Top "Cut here" badge
+        const label = 'Cut here';
+        ctx.font = 'bold 10px sans-serif';
+        const tw = ctx.measureText(label).width;
+        const badgeW = tw + 18;
+        const badgeH = 18;
+        const bx = Math.min(Math.max(sx - badgeW / 2, 2), chartWidth - badgeW - 2);
+        ctx.fillStyle = '#2962ff';
+        roundRectPath(ctx, bx, 5, badgeW, badgeH, 9);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, bx + badgeW / 2, 5 + badgeH / 2);
+        // Center grip
+        ctx.beginPath();
+        ctx.fillStyle = '#2962ff';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.arc(sx, chartHeight / 2, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // Bottom time label at axis
+        const t = data[selectBarIndex].time;
+        const tLabel = formatAxisTime(t, intervalSec);
+        ctx.font = 'bold 10px monospace';
+        const tW = ctx.measureText(tLabel).width + 14;
+        const tx = Math.min(Math.max(sx - tW / 2, 2), chartWidth - tW - 2);
+        ctx.fillStyle = '#2962ff';
+        roundRectPath(ctx, tx, chartHeight + 4, tW, 16, 4);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(tLabel, tx + tW / 2, chartHeight + 13);
+      }
+    }
+
     // 4b. Crosshair bar highlight (drawn behind drawings, like TradingView)
-    if (showCross && crossPos) {
+    if (showCross && crossPos && !(isSelectBarMode && selectBarIndex !== null)) {
       const hoverIdx = Math.round(getIndexFromX(crossPos.x));
       if (hoverIdx >= 0 && hoverIdx < data.length) {
         const barX = getX(hoverIdx);
@@ -555,13 +667,18 @@ const CustomChart: React.FC<CustomChartProps> = ({
       }
     }
 
-    // 5. Drawings (Canvas Layer) — Full visual rendering (SVG is hit-area only).
+    // 5. Drawings (Canvas Layer) — Full visual rendering (SVG is hit-area only)
     // Clipped to the plot (full height, chart width): no drawing — lines,
-    // boxes, fills — may ever paint over the price scale.
+    // boxes, fills, ghosts, snap dots — may ever paint over the price scale.
+    // (The selected-vertical time badge lives in the bottom date strip, so
+    // the clip keeps full height and only cuts the right scale region.)
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, chartWidth, height);
     ctx.clip();
+    const selectedSet: Set<string> = new Set(selectedIds ?? (selectedDrawingId ? [selectedDrawingId] : []));
+    // NOTE: price-tip badges on drawings are intentionally disabled — drawings
+    // render as bare lines/shapes with no axis price tags (all tools).
     drawings.forEach(d => {
       // Calculate coords
       let x1: number, x2: number;
@@ -581,71 +698,178 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
       const y2 = d.p2 ? getY(d.p2.price) : y1;
 
+      const isSelected = selectedSet.has(d.id);
+      const isHovered = hoveredDrawingId === d.id;
+      const baseWidth = d.strokeWidth || 2;
       const drawColor = d.color || (isDarkMode ? '#2962ff' : '#475569');
-      ctx.strokeStyle = drawColor;
-      ctx.lineWidth = d.strokeWidth || 2;
+      // Selection glow (under-stroke) + hover emphasis — TradingView blue pick.
+      if (isSelected) {
+        ctx.save();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(41, 98, 255, 0.35)';
+        ctx.lineWidth = baseWidth + 6;
+        ctx.lineCap = 'round';
+      } else {
+        ctx.strokeStyle = drawColor;
+        ctx.lineWidth = isHovered ? baseWidth + 1 : baseWidth;
+      }
 
       // Line Styles
       ctx.setLineDash([]);
-      if (d.strokeStyle === 'dashed') ctx.setLineDash([6, 6]);
-      if (d.strokeStyle === 'dotted') ctx.setLineDash([2, 4]);
+      if (!isSelected) {
+        if (d.strokeStyle === 'dashed') ctx.setLineDash([6, 6]);
+        if (d.strokeStyle === 'dotted') ctx.setLineDash([2, 4]);
+      }
 
       ctx.beginPath();
 
       if (d.type === 'trendline' || d.type === 'arrow') {
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
+        const seg = extendSegmentToBounds(x1, y1, x2, y2, chartWidth, chartHeight, !!d.extendLeft, !!d.extendRight);
+        if (isSelected) {
+          ctx.moveTo(seg.x1, seg.y1);
+          ctx.lineTo(seg.x2, seg.y2);
+          ctx.stroke();
+          ctx.restore();
+          ctx.strokeStyle = drawColor;
+          ctx.lineWidth = baseWidth;
+          ctx.setLineDash([]);
+          if (d.strokeStyle === 'dashed') ctx.setLineDash([6, 6]);
+          if (d.strokeStyle === 'dotted') ctx.setLineDash([2, 4]);
+          ctx.beginPath();
+        }
+        ctx.moveTo(seg.x1, seg.y1);
+        ctx.lineTo(seg.x2, seg.y2);
         ctx.stroke();
 
         if (d.type === 'arrow') {
           ctx.setLineDash([]);
-          const angle = Math.atan2(y2 - y1, x2 - x1);
-          const headLen = 12;
+          const angle = Math.atan2(seg.y2 - seg.y1, seg.x2 - seg.x1);
+          // Arrowhead scales with stroke width (TradingView parity).
+          const headLen = 8 + baseWidth * 3;
+          const headW = Math.PI / 6;
           ctx.beginPath();
-          ctx.moveTo(x2, y2);
-          ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
-          ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.moveTo(seg.x2, seg.y2);
+          ctx.lineTo(seg.x2 - headLen * Math.cos(angle - headW), seg.y2 - headLen * Math.sin(angle - headW));
+          ctx.lineTo(seg.x2 - headLen * Math.cos(angle + headW), seg.y2 - headLen * Math.sin(angle + headW));
           ctx.closePath();
           ctx.fillStyle = drawColor;
           ctx.fill();
         }
+        if (isSelected) {
+          // Endpoint handles (canvas mirror of SVG handles).
+          ctx.setLineDash([]);
+          for (const [hx, hy] of [[seg.x1, seg.y1], [seg.x2, seg.y2]] as const) {
+            ctx.beginPath();
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#2962ff';
+            ctx.lineWidth = 2;
+            ctx.rect(hx - 4, hy - 4, 8, 8);
+            ctx.fill();
+            ctx.stroke();
+          }
+        }
+      }
+      else if (d.type === 'measure') {
+        // Measure tool (TV range tool): dashed line + floating measure label.
+        ctx.save();
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = drawColor;
+        ctx.lineWidth = baseWidth;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.restore();
+        const mP1 = (d.p1.logical !== undefined ? data[Math.round(d.p1.logical)] : null) || null;
+        void mP1;
+        const priceA = d.p1.price;
+        const priceB = d.p2 ? d.p2.price : d.p1.price;
+        const pts = priceB - priceA;
+        const pct = priceA !== 0 ? (pts / Math.abs(priceA)) * 100 : 0;
+        const bars = d.p2 && d.p1.logical !== undefined && d.p2.logical !== undefined
+          ? Math.abs(Math.round(d.p2.logical) - Math.round(d.p1.logical)) : 0;
+        const sign = pts > 0 ? '+' : '';
+        const mLabel = `${sign}${Number(pts.toFixed(5))} (${sign}${pct.toFixed(2)}%) · ${bars} bars`;
+        ctx.font = 'bold 10px sans-serif';
+        const mW = ctx.measureText(mLabel).width + 14;
+        const mX = Math.min(Math.max((x1 + x2) / 2 - mW / 2, 2), Math.max(2, chartWidth - mW - 2));
+        const mY = Math.min(Math.max((y1 + y2) / 2 - 11, 2), Math.max(2, chartHeight - 24));
+        ctx.fillStyle = isDarkMode ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.92)';
+        roundRectPath(ctx, mX, mY, mW, 20, 6);
+        ctx.fill();
+        ctx.fillStyle = drawColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(mLabel, mX + mW / 2, mY + 10);
+        if (isSelected) {
+          ctx.setLineDash([]);
+          ctx.beginPath(); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#2962ff'; ctx.lineWidth = 2;
+          ctx.rect(x1 - 4, y1 - 4, 8, 8); ctx.fill(); ctx.stroke();
+          ctx.beginPath();
+          ctx.rect(x2 - 4, y2 - 4, 8, 8); ctx.fill(); ctx.stroke();
+        }
       }
       else if (d.type === 'ray') {
-        const ray = getRayCoordinates(x1, y1, x2, y2, width, height);
+        const ray = getRayCoordinates(x1, y1, x2, y2, chartWidth, chartHeight);
+        if (isSelected) { ctx.moveTo(ray.x1, ray.y1); ctx.lineTo(ray.x2, ray.y2); ctx.stroke(); ctx.restore(); ctx.strokeStyle = drawColor; ctx.lineWidth = baseWidth; ctx.setLineDash([]); ctx.beginPath(); }
         ctx.moveTo(ray.x1, ray.y1);
         ctx.lineTo(ray.x2, ray.y2);
         ctx.stroke();
+        if (isSelected) {
+          ctx.setLineDash([]);
+          ctx.beginPath(); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#2962ff'; ctx.lineWidth = 2;
+          ctx.rect(ray.x1 - 4, ray.y1 - 4, 8, 8); ctx.fill(); ctx.stroke();
+        }
       }
       else if (d.type === 'rect') {
-        ctx.fillStyle = drawColor;
-        ctx.globalAlpha = 0.12;
-        ctx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-        ctx.globalAlpha = 1.0;
-        ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        const rx = Math.min(x1, x2), ry = Math.min(y1, y2);
+        const rw = Math.abs(x2 - x1), rh = Math.abs(y2 - y1);
+        if (d.fillVisible !== false) {
+          ctx.fillStyle = drawColor;
+          ctx.globalAlpha = isSelected ? 0.18 : 0.12;
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.globalAlpha = 1.0;
+        }
+        if (isSelected) { ctx.stroke(); ctx.restore(); ctx.strokeStyle = drawColor; ctx.lineWidth = baseWidth; ctx.setLineDash([]); ctx.beginPath(); }
+        ctx.strokeRect(rx, ry, rw, rh);
+        if (isSelected) {
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = '#2962ff';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rx - 4, ry - 4, rw + 8, rh + 8);
+          ctx.setLineDash([]);
+        }
       }
       else if (d.type === 'horizontal') {
+        if (isSelected) { ctx.moveTo(0, y1); ctx.lineTo(chartWidth, y1); ctx.stroke(); ctx.restore(); ctx.strokeStyle = drawColor; ctx.lineWidth = baseWidth; ctx.setLineDash([]); ctx.beginPath(); }
         ctx.moveTo(0, y1);
         ctx.lineTo(chartWidth, y1);
         ctx.stroke();
-
-        // Price label badge
-        ctx.setLineDash([]);
-        ctx.fillStyle = drawColor;
-        ctx.fillRect(chartWidth - 68, y1 - 10, 64, 20);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(d.p1.price.toFixed(5), chartWidth - 36, y1);
       }
       else if (d.type === 'vertical') {
+        if (isSelected) { ctx.moveTo(x1, 0); ctx.lineTo(x1, chartHeight); ctx.stroke(); ctx.restore(); ctx.strokeStyle = drawColor; ctx.lineWidth = baseWidth; ctx.setLineDash([]); ctx.beginPath(); }
         ctx.moveTo(x1, 0);
         ctx.lineTo(x1, chartHeight);
         ctx.stroke();
+        if (isSelected) {
+          // Time badge on the bottom axis for the selected vertical line.
+          const t = d.p1.time;
+          const label = formatAxisTime(t, intervalSec);
+          ctx.font = 'bold 10px sans-serif';
+          const tw = ctx.measureText(label).width + 12;
+          const bx = Math.min(Math.max(x1 - tw / 2, 0), chartWidth - tw);
+          ctx.fillStyle = '#2962ff';
+          ctx.fillRect(bx, chartHeight, tw, 20);
+          ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(label, bx + tw / 2, chartHeight + 10);
+        }
       }
       else if (d.type === 'fib') {
         ctx.setLineDash([]);
-        const fibLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+        const defaultFib = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+        const fibLevels: number[] = Array.isArray((d as any).fibLevels) && (d as any).fibLevels.length > 0
+          ? (d as any).fibLevels
+          : defaultFib;
         const fibColors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#ef4444'];
         const fMinX = Math.min(x1, x2);
         const fMaxX = Math.max(x1, x2);
@@ -655,14 +879,14 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
         fibLevels.forEach((level, i) => {
           const fy = fMinY + fDiff * level;
-          ctx.strokeStyle = fibColors[i];
+          ctx.strokeStyle = fibColors[i % fibColors.length];
           ctx.lineWidth = d.strokeWidth || 1;
           ctx.beginPath();
           ctx.moveTo(fMinX, fy);
           ctx.lineTo(fMaxX, fy);
           ctx.stroke();
           // Level label
-          ctx.fillStyle = fibColors[i];
+          ctx.fillStyle = fibColors[i % fibColors.length];
           ctx.font = 'bold 10px sans-serif';
           ctx.textAlign = 'left';
           ctx.textBaseline = 'middle';
@@ -673,6 +897,14 @@ const CustomChart: React.FC<CustomChartProps> = ({
         ctx.globalAlpha = 0.04;
         ctx.fillRect(fMinX, fMinY, fMaxX - fMinX, fDiff);
         ctx.globalAlpha = 1.0;
+        if (isSelected) {
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = '#2962ff';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(fMinX - 3, fMinY - 3, (fMaxX - fMinX) + 6, fDiff + 6);
+          ctx.restore();
+        }
       }
       else if (d.type === 'channel') {
         const channelDx = x2 - x1;
@@ -708,6 +940,18 @@ const CustomChart: React.FC<CustomChartProps> = ({
         ctx.moveTo(x2, y2); ctx.lineTo(cx3, cy3);
         ctx.stroke();
         ctx.setLineDash([]);
+        if (isSelected) {
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = '#2962ff';
+          ctx.lineWidth = 1.5;
+          const chMinX = Math.min(x1, x2, cx3, cx4) - 3;
+          const chMaxX = Math.max(x1, x2, cx3, cx4) + 3;
+          const chMinY = Math.min(y1, y2, cy3, cy4) - 3;
+          const chMaxY = Math.max(y1, y2, cy3, cy4) + 3;
+          ctx.strokeRect(chMinX, chMinY, chMaxX - chMinX, chMaxY - chMinY);
+          ctx.restore();
+        }
       }
       else if (d.type === 'text') {
         ctx.setLineDash([]);
@@ -728,8 +972,8 @@ const CustomChart: React.FC<CustomChartProps> = ({
         const targetY = getY(targetPrice);
         const stopY = getY(stopPrice);
 
-        const w = Math.max(Math.abs(x2 - x1), 80);
-        const left = Math.min(x1, x2 || x1 + 80);
+        const w = Math.max(Math.abs(x2 - x1), positionToolMinWidth(typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches));
+        const left = Math.min(x1, x2 || x1 + w);
         const right = left + w;
         const centerX = left + (w / 2);
 
@@ -761,30 +1005,144 @@ const CustomChart: React.FC<CustomChartProps> = ({
         ctx.stroke();
 
         // --- Center RR Text Tag (TradingView Style) ---
-        const rrText = rr.toFixed(2);
+        const rrText = `R:R ${rr.toFixed(2)}`;
         ctx.font = 'bold 9px sans-serif';
         const txtWidth = ctx.measureText(rrText).width;
+        if (isSelected) {
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = '#2962ff';
+          ctx.lineWidth = 1.5;
+          const top = Math.min(profitTop, lossTop);
+          const h = Math.max(profitTop + Math.max(profitH, 1), lossTop + Math.max(lossH, 1)) - top;
+          ctx.strokeRect(left - 3, top - 3, w + 6, h + 6);
+          ctx.restore();
+        }
+        ctx.font = 'bold 9px sans-serif';
         // Background for text
-        ctx.fillStyle = isDarkMode ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.4)';
+        ctx.fillStyle = isDarkMode ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.85)';
         // Center text on the entry line
-        ctx.fillRect(centerX - (txtWidth / 2) - 3, entryY - 7, txtWidth + 6, 14);
-        
-        ctx.fillStyle = isDarkMode ? 'rgba(226, 232, 240, 0.9)' : 'rgba(30, 41, 59, 0.9)';
+        ctx.fillRect(centerX - (txtWidth / 2) - 5, entryY - 7, txtWidth + 10, 14);
+        ctx.fillStyle = isDarkMode ? 'rgba(226, 232, 240, 0.95)' : 'rgba(30, 41, 59, 0.95)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(rrText, centerX, entryY);
+        if (isSelected) { ctx.setLineDash([]); }
       }
     });
     ctx.setLineDash([]); // Reset
 
-    // 5. Trade Entry & Exit Markers — MT5-style solid arrows + dashed entry→exit connector
+    // 5c. Magnet snap indicator (TradingView snap dot + price bubble).
+    if (snapIndicator) {
+      const coarseSnap = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      ctx.beginPath();
+      ctx.fillStyle = '#2962ff';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.arc(snapIndicator.x, snapIndicator.y, coarseSnap ? 7 : 5, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // Price bubble so you can see WHAT you snapped to (TV-style).
+      const snapPriceText = formatPrice(getPriceFromY(snapIndicator.y));
+      ctx.font = 'bold 10px monospace';
+      const snapW = ctx.measureText(snapPriceText).width + 14;
+      const snapX = Math.min(Math.max(snapIndicator.x + 12, 2), Math.max(2, chartWidth - snapW - 2));
+      const snapYc = Math.min(Math.max(snapIndicator.y - 11, 2), Math.max(2, chartHeight - 24));
+      ctx.fillStyle = '#2962ff';
+      roundRectPath(ctx, snapX, snapYc, snapW, 20, 6);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(snapPriceText, snapX + snapW / 2, snapYc + 10);
+    }
+
+    // 5d. Live drawing preview (TV ghost): dashed line from the placed anchor
+    // to the finger/mouse while a 2-step tool is armed.
+    if (previewDrawing && previewMouse) {
+      const pv = previewDrawing as Drawing;
+      const pvP1 = pv.p1.logical !== undefined ? getX(pv.p1.logical) : (mockApi.chart.timeScale().timeToCoordinate(pv.p1.time) ?? previewMouse.x);
+      const pvY1 = getY(pv.p1.price);
+      const pvX2 = previewMouse.x;
+      const pvY2 = previewMouse.y;
+      const pvColor = pv.color || '#2962ff';
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = pvColor;
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = Math.max(1, pv.strokeWidth || 1);
+      ctx.beginPath();
+      if (pv.type === 'horizontal') { ctx.moveTo(0, pvY2); ctx.lineTo(chartWidth, pvY2); }
+      else if (pv.type === 'vertical') { ctx.moveTo(pvX2, 0); ctx.lineTo(pvX2, chartHeight); }
+      else if (pv.type === 'rect') {
+        ctx.strokeRect(Math.min(pvP1, pvX2), Math.min(pvY1, pvY2), Math.abs(pvX2 - pvP1), Math.abs(pvY2 - pvY1));
+      } else {
+        ctx.moveTo(pvP1, pvY1);
+        ctx.lineTo(pvX2, pvY2);
+      }
+      ctx.stroke();
+      ctx.restore();
+      // Anchor dot at the placed point + finger dot while armed.
+      const coarsePv = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      if (coarsePv && pv.type !== 'horizontal' && pv.type !== 'vertical') {
+        ctx.beginPath();
+        ctx.fillStyle = pvColor;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.arc(pvP1, pvY1, 6, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();
+        ctx.globalAlpha = 0.6;
+        ctx.arc(pvX2, pvY2, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.stroke();
+      }
+    }
+
+    // 5e. Placement cursor (TradingView-mobile aim model): blue dot with
+    // intersecting crosshair lines that follows the finger while a drawing
+    // tool is armed on touch — set BEFORE the first point exists, so the
+    // user aims without their finger covering the target.  A tap commits the
+    // point at this dot (handled by the host, not here).
+    if (placementCursor) {
+      const pcx = placementCursor.x;
+      const pcy = placementCursor.y;
+      ctx.save();
+      // Full-plot crosshair lines, dashed like TradingView (the arm ghost
+      // stays solid-dashed [5,4], so the two remain distinguishable).
+      ctx.strokeStyle = '#2962ff';
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.moveTo(0, pcy); ctx.lineTo(chartWidth, pcy);
+      ctx.moveTo(pcx, 0); ctx.lineTo(pcx, chartHeight);
+      ctx.stroke();
+      ctx.restore();
+      // Blue dot with white ring (TradingView size).
+      ctx.beginPath();
+      ctx.fillStyle = '#2962ff';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.arc(pcx, pcy, 4, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
+    ctx.restore(); // End plot clip — axes/scale paint after this.
+
+    // 5. Trade Entry & Exit Markers — MT5-style solid arrows + dashed
+    // entry→exit connector, clipped to the plot so markers never spill
+    // onto the price scale.
     if (trades && trades.length > 0) {
       const MT5_BUY = '#2E9BFF';
       const MT5_SELL = '#F23645';
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, chartWidth, height);
+      ctx.clip();
       // MT5-style solid arrow pointing UP: tip at (centerX, tipY), body below it.
       const drawUpArrow = (centerX: number, tipY: number, color: string) => {
-        const arrowW = 11;
-        const arrowH = 9;
+        const arrowW = 14;
+        const arrowH = 11;
         ctx.save();
         ctx.fillStyle = color;
         ctx.strokeStyle = 'rgba(255,255,255,0.85)';
@@ -801,8 +1159,8 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
       // MT5-style solid arrow pointing DOWN: tip at (centerX, tipY), body above it.
       const drawDownArrow = (centerX: number, tipY: number, color: string) => {
-        const arrowW = 11;
-        const arrowH = 9;
+        const arrowW = 14;
+        const arrowH = 11;
         ctx.save();
         ctx.fillStyle = color;
         ctx.strokeStyle = 'rgba(255,255,255,0.85)';
@@ -819,12 +1177,12 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
       trades.forEach(trade => {
         if (!trade) return;
-        const isBuy = (trade.direction === 'Long' || (trade as any).type === 'BUY' || (trade as any).tradeSide === 'buy');
+        const isBuy = trade.direction
+          ? trade.direction === 'Long'
+          : ((trade as any).type === 'BUY' || (trade as any).tradeSide === 'buy');
         const entryPrice = trade.entryPrice ?? (trade as any).entry ?? (trade as any).price;
         const exitPrice = trade.exitPrice ?? (trade as any).exit;
 
-        // Resolve entry/exit times in seconds. Invalid dates yield null so a
-        // bad closeTime can't erase a good entry arrow (and vice versa).
         const entrySec = parseTradeTimeSec(
           (trade as any).openTime ?? (trade as any).open_time ?? (trade as any).time ?? (trade as any).entry_time
         );
@@ -832,12 +1190,21 @@ const CustomChart: React.FC<CustomChartProps> = ({
           (trade as any).closeTime ?? (trade as any).close_time ?? (trade as any).exit_time
         );
 
-        // Closest candle index for entry / exit.
         const entryIdx = findClosestCandleIndex(data, entrySec);
         const exitIdx = findClosestCandleIndex(data, exitSec);
 
         const hasEntryPrice = Number.isFinite(Number(entryPrice)) && Number(entryPrice) > 0;
         const hasExitPrice = Number.isFinite(Number(exitPrice)) && Number(exitPrice) > 0;
+
+        // Detect prices that are wildly off-scale from the visible candle
+        // range — e.g. lot-size stored as entryPrice, or a different
+        // symbol's scale. Fall back to candle wick when off-scale.
+        const { minPrice: visMin, maxPrice: visMax } = viewState.current;
+        const visSpan = visMax - visMin || 1;
+        const priceOnScale = (p: number) =>
+          p >= visMin - visSpan * 0.5 && p <= visMax + visSpan * 0.5;
+        const useEntryPrice = hasEntryPrice && priceOnScale(Number(entryPrice));
+        const useExitPrice  = hasExitPrice  && priceOnScale(Number(exitPrice));
 
         // MT5 entry arrow, tipped at the fill price when known, otherwise just
         // outside the wick so it never hides inside the candle body.
@@ -849,13 +1216,11 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
           if (isBuy) {
             // Long entry (buy) -> blue arrow pointing UP
-            const rawY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.low) + 10;
-            const tipY = clampY(rawY, chartHeight);
+            const tipY = clampY(useEntryPrice ? getY(Number(entryPrice)) : getY(candle.low) + 10, chartHeight);
             entryTip = { x: candleX, y: tipY, up: true, color: MT5_BUY };
           } else {
             // Short entry (sell) -> red arrow pointing DOWN
-            const rawY = hasEntryPrice ? getY(Number(entryPrice)) : getY(candle.high) - 10;
-            const tipY = clampY(rawY, chartHeight);
+            const tipY = clampY(useEntryPrice ? getY(Number(entryPrice)) : getY(candle.high) - 10, chartHeight);
             entryTip = { x: candleX, y: tipY, up: false, color: MT5_SELL };
           }
         }
@@ -869,13 +1234,11 @@ const CustomChart: React.FC<CustomChartProps> = ({
 
           if (isBuy) {
             // Long exit (sell) -> red arrow pointing DOWN
-            const rawY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.high) - 10;
-            const tipY = clampY(rawY, chartHeight);
+            const tipY = clampY(useExitPrice ? getY(Number(exitPrice)) : getY(candle.high) - 10, chartHeight);
             exitTip = { x: exitX, y: tipY, up: false, color: MT5_SELL };
           } else {
             // Short exit (buy) -> blue arrow pointing UP
-            const rawY = hasExitPrice ? getY(Number(exitPrice)) : getY(candle.low) + 10;
-            const tipY = clampY(rawY, chartHeight);
+            const tipY = clampY(useExitPrice ? getY(Number(exitPrice)) : getY(candle.low) + 10, chartHeight);
             exitTip = { x: exitX, y: tipY, up: true, color: MT5_BUY };
           }
         }
@@ -891,17 +1254,39 @@ const CustomChart: React.FC<CustomChartProps> = ({
           ctx.stroke();
           ctx.restore();
         }
+        const drawMarkerLabel = (text: string, x: number, tipY: number, isUp: boolean, color: string) => {
+          ctx.save();
+          ctx.font = 'bold 9px system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.textAlign = 'center';
+          // Up-pointing arrow: tip is at tipY, base extends down to tipY + 11. Text goes below base.
+          // Down-pointing arrow: tip is at tipY, base extends up to tipY - 11. Text goes above base.
+          const textY = isUp ? tipY + 14 : tipY - 14;
+          ctx.textBaseline = isUp ? 'top' : 'bottom';
+
+          // Crisp stroke outline so text is legible across candlesticks and grid lines
+          ctx.strokeStyle = isDarkMode ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.9)';
+          ctx.lineWidth = 2.5;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(text, x, textY);
+
+          ctx.fillStyle = color;
+          ctx.fillText(text, x, textY);
+          ctx.restore();
+        };
+
         if (entryTip) {
           if (entryTip.up) drawUpArrow(entryTip.x, entryTip.y, entryTip.color);
           else drawDownArrow(entryTip.x, entryTip.y, entryTip.color);
+          drawMarkerLabel('Entry', entryTip.x, entryTip.y, entryTip.up, entryTip.color);
         }
         if (exitTip) {
           if (exitTip.up) drawUpArrow(exitTip.x, exitTip.y, exitTip.color);
           else drawDownArrow(exitTip.x, exitTip.y, exitTip.color);
+          drawMarkerLabel('Exit', exitTip.x, exitTip.y, exitTip.up, exitTip.color);
         }
       });
+      ctx.restore(); // End trade-marker plot clip.
     }
-    ctx.restore(); // End plot clip — axes/scale paint after this.
 
     // 5b. TradingView-style symbol + timeframe watermark
     if (tradingView && symbol) {
@@ -1019,7 +1404,6 @@ const CustomChart: React.FC<CustomChartProps> = ({
         const prevCandle = data[data.length - 2];
         const lastPriceY = getY(lastCandle.close);
         if (lastPriceY >= 0 && lastPriceY <= chartHeight) {
-          const lastX = getX(data.length - 1);
           const isUp = lastCandle.close >= prevCandle.close;
           const tagColor = isUp ? '#10b981' : '#ef4444';
 
@@ -1029,7 +1413,8 @@ const CustomChart: React.FC<CustomChartProps> = ({
           ctx.lineWidth = 1;
           ctx.setLineDash([3, 3]);
           ctx.beginPath();
-          ctx.moveTo(lastX, lastPriceY);
+          // Full-width like TradingView: edge to edge, joined to the price tag.
+          ctx.moveTo(0, lastPriceY);
           ctx.lineTo(chartWidth, lastPriceY);
           ctx.stroke();
           ctx.restore();
@@ -1092,7 +1477,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
         }
       }
     }
-  }, [data, isDarkMode, getX, getY, getPriceFromY, getIndexFromX, getInterval, drawings, trades, tradingView, symbol, timeframe, maybeAutoFitTradeWindow]);
+  }, [data, isDarkMode, getX, getY, getPriceFromY, getIndexFromX, getInterval, drawings, trades, tradingView, symbol, timeframe, selectedIds, selectedDrawingId, hoveredDrawingId, previewDrawing, previewMouse, snapIndicator, placementCursor, isSelectBarMode, selectBarIndex, autoFitTrades, priceAnchors]);
 
   // Sync API with parent whenever mockApi changes or onCoordinatesChange updates
   useEffect(() => {
@@ -1101,8 +1486,9 @@ const CustomChart: React.FC<CustomChartProps> = ({
     }
   }, [mockApi, onCoordinatesChange]);
 
-  // Interaction Handlers
+  // Interaction Handlers — Select-Bar has its own drag type so the line can be dragged left/right (TradingView parity) then click to cut
   const handleMouseDown = (e: React.MouseEvent) => {
+    crosshairTouchRef.current = false;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = e.clientX - rect.left;
@@ -1112,9 +1498,22 @@ const CustomChart: React.FC<CustomChartProps> = ({
     const chartWidth = width - PADDING_RIGHT;
     const chartHeight = height - PADDING_BOTTOM;
 
-    if (isSelectBarMode && onSelectBar) {
-      const idx = Math.round(getIndexFromX(x));
-      if (idx >= 0 && idx < data.length) onSelectBar(idx);
+    if (isSelectBarMode) {
+      // Start a SELECT_BAR drag — line will follow cursor, click (mouseUp without much drag) will still cut via handleMouseUp
+      if (x >= 0 && x <= chartWidth && y >= 0 && y <= chartHeight) {
+        const idx = Math.max(0, Math.min(data.length - 1, Math.round(getIndexFromX(x))));
+        onSelectBarMove?.(idx);
+        mouse.current = { isDown: true, lastX: x, lastY: y, dragType: 'PAN' as any };
+        // Mark as select drag so mouseMove routes to selector instead of pan
+        (mouse.current as any)._selectDrag = true;
+        if (containerRef.current) containerRef.current.style.cursor = 'ew-resize';
+        e.preventDefault();
+        return;
+      }
+      if (onSelectBar) {
+        const idx = Math.round(getIndexFromX(x));
+        if (idx >= 0 && idx < data.length) onSelectBar(idx);
+      }
       return;
     }
 
@@ -1135,7 +1534,7 @@ const CustomChart: React.FC<CustomChartProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-
+    crosshairTouchRef.current = false;
     const rect = canvasRef.current?.getBoundingClientRect();
 
     if (!rect) return;
@@ -1143,6 +1542,23 @@ const CustomChart: React.FC<CustomChartProps> = ({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     crosshairRef.current = { x, y };
+
+    // Hover preview for Select-Bar (move line left/right without holding) — TradingView parity
+    if (isSelectBarMode && !mouse.current.isDown && onSelectBarMove) {
+      const idx = Math.max(0, Math.min(data.length - 1, Math.round(getIndexFromX(x))));
+      if (x >= 0 && x <= viewState.current.width - PADDING_RIGHT) onSelectBarMove(idx);
+      draw();
+    }
+
+    if ((mouse.current as any)._selectDrag && isSelectBarMode) {
+      const idx = Math.max(0, Math.min(data.length - 1, Math.round(getIndexFromX(x))));
+      onSelectBarMove?.(idx);
+      crosshairRef.current = { x, y };
+      draw();
+      mouse.current.lastX = x;
+      mouse.current.lastY = y;
+      return;
+    }
 
     if (mouse.current.isDown) {
 
@@ -1232,9 +1648,20 @@ const CustomChart: React.FC<CustomChartProps> = ({
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e?: React.MouseEvent) => {
+    const wasSelectDrag = (mouse.current as any)._selectDrag;
+    // Click-to-cut: if this was a select-bar drag/tap, cut at the current hover index
+    if (isSelectBarMode && (wasSelectDrag || !mouse.current.isDown)) {
+      // If mouse was down as select drag, onSelectBarMove already positioned the line — now cut only on a tap/click (small movement)
+      if (e && onSelectBar && selectBarIndex !== null && selectBarIndex !== undefined) {
+        const moved = Math.abs((e.clientX ?? 0) - (mouse.current.lastX ?? e.clientX)) < 8;
+        if (moved) onSelectBar(selectBarIndex);
+      }
+    }
     mouse.current.isDown = false;
-    if (containerRef.current) containerRef.current.style.cursor = 'crosshair';
+    (mouse.current as any)._selectDrag = false;
+    if (containerRef.current) containerRef.current.style.cursor = isSelectBarMode ? 'ew-resize' : 'crosshair';
+    if (isSelectBarMode) draw();
   };
 
   const handleMouseLeave = () => {
@@ -1242,6 +1669,177 @@ const CustomChart: React.FC<CustomChartProps> = ({
     mouse.current.isDown = false;
     if (containerRef.current) containerRef.current.style.cursor = 'crosshair';
     draw();
+  };
+
+  // ── Touch handlers for mobile: single-finger pan (left/right to view previous candles) + vertical pan, two-finger pinch zoom ──
+  const lastTouchRef = useRef<{ x: number; y: number; dist?: number } | null>(null);
+
+  const getTouchPos = (t: Touch | React.Touch) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    crosshairTouchRef.current = true;
+    if (e.touches.length === 1) {
+      const p = getTouchPos(e.touches[0]);
+      if (!p) return;
+      const { width, height } = viewState.current;
+      const chartWidth = width - PADDING_RIGHT;
+      const chartHeight = height - PADDING_BOTTOM;
+      let dragType: 'NONE' | 'PAN' | 'PRICE_SCALE' | 'TIME_SCALE' = 'NONE';
+      if (p.x > chartWidth) dragType = 'PRICE_SCALE';
+      else if (p.y > chartHeight) dragType = 'TIME_SCALE';
+      else if (!disablePan) dragType = 'PAN';
+      // isSelectBarMode on touch: drag line left/right then tap to cut (TradingView parity)
+      if (isSelectBarMode) {
+        const idx = Math.max(0, Math.min(data.length - 1, Math.round(getIndexFromX(p.x))));
+        onSelectBarMove?.(idx);
+        // On touch, a quick tap cuts; a drag moves the line (handled in touchMove + touchEnd)
+        lastTouchRef.current = { x: p.x, y: p.y, dist: undefined };
+        (mouse.current as any)._selectDrag = true;
+        mouse.current = { isDown: true, lastX: p.x, lastY: p.y, dragType: 'PAN' as any };
+        (mouse.current as any)._selectDrag = true;
+        return;
+      }
+      mouse.current = { isDown: true, lastX: p.x, lastY: p.y, dragType };
+      lastTouchRef.current = { x: p.x, y: p.y };
+      crosshairRef.current = { x: p.x, y: p.y };
+      if (containerRef.current) {
+        if (dragType === 'PAN') containerRef.current.style.cursor = 'grabbing';
+      }
+      e.preventDefault();
+    } else if (e.touches.length === 2) {
+      const p0 = getTouchPos(e.touches[0]);
+      const p1 = getTouchPos(e.touches[1]);
+      if (!p0 || !p1) return;
+      const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      lastTouchRef.current = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2, dist };
+      mouse.current.isDown = false; // pinch takes over
+      e.preventDefault();
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    crosshairTouchRef.current = true;
+    if (isSelectBarMode && e.touches.length === 1) {
+      const p = getTouchPos(e.touches[0]);
+      if (p) {
+        const idx = Math.max(0, Math.min(data.length - 1, Math.round(getIndexFromX(p.x))));
+        onSelectBarMove?.(idx);
+        crosshairRef.current = { x: p.x, y: p.y };
+        if (lastTouchRef.current) lastTouchRef.current = { x: p.x, y: p.y };
+        mouse.current.lastX = p.x;
+        mouse.current.lastY = p.y;
+        draw();
+        e.preventDefault();
+        return;
+      }
+    }
+    if (e.touches.length === 1 && lastTouchRef.current && mouse.current.isDown) {
+      const p = getTouchPos(e.touches[0]);
+      if (!p) return;
+      crosshairRef.current = { x: p.x, y: p.y };
+      const dx = p.x - mouse.current.lastX;
+      const dy = p.y - mouse.current.lastY;
+      if (mouse.current.dragType === 'PAN') {
+        viewState.current.offsetX -= dx;
+        const { height, minPrice, maxPrice } = viewState.current;
+        const chartHeight = height - PADDING_BOTTOM;
+        if (chartHeight > 0) {
+          const priceRange = maxPrice - minPrice;
+          const pricePerPixel = priceRange / chartHeight;
+          const dPrice = dy * pricePerPixel;
+          viewState.current.isManualPriceRange = true;
+          viewState.current.manualMinPrice = minPrice + dPrice;
+          viewState.current.manualMaxPrice = maxPrice + dPrice;
+        }
+      } else if (mouse.current.dragType === 'PRICE_SCALE') {
+        const { minPrice, maxPrice } = viewState.current;
+        const stretchFactor = Math.pow(1.1, dy / 20);
+        const midPrice = (maxPrice + minPrice) / 2;
+        const priceRange = maxPrice - minPrice;
+        const newHalfRange = (priceRange * stretchFactor) / 2;
+        viewState.current.isManualPriceRange = true;
+        viewState.current.manualMinPrice = midPrice - newHalfRange;
+        viewState.current.manualMaxPrice = midPrice + newHalfRange;
+      } else if (mouse.current.dragType === 'TIME_SCALE') {
+        const zoomFactor = Math.pow(0.99, dx);
+        const oldScaleX = viewState.current.scaleX;
+        const newScaleX = Math.max(0.5, Math.min(200, oldScaleX * zoomFactor));
+        const logicalAtMouse = getIndexFromX(p.x);
+        viewState.current.scaleX = newScaleX;
+        const { width, scaleX } = viewState.current;
+        const chartWidth = width - PADDING_RIGHT;
+        viewState.current.offsetX = chartWidth - p.x - (data.length - 1 - logicalAtMouse) * scaleX;
+      }
+      mouse.current.lastX = p.x;
+      mouse.current.lastY = p.y;
+      lastTouchRef.current = { x: p.x, y: p.y };
+      setChartRevision(r => r + 1);
+      draw();
+      notifyViewStateChange();
+      if (onMouseUpdate) {
+        const logical = getIndexFromX(p.x);
+        const price = getPriceFromY(p.y);
+        const time = data[Math.round(logical)]?.time || 0;
+        onMouseUpdate(p.x, p.y, { time, price, logical });
+      }
+      e.preventDefault();
+    } else if (e.touches.length === 2 && lastTouchRef.current?.dist) {
+      const p0 = getTouchPos(e.touches[0]);
+      const p1 = getTouchPos(e.touches[1]);
+      if (!p0 || !p1) return;
+      const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      const centerX = (p0.x + p1.x) / 2;
+      const prevDist = lastTouchRef.current.dist as number;
+      if (prevDist > 0) {
+        const zoomFactor = dist / prevDist;
+        const logicalBefore = getIndexFromX(centerX);
+        viewState.current.scaleX = Math.max(0.5, Math.min(200, viewState.current.scaleX * zoomFactor));
+        const { width, scaleX } = viewState.current;
+        const chartWidth = width - PADDING_RIGHT;
+        viewState.current.offsetX = chartWidth - centerX - (data.length - 1 - logicalBefore) * scaleX;
+        setChartRevision(r => r + 1);
+        draw();
+        notifyViewStateChange();
+      }
+      lastTouchRef.current.dist = dist;
+      e.preventDefault();
+    } else if (e.touches.length === 1) {
+      const p = getTouchPos(e.touches[0]);
+      if (!p) return;
+      crosshairRef.current = { x: p.x, y: p.y };
+      draw();
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    // Select-bar cutting is owned by the host (tap-without-drag confirms on
+    // touch-end there). The canvas only parks the line while dragging, so a
+    // drag-and-release never cuts by accident (TV confirm model).
+    mouse.current.isDown = false;
+    (mouse.current as any)._selectDrag = false;
+    if (containerRef.current) containerRef.current.style.cursor = isSelectBarMode ? 'ew-resize' : 'crosshair';
+    if (isSelectBarMode) draw();
+    if (e.touches.length === 0) {
+      lastTouchRef.current = null;
+      // Touch never leaves a hover crosshair behind: without this the last
+      // finger position keeps a stale set of dashed lines on screen (there
+      // is no mouse-leave on touch to clear it).
+      if (crosshairRef.current !== null) {
+        crosshairRef.current = null;
+        draw();
+      }
+    } else if (e.touches.length === 1) {
+      const p = getTouchPos(e.touches[0]);
+      if (p) {
+        mouse.current = { isDown: true, lastX: p.x, lastY: p.y, dragType: disablePan ? 'NONE' : 'PAN' };
+        lastTouchRef.current = { x: p.x, y: p.y };
+      }
+    }
+    e.preventDefault();
   };
 
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -1304,7 +1902,44 @@ const CustomChart: React.FC<CustomChartProps> = ({
     };
   }, [draw, handleWheel]);
 
-  useEffect(() => { draw(); }, [draw, data, trades, drawings]);
+  useEffect(() => { draw(); }, [draw, data, trades, drawings, selectedIds, selectedDrawingId, hoveredDrawingId, previewDrawing, previewMouse, snapIndicator, placementCursor]);
+
+  // Live overlay bindings: DrawingLayer positions its SVG handles through the
+  // chart/series converters it receives as props. Those props are set from
+  // refs in the parent, which do NOT re-render the parent on pan / zoom /
+  // replay — so without this, the canvas (fresh getY per draw) moves while
+  // the SVG circles stay frozen on stale coordinates. Cloning here with the
+  // current revision's converters keeps every tool's handles glued to its art.
+  const liveChildren = React.useMemo(() => {
+    return React.Children.map(children, child => {
+      if (!React.isValidElement(child)) return child;
+      return React.cloneElement(child as React.ReactElement<any>, {
+        chart: mockApi.chart,
+        series: mockApi.series,
+      });
+    });
+  }, [children, mockApi, chartRevision]);
+
+  // Scroll to Most Recent Bar (Real-Time Bar) handler
+  const handleScrollToRealtime = useCallback((e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    viewState.current.offsetX = 0;
+    viewState.current.isManualPriceRange = false;
+    setChartRevision(r => r + 1);
+    draw();
+    notifyViewStateChange();
+    if (onScrollToRealtime) {
+      onScrollToRealtime();
+    }
+  }, [draw, notifyViewStateChange, onScrollToRealtime]);
+
+  // User has manually scrolled back to inspect historical chart data:
+  // When scrolled back, latest bar (index = data.length - 1) moves rightward past the chart edge.
+  // getX(data.length - 1) = chartWidth - offsetX. When offsetX < -20, latest bar is scrolled off/away from right edge.
+  const isScrolledBack = data.length > 0 && viewState.current.offsetX < -20;
 
   return (
     <div ref={containerRef} className="w-full h-full relative overflow-hidden bg-black cursor-crosshair">
@@ -1314,9 +1949,41 @@ const CustomChart: React.FC<CustomChartProps> = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         className="w-full h-full block touch-none"
       />
-      {children}
+      {liveChildren}
+      {showScrollToRealtime && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={handleScrollToRealtime}
+          title="Scroll to Most Recent Bar"
+          aria-label="Scroll to Most Recent Bar"
+          className={`absolute z-20 flex items-center justify-center w-8 h-8 bg-transparent border-0 shadow-none cursor-pointer transition-all duration-200 active:scale-90 [filter:drop-shadow(0_1px_4px_rgba(0,0,0,0.6))] ${
+            isScrolledBack ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-75 pointer-events-none'
+          } ${
+            isDarkMode
+              ? 'text-zinc-300 hover:text-white'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+          style={{
+            right: PADDING_RIGHT + 8,
+            bottom: PADDING_BOTTOM + 8,
+            background: 'transparent',
+            border: 'none',
+            boxShadow: 'none',
+            backdropFilter: 'none',
+            WebkitBackdropFilter: 'none',
+          }}
+        >
+          <ArrowRightToLine size={20} strokeWidth={2.2} />
+        </button>
+      )}
     </div>
   );
 };
