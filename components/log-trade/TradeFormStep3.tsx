@@ -1,11 +1,16 @@
-import React from 'react';
-import { Brain, ShieldCheck, AlertTriangle, Image as ImageIcon, Eye, Trash2, Type, Lock } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Brain, ShieldCheck, AlertTriangle, Image as ImageIcon, Eye, Trash2, Type, Lock, ListChecks, ChevronDown } from 'lucide-react';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from '../../lib/constants';
 import { Select } from '../Select';
 import RichTextEditor from '../RichTextEditor';
 import { Input } from '../ui/Input';
 import { FeatureGate } from '../ui/FeatureGate';
 import { cn } from '../../lib/utils';
+import type { ChecklistTemplate } from '../../types';
+import { TradeChecklistPanel, GradePill } from '../discipline/TradeChecklistPanel';
+import { ExecutionTagsSelect } from './ExecutionTagsSelect';
+import { computeAdherence, gradeFor } from '../../lib/disciplineChecklist';
+import { haptic } from '../../lib/haptics';
 
 interface TradeFormStep3Props {
     formData: any;
@@ -18,6 +23,10 @@ interface TradeFormStep3Props {
     afterInputRef: React.RefObject<HTMLInputElement>;
     isDarkMode: boolean;
     userProfile: any;
+    checklistTemplate: ChecklistTemplate;
+    checklistChecks: Record<string, boolean>;
+    behaviorTags: string[];
+    onChecklistChange: (checks: Record<string, boolean>, tags: string[]) => void;
 }
 
 export const TradeFormStep3: React.FC<TradeFormStep3Props> = ({
@@ -31,14 +40,25 @@ export const TradeFormStep3: React.FC<TradeFormStep3Props> = ({
     afterInputRef,
     isDarkMode,
     userProfile,
+    checklistTemplate,
+    checklistChecks,
+    behaviorTags,
+    onChecklistChange,
 }) => {
     const currentPlan = normalizePlan(userProfile?.plan);
     const canUploadImages = PLAN_FEATURES[currentPlan]?.allowImageUploads ?? false;
+    const [checklistOpen, setChecklistOpen] = useState(false);
+    const adherence = useMemo(
+        () => computeAdherence(checklistChecks, checklistTemplate.items),
+        [checklistChecks, checklistTemplate.items],
+    );
+    const grade = adherence === null ? null : gradeFor(adherence);
+    const checkedCount = checklistTemplate.items.filter((i) => checklistChecks[i.id]).length;
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
+        <div className="space-y-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3">
+                <div className="space-y-1">
                     <div className="flex items-center justify-between">
                         <label className="block text-[11px] font-bold uppercase tracking-widest text-zinc-500">Mindset/Psychology</label>
                         <FeatureGate feature="advancedAnalytics" userProfile={userProfile} variant="inline"><span></span></FeatureGate>
@@ -57,7 +77,7 @@ export const TradeFormStep3: React.FC<TradeFormStep3Props> = ({
                         ]}
                     />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1">
                     <div className="flex items-center justify-between">
                         <label className="block text-[11px] font-bold uppercase tracking-widest text-zinc-500">Plan Adherence</label>
                         <FeatureGate feature="advancedAnalytics" userProfile={userProfile} variant="inline"><span></span></FeatureGate>
@@ -77,7 +97,51 @@ export const TradeFormStep3: React.FC<TradeFormStep3Props> = ({
                 </div>
             </div>
 
-            <div className="space-y-2">
+            {/* Execution Tags — Select-styled multi-select, below Plan Adherence */}
+            <ExecutionTagsSelect
+                isDarkMode={isDarkMode}
+                value={behaviorTags}
+                onChange={(tags) => onChecklistChange(checklistChecks, tags)}
+            />
+
+            {/* Discipline checklist — grade preview + expandable rule checkoff */}
+            <div className={`mt-2 rounded-2xl border-0 overflow-hidden ${isDarkMode ? 'border-0 bg-[#0a0a0a]' : 'border-slate-200 bg-slate-50'}`}>
+                <button
+                    type="button"
+                    onClick={() => { try { haptic.selection(); } catch {} setChecklistOpen(o => !o); }}
+                    className="w-full flex items-center gap-3 p-2.5 text-left touch-manipulation min-h-[48px]"
+                >
+                    <span className="flex-1 min-w-0 text-left">
+                        <span className={`block text-sm font-bold ${isDarkMode ? 'text-zinc-100' : 'text-slate-900'}`}>
+                            Discipline Checklist
+                        </span>
+                        <span className="block text-[11px] text-zinc-500 mt-0.5">
+                            {checklistTemplate.items.length === 0
+                                ? 'No rules yet'
+                                : adherence === null
+                                    ? `${checklistTemplate.items.length} rules`
+                                    : `${checkedCount}/${checklistTemplate.items.length} rules · ${adherence}%`}
+                        </span>
+                    </span>
+                    {grade && <GradePill grade={grade} adherenceRate={adherence} size="sm" />}
+                    <ChevronDown size={16} className={`text-zinc-500 shrink-0 transition-transform ${checklistOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {checklistOpen && (
+                    <div className="px-3 pb-3">
+                        <TradeChecklistPanel
+                            template={checklistTemplate}
+                            checks={checklistChecks}
+                            behaviorTags={behaviorTags}
+                            onChecksChange={(c) => onChecklistChange(c, behaviorTags)}
+                            onTagsChange={(t) => onChecklistChange(checklistChecks, t)}
+                            isDarkMode={isDarkMode}
+                            hideTags
+                        />
+                    </div>
+                )}
+            </div>
+
+            <div className="space-y-1">
                 <div className="flex items-center justify-between">
                     <label className="block text-[11px] font-bold uppercase tracking-widest text-zinc-500">Trading Mistake</label>
                     <FeatureGate feature="advancedAnalytics" userProfile={userProfile} variant="inline"><span></span></FeatureGate>                </div>
@@ -102,20 +166,20 @@ export const TradeFormStep3: React.FC<TradeFormStep3Props> = ({
                 />
             </div>
 
-            <div className="pt-2">
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Exit Comment</label>
+            <div className="pt-1">
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Exit Comment</label>
                 <RichTextEditor
                     isDarkMode={isDarkMode}
                     placeholder="Describe why you exited the trade..."
                     content={formData.exitComment}
                     onChange={(val) => handleInputChange('exitComment', val)}
-                    minHeight="120px"
+                    minHeight="70px"
                 />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3 pt-1">
                 {(['before', 'after'] as const).map((type) => (
-                    <div key={type} className="space-y-2">
+                    <div key={type} className="space-y-1">
                         <div className="flex items-center justify-between">
                             <label className="block text-[11px] font-bold uppercase tracking-widest text-zinc-500">
                                 {type === 'before' ? 'Entry/Before' : 'Exit/After'} Screenshot
@@ -136,11 +200,11 @@ export const TradeFormStep3: React.FC<TradeFormStep3Props> = ({
                                 }
                             }}
                             className={cn(
-                                "w-full h-32 border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-3 transition-all overflow-hidden relative",
+                                "w-full h-24 border-0 rounded-xl flex flex-col items-center justify-center gap-3 transition-all overflow-hidden relative",
                                 canUploadImages 
-                                    ? "cursor-pointer hover:border-violet-500" 
+                                    ? "cursor-pointer " 
                                     : "cursor-not-allowed opacity-50 bg-zinc-100/10",
-                                isDarkMode ? 'border-[#27272a] bg-[#000000]/50' : 'border-slate-300 bg-slate-50'
+                                isDarkMode ? 'border-0 bg-[#0a0a0a]' : 'border-slate-300 bg-slate-50'
                             )}>
                             {screenshots[type] ? (
                                 <>
@@ -182,7 +246,7 @@ export const TradeFormStep3: React.FC<TradeFormStep3Props> = ({
                 ))}
             </div>
 
-            <div className="pt-2">
+            <div className="pt-1">
                 <Input
                     label="Strategy"
                     leftIcon={<Type size={16} />}

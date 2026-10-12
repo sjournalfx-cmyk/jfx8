@@ -42,7 +42,7 @@ const STEPS = [
 ];
 
 const StepIndicator = ({ current, total, isDarkMode, onSelect }: { current: number, total: number, isDarkMode: boolean, onSelect: (step: number) => void }) => (
-    <div className="flex items-center gap-3 mb-10 px-1 py-2 overflow-visible">
+    <div className="flex items-center gap-2 md:gap-3 mb-3 px-1 py-1 overflow-visible">
         {Array.from({ length: total }).map((_, i) => {
             const isActive = i + 1 === current;
             const isCompleted = i + 1 < current;
@@ -145,6 +145,31 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
     // Discipline engine: active checklist template (single template, P1).
     const { activeTemplate: checklistTemplate } = useChecklistTemplates();
+    // Soft-warning bypass: set when the user confirms "Save anyway" on a
+    // sub-100% checklist; reset whenever the checklist changes.
+    //
+    // A REF, not state. Confirming re-enters finalizeSave() in the same tick,
+    // and a state update would not have landed yet — the stale `false` closure
+    // would re-open the same modal and the save would never happen.
+    const disciplineConfirmedRef = useRef(false);
+    const [disciplineConfirmed, setDisciplineConfirmed] = useState(false);
+
+    const handleChecklistChange = (checks: Record<string, boolean>, tags: string[]) => {
+        const items = checklistTemplate.items;
+        const touched = Object.keys(checks).length > 0 || tags.length > 0;
+        disciplineConfirmedRef.current = false;
+        setDisciplineConfirmed(false);
+        setFormData(prev => ({
+            ...prev,
+            checklistChecks: checks,
+            behaviorTags: tags,
+            // Auto-derive the legacy tier from the checklist; the manual
+            // dropdown stays as fallback for untouched/imported trades.
+            ...(touched && items.length
+                ? { planAdherence: derivePlanAdherence(computeAdherence(checks, items) ?? 0) }
+                : {}),
+        }));
+    };
 
     const [metrics, setMetrics] = useState({ risk: 0, reward: 0, rr: 0 });
 
@@ -327,6 +352,30 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
       return;
     }
 
+    // Discipline soft warning: sub-100% checklist asks once, never blocks.
+    const templateItems = checklistTemplate.items;
+    const gateUncheckedCount = templateItems.filter((i) => !formData.checklistChecks?.[i.id]).length;
+    if (templateItems.length > 0 && gateUncheckedCount > 0 && !disciplineConfirmedRef.current) {
+        const gateRate = computeAdherence(formData.checklistChecks, templateItems) ?? 0;
+        const grade = gradeFor(gateRate);
+        setConfirmModal({
+            isOpen: true,
+            title: `Execution Grade ${grade} (${gateRate}%)`,
+            description: `${gateUncheckedCount} of ${templateItems.length} rules unchecked. Save anyway? Your grade is recorded either way.`,
+            showCancel: true,
+            confirmText: 'Save anyway',
+            cancelText: 'Review checklist',
+            onConfirm: () => {
+                setConfirmModal(p => ({ ...p, isOpen: false }));
+                disciplineConfirmedRef.current = true;
+                setDisciplineConfirmed(true);
+                void finalizeSave();
+            },
+        });
+        return;
+    }
+
+
     let normalizedTrade: Trade;
     try {
       normalizedTrade = normalizeTrade({
@@ -354,7 +403,6 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
     // Discipline snapshot: recompute at save time so the stored grade always
     // matches the checklist. Untouched trades keep the manual planAdherence.
-    const templateItems = checklistTemplate.items;
     const checklistTouched =
         Object.keys(formData.checklistChecks || {}).length > 0 || (formData.behaviorTags || []).length > 0;
     if (checklistTouched && templateItems.length > 0) {
@@ -408,20 +456,32 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
     return (
         <div className={cn("w-full h-full overflow-hidden flex flex-col font-sans", isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-[#F8FAFC] text-slate-900')}>
-            <div className={cn("h-18 shrink-0 flex items-center justify-between px-8 py-4 z-20 relative", isDarkMode ? 'bg-[#000000]' : 'bg-white')}>
-                <div className={cn("absolute bottom-0 left-8 right-8 h-px", isDarkMode ? "bg-[#27272a]" : "bg-slate-200")} />
-                <div className="flex items-center gap-4">
-                    <div className={cn("p-2 rounded-lg", isDarkMode ? 'bg-violet-500/10 text-violet-400' : 'bg-violet-50 text-violet-600')}>
-                        <FileText size={20} />
-                    </div>
-                    <div>
-                        <h1 className="text-lg font-bold tracking-tight leading-none">{initialTrade?.id ? 'Edit Trade Entry' : 'Log New Trade'}</h1>
-                        <p className="text-xs text-zinc-500 font-medium mt-1">{initialTrade?.id ? `ID: ${initialTrade.id}` : `Entry #${Date.now().toString().slice(-4)}`}</p>
-                    </div>
+            {/* Single responsive header (APK parity): compact bar on phones with
+                Cancel (step 1) / Back (steps 2-3) on the left, full header with
+                Import / Save / Cancel from md up. */}
+            <div className={cn("h-[56px] sm:h-[60px] shrink-0 flex items-center gap-1 px-2 sm:px-6 py-2 z-20 relative", isDarkMode ? 'bg-[#000000]' : 'bg-white')}>
+                <div className={cn("absolute bottom-0 left-2 sm:left-6 right-2 sm:right-6 h-px", isDarkMode ? "bg-zinc-800/80" : "bg-slate-200")} />
+                <div className="shrink-0 min-w-[44px] flex items-center md:hidden">
+                    {step === 1 ? (
+                        onCancel ? (
+                            <button onClick={requestCancel} aria-label="Cancel" className="flex items-center gap-1 min-h-[44px] px-2 -ml-2 rounded-xl text-[13px] font-bold text-zinc-400 active:scale-95 transition-all touch-manipulation">
+                                <X size={16} strokeWidth={2.5} /> Cancel
+                            </button>
+                        ) : <div className="w-[72px]" />
+                    ) : (
+                        <button onClick={prevStep} aria-label="Back" className="flex items-center gap-1 min-h-[44px] px-2 -ml-2 rounded-xl text-[13px] font-bold text-zinc-400 active:scale-95 transition-all touch-manipulation">
+                            <ChevronLeft size={16} strokeWidth={2.5} /> Back
+                        </button>
+                    )}
                 </div>
-                <div className="flex items-center gap-3">
-                    {initialTrade && onCancel && <Button variant="destructive" size="sm" onClick={requestCancel} leftIcon={<X size={14} />}>Cancel</Button>}
-                    {!initialTrade && onCancel && <Button variant="destructive" size="sm" onClick={requestCancel} leftIcon={<X size={14} />}>Cancel</Button>}
+                <div className="hidden md:block md:w-[220px] shrink-0" aria-hidden />
+                <div className="flex-1 min-w-0 text-center px-2">
+                    <h1 className="text-[11px] sm:text-[13px] font-bold tracking-tight leading-none text-white">{initialTrade?.id ? 'Edit Trade' : 'Log New Trade'}</h1>
+                    <p className="text-[9px] text-zinc-400 font-medium font-mono leading-none mt-0.5">{initialTrade?.id ? `#${initialTrade.id.slice(0, 6)}` : `Entry #${Date.now().toString().slice(-4)}`}</p>
+                </div>
+                <div className="shrink-0 flex items-center gap-1 sm:gap-2">
+                    {initialTrade && onCancel && <Button variant="destructive" size="sm" onClick={requestCancel} leftIcon={<X size={14} />} className="hidden md:inline-flex">Cancel</Button>}
+                    {!initialTrade && onCancel && <Button variant="destructive" size="sm" onClick={requestCancel} leftIcon={<X size={14} />} className="hidden md:inline-flex">Cancel</Button>}
                     <Button variant="secondary" size="sm" disabled={isRestricted || isReadOnly} onClick={() => !isReadOnly && importTradesInputRef.current?.click()} leftIcon={isRestricted || isReadOnly ? <Lock size={14} /> : <Upload size={14} />} className="hidden sm:flex">Import</Button>
                     <input type="file" ref={importTradesInputRef} className="hidden" accept=".csv,.txt" onChange={handleImportMT4MT5} />
                     <Button variant="primary" size="sm" onClick={finalizeSave} isLoading={isSaving} disabled={isReadOnly} leftIcon={!isSaving && <Save size={16} />}>{initialTrade?.id ? 'Update' : 'Save'}</Button>
@@ -438,18 +498,24 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
 
             <div className="flex flex-1 overflow-hidden relative">
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="max-w-4xl mx-auto px-8 py-10 pb-32">
+                <div className="flex-1 overflow-y-auto custom-scrollbar pb-4 md:pb-8">
+                    <div className="max-w-4xl mx-auto px-4 md:px-8 py-2 md:py-4 pb-2">
                         <StepIndicator current={step} total={3} isDarkMode={isDarkMode} onSelect={setStep} />
-                        {step === 1 ? <TradeFormStep1 formData={formData} handleInputChange={handleInputChange} pairError={pairError} isDarkMode={isDarkMode} userProfile={userProfile} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : step === 2 ? <TradeFormStep2 formData={formData} handleInputChange={handleInputChange} isDarkMode={isDarkMode} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : <TradeFormStep3 formData={formData} handleInputChange={handleInputChange} screenshots={screenshots} handleFileUpload={handleFileUpload} handleDeleteScreenshot={handleDeleteScreenshot} setPreviewImage={setPreviewImage} beforeInputRef={beforeInputRef} afterInputRef={afterInputRef} isDarkMode={isDarkMode} userProfile={userProfile} />}
+                        {step === 1 ? <TradeFormStep1 formData={formData} handleInputChange={handleInputChange} pairError={pairError} isDarkMode={isDarkMode} userProfile={userProfile} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : step === 2 ? <TradeFormStep2 formData={formData} handleInputChange={handleInputChange} isDarkMode={isDarkMode} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : <TradeFormStep3 formData={formData} handleInputChange={handleInputChange} screenshots={screenshots} handleFileUpload={handleFileUpload} handleDeleteScreenshot={handleDeleteScreenshot} setPreviewImage={setPreviewImage} beforeInputRef={beforeInputRef} afterInputRef={afterInputRef} isDarkMode={isDarkMode} userProfile={userProfile} checklistTemplate={checklistTemplate} checklistChecks={formData.checklistChecks || {}} behaviorTags={formData.behaviorTags || []} onChecklistChange={handleChecklistChange} />}
+                        {/* Mobile inline actions — below Entry Comment, scrolls with content so AI button + island nav don't cover it */}
+                        <div className={cn("mt-2 pt-3 flex justify-start items-center gap-4 border-0 md:hidden", isDarkMode ? "border-zinc-800/80" : "border-slate-200")}>
+                            {step < 3 ? <Button variant="primary" onClick={nextStep} rightIcon={<ChevronRight size={16} />} className="px-8 min-h-[44px] rounded-xl shadow-[0_8px_24px_rgba(255,79,1,0.18)]">Continue</Button> : <div className="w-24" />}
+                        </div>
+                        {/* clearance for island nav only — Continue sits left, clear of the right-side AI button */}
+                        <div className="h-[calc(108px+env(safe-area-inset-bottom))] md:hidden" aria-hidden />
                     </div>
                 </div>
             </div>
 
-            <div className={cn("p-6 shrink-0 flex justify-between items-center z-20 relative", isDarkMode ? "bg-[#000000]" : "bg-white border-slate-200")}>
-                <div className={cn("absolute top-0 left-8 right-8 h-px", isDarkMode ? "bg-[#27272a]" : "bg-slate-200")} />
-                <Button variant="ghost" onClick={prevStep} disabled={step === 1} leftIcon={<ChevronLeft size={16} />} className={cn(step === 1 && "opacity-0")}>Back</Button>
-                {step < 3 ? <Button variant="primary" onClick={nextStep} rightIcon={<ChevronRight size={16} />} className="px-8">Continue</Button> : <div className="w-24" />}
+            <div className={cn("hidden md:flex p-4 md:p-6 shrink-0 justify-between items-center z-20 relative gap-4", isDarkMode ? "bg-[#000000]" : "bg-white border-slate-200")}>
+                <div className={cn("absolute top-0 left-4 md:left-8 right-4 md:right-8 h-px", isDarkMode ? "bg-zinc-800/80" : "bg-slate-200")} />
+                <Button variant="ghost" onClick={prevStep} disabled={step === 1} leftIcon={<ChevronLeft size={16} />} className={cn(step === 1 ? "opacity-0 pointer-events-none" : "", "min-h-[44px] rounded-xl")}>Back</Button>
+                {step < 3 ? <Button variant="primary" onClick={nextStep} rightIcon={<ChevronRight size={16} />} className="px-8 min-h-[44px] rounded-xl shadow-[0_8px_24px_rgba(255,79,1,0.18)]">Continue</Button> : <div className="w-24" />}
             </div>
             {confirmModal.isOpen && <ConfirmationModal {...confirmModal} onCancel={() => setConfirmModal(p => ({ ...p, isOpen: false }))} isDarkMode={isDarkMode} />}
 
