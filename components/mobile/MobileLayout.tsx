@@ -675,6 +675,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         onRemovePortfolio={onRemovePortfolio}
         onOpenPortfolios={() => openPortfoliosPage(false)}
         onNewPortfolio={() => openPortfoliosPage(true)}
+        activeSource={activeSource}
       />
 
       {/* 5. Portfolio Bottom Sheet */}

@@ -41,7 +41,7 @@
   --spacing-section: 6rem;
 
   --color-obsidian: #000000;
-  --color-zinc-850: #1f1f22;
+  --color-zinc-850: #000000;
   --color-zinc-950: #000000;
 
   --grid-cols-15: repeat(15, minmax(0, 1fr));
@@ -549,7 +549,9 @@ canvas, svg {
   zoom: 1.282;
 }
 
-/* Stable, high-contrast modal treatment for API-key actions. */
+/* Stable, high-contrast modal treatment for API-key actions.
+   Base z-index stays 80 for desktop (shared with the desktop modal stack);
+   the phone-web media query below raises it to 9999, matching the APK. */
 .api-key-modal-layer {
   position: fixed;
   inset: 0;
@@ -557,14 +559,41 @@ canvas, svg {
   display: grid;
   place-items: center;
   overflow-y: auto;
+  pointer-events: auto !important;
+  touch-action: pan-y;
 }
 
 .api-key-modal-card {
-  width: min(100%, 30rem);
-  max-height: calc(100vh - 2.5rem);
+  width: min(100%, 32rem);
+  max-height: calc(100vh - 2rem);
   overflow-y: auto;
-  border-radius: 1.25rem;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7);
+  border-radius: 1.5rem;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.52);
+}
+
+.api-key-modal-card h3 {
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.api-key-modal-card p {
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.api-key-modal-card label {
+  font-size: 0.875rem;
+}
+
+.api-key-modal-card input,
+.api-key-modal-card select {
+  min-height: 2.9rem;
+  font-size: 0.95rem;
+}
+
+.api-key-modal-card button {
+  min-height: 2.75rem;
+  font-size: 0.875rem;
 }
 
 /* AI Chat Demo Premium Animations */
@@ -696,3 +725,542 @@ body.jfx-mobile .animate-sheet-up { animation: sheet-up 0.3s cubic-bezier(0.32, 
   to { opacity: 1; }
 }
 body.jfx-mobile .animate-sheet-fade { animation: sheet-fade 0.2s ease-out; }
+
+/* ----------------------------------------------------------------------
+   APK PARITY — UNSCOPED BASE DEFINITIONS FOR THE .jfx-* DESIGN SYSTEM.
+
+   Why these exist unscoped: components SHARED by the desktop web layout
+   and the phone shell (components/ui/Card.tsx, components/ui/Drawer.tsx,
+   components/backtest/DrawingStyleDrawers.tsx) emit .jfx-card / .jfx-h2 /
+   .jfx-label classes directly. On the APK those classes are global, so
+   they always resolve. In this stylesheet the mobile design system is
+   gated behind body.jfx-mobile so it cannot leak onto the desktop web
+   layout — which left those shared components rendering unstyled.
+
+   These base rules carry the SAME declarations as the body.jfx-mobile
+   block above, so phone-web is visually unchanged and desktop web now
+   resolves the same classes. body.jfx-mobile .x has higher specificity
+   (0,2,1 vs 0,1,0) and therefore still wins on phone.
+
+   Global resets the APK also applies (button{min-height:44px},
+   touch-action, reduced-motion) are deliberately NOT ported: they must
+   stay gated or they would change the desktop web layout.
+   ---------------------------------------------------------------------- */
+.jfx-card { background: #000000; border: 1px solid var(--jfx-border); border-radius: 16px; box-shadow: var(--shadow-card); }
+.jfx-card-soft { background: #000000; border: 1px solid var(--jfx-border-soft); border-radius: 20px; box-shadow: var(--shadow-soft); }
+.jfx-card-accent { border-color: var(--jfx-accent-border); background: linear-gradient(180deg, rgba(255,79,1,0.06) 0%, rgba(255,79,1,0) 100%), #000000; }
+
+.jfx-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--jfx-text-60); }
+.jfx-value-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.jfx-h1 { font-size: 22px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.15; }
+.jfx-h2 { font-size: 15px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.3; }
+.jfx-body { font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--jfx-text-80); }
+.jfx-caption { font-size: 11px; font-weight: 700; color: var(--jfx-text-60); }
+
+.jfx-skeleton { background: linear-gradient(90deg, rgba(39,39,42,0.9) 25%, rgba(63,63,70,0.6) 37%, rgba(39,39,42,0.9) 63%); background-size: 200% 100%; animation: jfx-shimmer 1.4s infinite linear; border-radius: 12px; }
+
+.safe-area-inset-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.pb-nav { padding-bottom: calc(5.25rem + env(safe-area-inset-bottom)); }
+.pb-nav-plus-fab { padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
+
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+.jfx-thumb-zone { position: fixed; bottom: calc(5.25rem + env(safe-area-inset-bottom) + 16px); right: 16px; z-index: 45; }
+.jfx-fab { width: 56px; height: 56px; border-radius: 9999px; background: var(--jfx-accent); color: white; box-shadow: var(--shadow-accent), 0 0 0 1px rgba(255,255,255,0.08) inset; display: flex; align-items: center; justify-content: center; }
+.jfx-fab:active { transform: scale(0.96); }
+.jfx-nav-island { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: 0 -8px 32px rgba(0,0,0,0.5), 0 -1px 0 rgba(255,255,255,0.06) inset; }
+
+.animate-sheet-up { animation: sheet-up 0.3s cubic-bezier(0.32, 0.72, 0, 1); }
+.animate-sheet-fade { animation: sheet-fade 0.2s ease-out; }
+
+
+/* ----------------------------------------------------------------------
+   MOBILE SETTINGS + DEVELOPER TOOLS + API-KEY MODAL (ported verbatim from
+   the jfx-mobile APK so phone-web renders the identical layout).
+   Every rule is self-scoped: `.mobile-settings` prefix or
+   `@media (max-width: 640px)`. None of it can reach the desktop
+   layout, so it is safe unscoped in the shared web stylesheet.
+   ---------------------------------------------------------------------- */
+
+/* ── MOBILE SETTINGS REDESIGN ───────────────────────────────────────────
+   Finance-grade mobile UX: sticky nav owns the title, the desktop header
+   becomes a compact stat strip, sections ride a sticky chip rail, and the
+   primary Save action docks in the thumb zone above the island nav.
+   8pt grid · 60/30/10 · 44pt targets · 16px inputs (no iOS zoom). */
+.mobile-settings {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+.mobile-settings > div {
+  height: auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+.mobile-settings > div > div {
+  height: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 0 12px 16px !important;
+  gap: 12px !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+.mobile-settings .settings-content-scale {
+  zoom: 1 !important; /* desktop compacts to 0.78 — mobile stays readable */
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Header card removed on mobile — nav bar owns the title, plan/sync/trades
+   already surface in the profile card, billing, and drawer. One less card. */
+.mobile-settings header {
+  display: none !important;
+}
+
+/* Desktop: full labels only */
+.tab-label-short { display: none; }
+
+/* Stack multi-col desktop grids — keep intentional 2/3-col tiles intact */
+.mobile-settings .grid[class*="lg:grid-cols"],
+.mobile-settings .grid[class*="md:grid-cols"],
+.mobile-settings .grid[class*="xl:grid-cols"] {
+  grid-template-columns: minmax(0, 1fr) !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* Section rail → minimal segmented control: one quiet bar, equal
+   text-only segments, active segment filled orange. Scrolls safely if the
+   viewport ever squeezes narrower than the labels (tabs can never strand
+   off-screen with no way to reach them). */
+.mobile-settings aside {
+  flex-direction: row !important;
+  overflow-x: auto !important;
+  margin: 0 !important;
+  padding: 4px !important;
+  gap: 4px !important;
+  position: static !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: none !important;
+  border-radius: 16px !important;
+  box-shadow: none !important;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.mobile-settings aside::-webkit-scrollbar { display: none; }
+.mobile-settings aside > div:first-child,  /* "Sections" label */
+.mobile-settings aside > div:last-child {  /* sign-out card (drawer owns logout) */
+  display: none;
+}
+.mobile-settings aside > button {
+  flex: 1 1 0 !important;
+  min-width: 76px !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 0 !important;
+  padding: 9px 2px !important;
+  border-radius: 12px !important;
+  gap: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+/* Active segment keeps its orange fill */
+.mobile-settings aside > button[class*="bg-[#FF4F01]"] {
+  background: #FF4F01 !important;
+  box-shadow: 0 2px 10px rgba(255, 79, 1, 0.35) !important;
+}
+/* Text-only segments: icon tiles off */
+.mobile-settings aside > button > div:first-child {
+  display: none !important;
+}
+.mobile-settings aside > button > div:last-child > p:last-child {
+  display: none; /* chip shows label only */
+}
+.mobile-settings aside > button > div:last-child {
+  min-width: 0;
+  overflow: hidden;
+}
+.mobile-settings aside > button > div:last-child > p:first-child {
+  font-size: 12px !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Mobile chips use the short label */
+.mobile-settings aside .tab-label-full { display: none; }
+.mobile-settings aside .tab-label-short { display: inline; }
+.mobile-settings aside > button svg {
+  width: 14px !important;
+  height: 14px !important;
+  flex-shrink: 0;
+}
+
+/* Mobile: the floating action button above the island nav owns Save —
+   hide the inline bottom button. */
+.mobile-settings .settings-save-btn { display: none !important; }
+
+/* Content sits directly on black — no card-in-card */
+.mobile-settings main {
+  overflow: visible !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+/* Section title block: one clear headline per screen */
+.mobile-settings main h2 {
+  font-size: 19px !important;
+  line-height: 1.25 !important;
+}
+/* Cards → home-widget surface: flat #0a0a0a, no borderlines */
+.mobile-settings section {
+  background: #0a0a0a !important;
+  border: none !important;
+  border-radius: 16px !important;
+  padding: 8px !important;
+  box-shadow: none !important;
+}
+/* Lower card height: compress vertical rhythm inside sections */
+.mobile-settings main .space-y-5 > :not([hidden]) ~ :not([hidden]),
+.mobile-settings main .space-y-4 > :not([hidden]) ~ :not([hidden]),
+.mobile-settings section .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 8px !important;
+}
+.mobile-settings section .mb-5 {
+  margin-bottom: 8px !important;
+}
+.mobile-settings section .mb-4 {
+  margin-bottom: 8px !important;
+}
+.mobile-settings section .mb-3\.5 {
+  margin-bottom: 8px !important;
+}
+.mobile-settings section .mb-2\.5 {
+  margin-bottom: 6px !important;
+}
+/* Persona avatar: 64px → 40px */
+.mobile-settings section div.h-16.w-16 {
+  height: 40px !important;
+  width: 40px !important;
+  border-radius: 12px !important;
+}
+/* Section title block: redundant on mobile (chips + card titles carry it) */
+.mobile-settings main > div > div:first-child {
+  display: none !important;
+}
+/* Plan rows + usage tiles: tighter */
+.mobile-settings section div.rounded-2xl {
+  padding: 8px !important;
+}
+/* All pills → square */
+.mobile-settings section .rounded-full {
+  border-radius: 6px !important;
+}
+/* Feature tags: no borderlines, flat whisper surface */
+.mobile-settings section div.rounded-2xl span.rounded-full {
+  border: none !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+/* Price + SWITCH/ACTIVE cluster docks bottom-right of each plan card */
+.mobile-settings section div.rounded-2xl > div > div:last-child {
+  align-self: flex-end;
+  margin-left: auto;
+}
+/* SWITCH / ACTIVE buttons: compact */
+.mobile-settings section div.rounded-2xl button {
+  min-height: 0 !important;
+  min-width: 0 !important;
+  padding: 6px 12px !important;
+  font-size: 10px !important;
+  border-radius: 6px !important;
+}
+.mobile-settings section div.rounded-xl[class*="min-w-"] {
+  padding: 6px 8px !important;
+}
+/* Active plan keeps its meaningful orange outline (selection state) */
+.mobile-settings section div[class*="border-[#FF4F01]"] {
+  border: 1px solid #FF4F01 !important;
+  background: #0a0a0a !important;
+}
+/* Icon wells → minimal bare glyphs (avatar imagery + active-plan dot untouched) */
+.mobile-settings section div.rounded-xl[class*="p-2"]:not([class*="min-w-"]):not([class*="rounded-\[20px\]"]),
+.mobile-settings section div.rounded-lg[class*="p-2"]:not([class*="bg-[#FF4F01]"]) {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #a1a1aa !important;
+}
+/* Usage mini-tiles: borderless, whisper of separation on the flat surface */
+.mobile-settings section div.rounded-xl[class*="min-w-"] {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: none !important;
+}
+
+/* Inputs: 16px kills iOS auto-zoom, 48px hits the 44pt target */
+.mobile-settings input,
+.mobile-settings textarea {
+  min-height: 48px !important;
+  font-size: 16px !important;
+  border-radius: 14px !important;
+}
+/* Persona form card: aggressive compaction to match the avatar card height */
+.mobile-settings section input {
+  min-height: 30px !important;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+  border-radius: 10px !important;
+}
+.mobile-settings section label {
+  font-size: 8px !important;
+  margin-bottom: 2px !important;
+}
+.mobile-settings section .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 4px !important;
+}
+/* Trading Style + Experience Level side by side, compact like inputs */
+.mobile-settings section .grid.grid-cols-1[class*="sm:grid-cols-2"] {
+  grid-template-columns: 1fr 1fr !important;
+}
+.mobile-settings section .grid.grid-cols-1[class*="sm:grid-cols-2"] button {
+  min-height: 30px !important;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+  font-size: 13px !important;
+}
+/* Profile tab: persona + avatar library merge into ONE minimal card.
+   Scoped via :has() on the persona avatar box — desktop untouched. */
+.mobile-settings main div.grid:has(> section div.h-16.w-16) {
+  gap: 0 !important;
+}
+.mobile-settings main div.grid:has(> section div.h-16.w-16) > section:first-child {
+  border-radius: 16px 16px 0 0 !important;
+  padding-bottom: 4px !important;
+}
+.mobile-settings main div.grid:has(> section div.h-16.w-16) > section:last-child {
+  border-radius: 0 0 16px 16px !important;
+  padding-top: 4px !important;
+}
+/* Drop read-only rows (email, timezone) — display-only, nothing to edit */
+.mobile-settings main div.grid:has(> section div.h-16.w-16) .space-y-4 > div:has(input:read-only) {
+  display: none !important;
+}
+/* Drop redundant eyebrows ("Current Persona", "Avatar Library") — titles carry it */
+.mobile-settings main div.grid:has(> section div.h-16.w-16) p[class*="tracking-[0.22em]"] {
+  display: none !important;
+}
+/* Persona identity row: smaller avatar + name */
+.mobile-settings section div.h-16.w-16 {
+  height: 30px !important;
+  width: 30px !important;
+  border-radius: 10px !important;
+}
+.mobile-settings section h3 {
+  font-size: 15px !important;
+}
+
+/* Security sign-out: full-width, thumb-reachable */
+.mobile-settings button.bg-rose-500 {
+  width: 100%;
+  min-height: 52px;
+  border-radius: 16px;
+}
+
+/* Save bar → sticky thumb-zone dock above the island nav */
+.mobile-settings main > div > div.border-t {
+  position: sticky;
+  bottom: calc(5.25rem + env(safe-area-inset-bottom) + 12px);
+  z-index: 20;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.9) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 16px;
+  padding: 10px !important;
+  margin-top: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.mobile-settings main > div > div.border-t > div:first-child {
+  min-height: 0; /* success slot collapses when empty */
+}
+.mobile-settings main > div > div.border-t > div:first-child:empty {
+  display: none;
+}
+.mobile-settings main > div > div.border-t > button {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 14px;
+  font-size: 14px;
+  box-shadow: 0 8px 24px rgba(255, 79, 1, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Mobile: the sticky save-bar dock is obsolete (FAB owns Save) — without its
+   button it renders as an empty bordered rectangle, so hide the whole dock. */
+.mobile-settings main > div > div.border-t { display: none !important; }
+
+/* ── DEVELOPER TOOLS ON MOBILE ────────────────────────────────────────
+   Desktop compacts Settings (zoom .78) and counter-zooms dev tools
+   (x1.282). Mobile resets the parent to zoom 1, so neutralize the
+   counter-zoom here — otherwise every dev-tools card renders 28%
+   oversized and overflows the viewport.
+
+   The global mobile rules (.mobile-settings section, .mobile-settings
+   section div.rounded-2xl button, etc.) aggressively compact every
+   settings tab for persona/billing. Dev-tools needs its own full-size
+   treatment — override every leaking global rule with higher specificity
+   so cards, buttons, labels, and inputs stay tappable and visible. */
+
+/* 1. Neutralise the counter-zoom (parent is already zoom:1 on mobile). */
+.mobile-settings .settings-developer-tools {
+  zoom: 1 !important;
+}
+
+/* 2. Hard width containment – prevents horizontal overflow from long
+      key prefixes, curl samples, etc. Clip keeps inner overflow-x:auto
+      scrollers (e.g. the curl row) working. */
+.mobile-settings main > div,
+.mobile-settings .settings-developer-tools,
+.mobile-settings .api-keys-panel,
+.mobile-settings .devtools {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: clip !important;
+  box-sizing: border-box !important;
+}
+.mobile-settings .devtools *,
+.mobile-settings .settings-developer-tools * {
+  min-width: 0;
+  box-sizing: border-box;
+}
+.mobile-settings .devtools .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 3. Restore the "Developer Tools" section header.
+      The global rule `main > div > div:first-child { display:none }` hides it.
+      Show it back inside the dev-tools wrapper. */
+.mobile-settings main > div > div:first-child:has(~ .settings-developer-tools) {
+  display: flex !important;
+}
+
+/* 4. Override the global `.mobile-settings section` compaction for every
+      section inside the dev-tools tree. Higher specificity wins. */
+.mobile-settings .settings-developer-tools section.devtools,
+.mobile-settings .settings-developer-tools section,
+.mobile-settings .settings-developer-tools .api-keys-panel {
+  background: #0a0a0a !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 20px !important;
+  padding: 16px !important;
+  box-shadow: none !important;
+}
+
+/* 5. Inner guide card + mobile key cards: comfortable spacing. */
+.mobile-settings .settings-developer-tools section section,
+.mobile-settings .settings-developer-tools .api-keys-panel section,
+.mobile-settings .settings-developer-tools div.rounded-2xl {
+  padding: 14px !important;
+  border-radius: 16px !important;
+}
+
+/* 6. Form inputs and labels inside dev-tools: readable text */
+.mobile-settings .settings-developer-tools label {
+  font-size: 11px !important;
+}
+
+.mobile-settings .settings-developer-tools input,
+.mobile-settings .settings-developer-tools select {
+  font-size: 13px !important;
+}
+
+/* 7. Code inside dev tools: maintain horizontal monospace display */
+.mobile-settings .settings-developer-tools code {
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+/* 8. Scope pills */
+.mobile-settings .settings-developer-tools .rounded-full {
+  border-radius: 9999px !important;
+}
+
+/* API-key modals render in a portal (outside .mobile-settings), so they
+   need their own small-screen treatment: full-width sheet, tighter pad. */
+@media (max-width: 640px) {
+  .api-key-modal-layer {
+    padding: 16px;
+    place-items: center !important;
+    z-index: 9999 !important;
+  }
+  .api-key-modal-card {
+    width: 100%;
+    max-height: calc(100dvh - 32px);
+    border-radius: 20px;
+  }
+}
+
+/* API-key modals render in a portal (outside .mobile-settings), so they
+   need their own small-screen treatment: full-width sheet, tighter pad. */
+@media (max-width: 640px) {
+  .api-key-modal-layer {
+    padding: 16px;
+    place-items: center !important;
+    z-index: 9999 !important;
+  }
+  .api-key-modal-card {
+    width: 100%;
+    max-height: calc(100dvh - 32px);
+    border-radius: 20px;
+  }
+}
+
+/* " + "-"*70 + "
+
+   PURE BLACK ENFORCEMENT (APK parity, re-scoped for web).
+   On the APK this block is global because the APK is black-only. Web also
+   ships a light theme for desktop, so it is gated behind the same
+   body.jfx-mobile class App.tsx sets on phone viewports. Without this the
+   phone-web shell renders zinc/slate surfaces while the APK renders pure
+   black -- the single biggest visual difference between the two.
+   " + "-"*70 + " */
+body.jfx-mobile,
+body.jfx-mobile #root,
+body.jfx-mobile .compact-scale {
+  background: #000000 !important;
+  background-color: #000000 !important;
+}
+body.jfx-mobile .compact-scale body {
+  background: #000000 !important;
+  background-color: #000000 !important;
+}
+/* Force all common surfaces to pure black — overrides lingering zinc/slate/white cards */
+body.jfx-mobile .jfx-card,
+body.jfx-mobile .jfx-card-soft,
+body.jfx-mobile .jfx-card-accent,
+body.jfx-mobile .glass,
+body.jfx-mobile .glass-card,
+body.jfx-mobile .glass-panel {
+  background: #000000;
+  background-color: #000000;
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { dataService } from './dataService';
+import { dataService, extractMissingColumnName } from './dataService';
 import { supabase } from '../lib/supabase';
 import { Trade } from '../types';
 
@@ -78,6 +78,11 @@ describe('dataService - Trade CRUD', () => {
     setupId: undefined,
     setupName: undefined,
     deletedAt: undefined,
+    checklistTemplateId: undefined,
+    checklistChecks: undefined,
+    adherenceRate: undefined,
+    executionGrade: undefined,
+    behaviorTags: [],
   };
 
   const mockDbTrade = {
@@ -135,12 +140,24 @@ describe('dataService - Trade CRUD', () => {
 
       await expect(dataService.getTrades(mockUser.id)).rejects.toThrow('DB error');
     });
+
+    it('strips schema-drift columns and retries instead of failing', async () => {
+      const colErr = { code: '42703', message: 'column trades.commissions does not exist' };
+      (supabase.from as any)
+        .mockReturnValueOnce(createMockQueryBuilder(null, colErr))
+        .mockReturnValue(createMockQueryBuilder([mockDbTrade]));
+
+      const result = await dataService.getTrades(mockUser.id);
+      expect(result).toEqual([mockTrade]);
+    });
   });
 
   describe('addTrade', () => {
     it('should add trade successfully', async () => {
       const newTrade = { ...mockTrade, id: undefined };
-      (supabase.from as any).mockReturnValue(createMockQueryBuilder(mockDbTrade));
+      (supabase.from as any)
+        .mockReturnValueOnce(createMockQueryBuilder(null))
+        .mockReturnValue(createMockQueryBuilder(mockDbTrade));
 
       const result = await dataService.addTrade(newTrade as Trade);
       expect(result).toEqual(mockTrade);
@@ -218,5 +235,28 @@ describe('dataService - Trade CRUD', () => {
 
       await expect(dataService.deleteNote('note-1')).rejects.toThrow('Delete failed');
     });
+  });
+});
+
+describe('extractMissingColumnName', () => {
+  it('parses Postgres 42703 dotted names', () => {
+    expect(extractMissingColumnName({ code: '42703', message: 'column trades.commissions does not exist' }))
+      .toBe('commissions');
+  });
+
+  it('parses quoted table-prefixed names', () => {
+    expect(extractMissingColumnName({ code: '42703', message: 'column "trades"."voice_note" does not exist' }))
+      .toBe('voice_note');
+  });
+
+  it('parses PostgREST schema-cache errors', () => {
+    expect(extractMissingColumnName({ code: 'PGRST204', message: "Could not find the 'checklist_template_id' column of 'trades' in the schema cache" }))
+      .toBe('checklist_template_id');
+  });
+
+  it('returns null for non-column errors', () => {
+    expect(extractMissingColumnName({ code: '42501', message: 'permission denied' })).toBeNull();
+    expect(extractMissingColumnName(new Error('DB error'))).toBeNull();
+    expect(extractMissingColumnName(null)).toBeNull();
   });
 });

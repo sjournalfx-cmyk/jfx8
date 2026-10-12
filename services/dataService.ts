@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
-import { Trade, Note, DailyBias, UserProfile, Goal, StrategyDiagram, DBTrade, DBGoal, BacktestSession, CashTransaction, DBCashTransaction } from '../types';
+import { persistentGetSync, persistentSet } from '../lib/persistentStore';
+import { Trade, Note, DailyBias, UserProfile, Goal, StrategyDiagram, DBTrade, DBGoal, BacktestSession, CashTransaction, DBCashTransaction, Portfolio, PortfolioAccount } from '../types';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from '../lib/constants';
 import { normalizeTrade } from '../lib/trade-normalization';
 
@@ -25,6 +26,31 @@ const sanitizeTimestamp = (value: unknown): string | null => {
   return new Date(timestamp).toISOString();
 };
 
+
+/**
+ * Foreign-key rejection on portfolio_id (e.g. a stray
+ * trades_portfolio_id_fkey pointing at a portfolios table that doesn't
+ * hold client-generated ids like 'default' or local UUIDs).
+ * portfolio_id is plain text by design — no FK must exist — so the fix is
+ * to strip it and retry, keeping the localStorage overlay as the assignment.
+ */
+export const isPortfolioFkViolation = (error: any): boolean => {
+  if (!error) return false;
+  const code = String((error as any).code || '');
+  const msg = String(
+    (error as any).message || (error as any).details || (error as any).hint || ''
+  ).toLowerCase();
+  return code === '23503' && msg.includes('portfolio');
+};
+
+const stripPortfolioId = <T extends Record<string, any>>(data: T): T => {
+  if (data && typeof data === 'object' && 'portfolio_id' in data) {
+    const { portfolio_id: _drop, ...rest } = data;
+    return rest as T;
+  }
+  return data;
+};
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value: unknown): value is string => typeof value === 'string' && UUID_PATTERN.test(value);
 const isUniqueViolation = (error: any) => error?.code === '23505' || /duplicate key/i.test(String(error?.message || ''));
@@ -35,14 +61,327 @@ const TRADE_LIST_COLUMNS = [
   'commissions', 'fees', 'swap', 'rr', 'rating', 'tags', 'notes', 'emotions',
   'plan_adherence', 'trading_mistake', 'mindset', 'exit_comment', 'voice_note',
   'open_time', 'close_time', 'before_screenshot', 'after_screenshot', 'setup_id',
-  'setup_name', 'deleted_at', 'chart_timeframe', 'updated_at',
+  'setup_name', 'deleted_at', 'chart_timeframe', 'updated_at', 'portfolio_id',
 ].join(',');
+// Fallback column list for bulletproof reads (see getTrades). Kept adjacent
+// to the primary list so the two cannot drift apart.
+const TRADE_LIST_COLUMNS_WITHOUT_PORTFOLIO = TRADE_LIST_COLUMNS.split(',').filter(c => c !== 'portfolio_id').join(',');
 // Discipline engine columns (migration 20260921). Appended last so the
 // pre-migration fallback in getTrades can strip exactly these.
 const DISCIPLINE_COLUMNS = [
   'checklist_template_id', 'checklist_checks', 'adherence_rate', 'execution_grade', 'behavior_tags',
 ];
 const TRADE_LIST_COLUMNS_WITH_DISCIPLINE = [...TRADE_LIST_COLUMNS.split(','), ...DISCIPLINE_COLUMNS].join(',');
+
+// Last getTrades failure (null on success). Surfaced in Diagnostics so a
+// silently-empty History is always explainable. Module-level by design:
+// dataService is a singleton.
+let lastTradesLoadError: string | null = null;
+const setLastTradesLoadError = (msg: string | null) => { lastTradesLoadError = msg; };
+export const getLastTradesLoadError = (): string | null => lastTradesLoadError;
+
+const tradePortfolioKey = (userId: string) => `jfx_trade_portfolios_${userId}`;
+
+export const getTradePortfolioKey = tradePortfolioKey;
+
+export const readTradePortfolioOverlay = (userId: string): Record<string, string> => {
+  try {
+    if (typeof window === 'undefined') return {};
+    // Sync mirror (localStorage + in-memory) — hydrated from native
+    // Preferences at boot via hydrateUserKeysFromNative. Never async here:
+    // this runs per-row during getTrades mapping.
+    const raw = persistentGetSync(tradePortfolioKey(userId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
+};
+
+export const writeTradePortfolioOverlay = (userId: string, tradeId: string, portfolioId: string) => {
+  writeTradePortfolioOverlays(userId, { [tradeId]: portfolioId });
+};
+
+/** Bulk version: one localStorage read-modify-write for many assignments. */
+export const writeTradePortfolioOverlays = (userId: string, entries: Record<string, string>) => {
+  try {
+    if (typeof window === 'undefined' || !userId) return;
+    const overlay = readTradePortfolioOverlay(userId);
+    let touched = false;
+    for (const [tradeId, portfolioId] of Object.entries(entries)) {
+      if (tradeId && portfolioId) {
+        overlay[tradeId] = portfolioId;
+        touched = true;
+      }
+    }
+    if (!touched) return;
+    const keys = Object.keys(overlay).slice(-2000);
+    const capped: Record<string, string> = {};
+    for (const k of keys) capped[k] = overlay[k];
+    // Dual-write: sync mirror + durable native copy (survives APK restarts).
+    persistentSet(tradePortfolioKey(userId), JSON.stringify(capped));
+  } catch { /* storage blocked — non-fatal */ }
+};
+
+/** Remove overlay assignments (e.g. after bulk delete) in one write. */
+export const removeTradePortfolioOverlays = (userId: string, tradeIds: string[]) => {
+  try {
+    if (typeof window === 'undefined' || !userId || tradeIds.length === 0) return;
+    const overlay = readTradePortfolioOverlay(userId);
+    let touched = false;
+    for (const id of tradeIds) {
+      if (id in overlay) {
+        delete overlay[id];
+        touched = true;
+      }
+    }
+    if (!touched) return;
+    persistentSet(tradePortfolioKey(userId), JSON.stringify(overlay));
+  } catch { /* storage blocked — non-fatal */ }
+};
+
+export const reassignTradePortfolioOverlay = (userId: string, fromPortfolioId: string, toPortfolioId: string) => {
+  try {
+    if (typeof window === 'undefined' || !userId || !fromPortfolioId) return;
+    const overlay = readTradePortfolioOverlay(userId);
+    let modified = false;
+    for (const [tradeId, pid] of Object.entries(overlay)) {
+      if (pid === fromPortfolioId) {
+        overlay[tradeId] = toPortfolioId;
+        modified = true;
+      }
+    }
+    if (modified) {
+      persistentSet(tradePortfolioKey(userId), JSON.stringify(overlay));
+    }
+  } catch { /* ignore */ }
+};
+
+export const clearTradePortfolioOverlayForPortfolio = (userId: string, portfolioId: string) => {
+  try {
+    if (typeof window === 'undefined' || !userId || !portfolioId) return;
+    const overlay = readTradePortfolioOverlay(userId);
+    let modified = false;
+    for (const [tradeId, pid] of Object.entries(overlay)) {
+      if (pid === portfolioId) {
+        delete overlay[tradeId];
+        modified = true;
+      }
+    }
+    if (modified) {
+      persistentSet(tradePortfolioKey(userId), JSON.stringify(overlay));
+    }
+  } catch { /* ignore */ }
+};
+
+const withClientPortfolio = <T extends Trade>(trade: T, portfolioId?: string): T => {
+  if (portfolioId) (trade as Trade).portfolio_id = portfolioId;
+  return trade;
+};
+
+/**
+ * Canonical test to determine if a trade belongs to a given portfolio.
+ * - 'all': matches every trade.
+ * - Default portfolio ('default' or defaultPortfolioId UUID): matches trades with
+ *   no portfolio_id, 'default', or defaultPortfolioId.
+ * - Custom portfolio: matches trades whose portfolio_id strictly matches targetPortfolioId.
+ */
+export const isTradeInPortfolio = (
+  tradePortfolioId: string | null | undefined,
+  targetPortfolioId: string | null | undefined,
+  defaultPortfolioId: string | null | undefined
+): boolean => {
+  if (!targetPortfolioId || targetPortfolioId === 'all') return true;
+
+  const defId = defaultPortfolioId || 'default';
+  const isTargetDefault = targetPortfolioId === 'default' || targetPortfolioId === defId;
+  const isTradeDefault = !tradePortfolioId || tradePortfolioId === 'default' || tradePortfolioId === defId;
+
+  if (isTargetDefault) {
+    return isTradeDefault;
+  }
+  return tradePortfolioId === targetPortfolioId;
+};
+
+// ─── Portfolios: server sync (migration 20260921) with overlay fallback ───
+// Every function degrades gracefully when offline or when the table hasn't
+// been created yet (callers already try/catch): overlay + local cache keep
+// the UI working, and ids are client-generated UUIDs preserved server-side
+// so trades.portfolio_id stays valid across uninstall/reinstall.
+const PORTFOLIO_OFFLINE_CODE = 'PORTFOLIO_OFFLINE';
+
+const portfolioOffline = (detail?: string) => {
+  const err = new Error(detail || 'Portfolio server sync unavailable (PORTFOLIO_OFFLINE)');
+  (err as any).code = PORTFOLIO_OFFLINE_CODE;
+  throw err;
+};
+
+/** True when the portfolios table isn't reachable (vs a real failure). */
+const isPortfolioSyncUnavailable = (error: any): boolean => {
+  if (!error) return false;
+  const code = String((error as any).code || '');
+  if (code === PORTFOLIO_OFFLINE_CODE || code === 'PGRST205' || code === '42P01') return true;
+  const msg = String((error as any).message || (error as any).details || (error as any).hint || '').toLowerCase();
+  return (
+    msg.includes('does not exist') ||
+    (msg.includes('portfolios') && (msg.includes('schema cache') || msg.includes('relation')))
+  );
+};
+
+interface DBPortfolio {
+  id: string;
+  user_id: string;
+  name: string;
+  description?: string | null;
+  purpose?: string | null;
+  source?: string | null;
+  starting_balance?: number | null;
+  currency?: string | null;
+  is_default?: boolean | null;
+  is_archived?: boolean | null;
+  accounts?: PortfolioAccount[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+const mapPortfolioFromDB = (row: DBPortfolio): Portfolio => ({
+  id: row.id,
+  name: row.name || 'Portfolio',
+  description: row.description || undefined,
+  purpose: (row.purpose as Portfolio['purpose']) || undefined,
+  source: (row.source as Portfolio['source']) || 'manual',
+  startingBalance: row.starting_balance !== null && row.starting_balance !== undefined ? Number(row.starting_balance) : undefined,
+  currency: row.currency || undefined,
+  isDefault: Boolean(row.is_default),
+  isArchived: Boolean(row.is_archived),
+  accounts: Array.isArray(row.accounts) ? row.accounts : [],
+  createdAt: row.created_at || new Date().toISOString(),
+  updatedAt: row.updated_at || undefined,
+});
+
+const buildPortfolioDbPayload = (userId: string, p: Portfolio): Record<string, unknown> => ({
+  // Preserve the client-generated UUID so existing trades.portfolio_id
+  // values keep matching after reinstalls. The seed 'default' is NOT a
+  // UUID — callers translate it before insert (see insertPortfolio).
+  id: p.id,
+  user_id: userId,
+  name: p.name,
+  description: p.description || null,
+  purpose: p.purpose || null,
+  source: p.source || 'manual',
+  starting_balance: p.startingBalance ?? null,
+  currency: p.currency || null,
+  is_default: Boolean(p.isDefault),
+  is_archived: Boolean(p.isArchived),
+  accounts: p.accounts || [],
+});
+
+export const fetchPortfolios = async (userId: string): Promise<Portfolio[]> => {
+  const { data, error } = await supabase
+    .from('portfolios')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) return portfolioOffline(`fetchPortfolios: ${error.message || error.code}`);
+  return (data || []).map((row: any) => mapPortfolioFromDB(row as DBPortfolio));
+};
+
+export const insertPortfolio = async (userId: string, draft: Portfolio): Promise<Portfolio> => {
+  // The local seed id 'default' is not a UUID and can never be a PK.
+  // Server rows always get real UUIDs; callers remap draft→saved ids.
+  const payload = buildPortfolioDbPayload(userId, draft);
+  if (draft.id === 'default' || !/^[0-9a-f-]{36}$/i.test(String(draft.id))) {
+    delete (payload as Record<string, unknown>).id;
+  }
+  const { data, error } = await supabase
+    .from('portfolios')
+    .insert(payload)
+    .select()
+    .single();
+  if (error) return portfolioOffline(`insertPortfolio: ${error.message || error.code}`);
+  return mapPortfolioFromDB(data as DBPortfolio);
+};
+
+export const patchPortfolio = async (id: string, patch: Partial<Portfolio>): Promise<void> => {
+  if (id === 'default') return; // seed has no server row
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return portfolioOffline('patchPortfolio: not authenticated');
+  const payload: Record<string, unknown> = {};
+  if (patch.name !== undefined) payload.name = patch.name;
+  if (patch.description !== undefined) payload.description = patch.description || null;
+  if (patch.purpose !== undefined) payload.purpose = patch.purpose || null;
+  if (patch.source !== undefined) payload.source = patch.source || 'manual';
+  if (patch.startingBalance !== undefined) payload.starting_balance = patch.startingBalance ?? null;
+  if (patch.currency !== undefined) payload.currency = patch.currency || null;
+  if (patch.isDefault !== undefined) payload.is_default = Boolean(patch.isDefault);
+  if (patch.isArchived !== undefined) payload.is_archived = Boolean(patch.isArchived);
+  if (patch.accounts !== undefined) payload.accounts = patch.accounts || [];
+  if (Object.keys(payload).length === 0) return;
+  const { error } = await supabase
+    .from('portfolios')
+    .update(payload)
+    .eq('id', id)
+    .eq('user_id', user.id);
+  if (error) return portfolioOffline(`patchPortfolio: ${error.message || error.code}`);
+};
+
+export const deletePortfolioRow = async (id: string): Promise<void> => {
+  if (id === 'default') return; // seed has no server row
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return portfolioOffline('deletePortfolioRow: not authenticated');
+  // Soft-archive, never hard-delete: trades referencing this id (e.g. from
+  // an offline window) keep resolving instead of orphaning.
+  const { error } = await supabase
+    .from('portfolios')
+    .update({ is_archived: true })
+    .eq('id', id)
+    .eq('user_id', user.id);
+  if (error) return portfolioOffline(`deletePortfolioRow: ${error.message || error.code}`);
+};
+
+export const reassignTradesPortfolio = async (userId: string, fromId: string, toId: string): Promise<void> => {
+  // Overlay first (instant local consistency), server second (durability).
+  if (userId && fromId && toId) {
+    reassignTradePortfolioOverlay(userId, fromId, toId);
+  }
+  const { error: moveError } = await supabase
+    .from('trades')
+    .update({ portfolio_id: toId })
+    .eq('user_id', userId)
+    .eq('portfolio_id', fromId);
+  if (moveError) {
+    if (isPortfolioFkViolation(moveError)) {
+      // Stray FK on trades.portfolio_id must not block deletes of
+      // portfolios; the overlay already reassigned locally.
+      console.warn('reassignTradesPortfolio: portfolio_id FK blocked server move; overlay kept.');
+      return;
+    }
+    if (isPortfolioSyncUnavailable(moveError) || extractMissingColumnName(moveError)) {
+      return portfolioOffline(`reassignTradesPortfolio: ${moveError.message || moveError.code}`);
+    }
+    throw moveError;
+  }
+};
+
+export const backfillNullTradesToPortfolio = async (userId: string, portfolioId: string): Promise<void> => {
+  // Reconcile local overlay entries from 'default' to portfolioId as well
+  if (userId && portfolioId && portfolioId !== 'default') {
+    reassignTradePortfolioOverlay(userId, 'default', portfolioId);
+  }
+  // Covers both never-assigned rows (NULL) and rows stamped with the legacy
+  // local seed id 'default' from before server sync existed — both belong to
+  // the resolved Default once the server Default has a real UUID.
+  const { error } = await supabase
+    .from('trades')
+    .update({ portfolio_id: portfolioId })
+    .eq('user_id', userId)
+    .or('portfolio_id.is.null,portfolio_id.eq.default');
+  if (error) {
+    if (isPortfolioSyncUnavailable(error) || isPortfolioFkViolation(error)) return; // best-effort
+    const missing = extractMissingColumnName(error);
+    if (missing) return; // column/table not migrated yet — overlay covers
+    throw error;
+  }
+};
 
 export const extractMissingColumnName = (error: any): string | null => {
   if (!error) return null;
@@ -794,6 +1133,22 @@ const cleanupNewTradeMedia = async (current: Partial<DBTrade> | undefined, urls:
 };
 
 export const dataService = {
+  // Persist portfolio-scoped trading locks. Graceful no-op when the
+  // portfolio_locks table hasn't been created yet (migration not applied).
+  async savePortfolioLocks(portfolioId: string, locks: unknown) {
+    try {
+      if (!portfolioId || portfolioId === 'default') return;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { error } = await supabase.from('portfolio_locks').upsert(
+        { user_id: user.id, portfolio_id: portfolioId, locks: locks ?? {}, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,portfolio_id' }
+      );
+      if (error) console.warn('savePortfolioLocks skipped:', error.message || error.code);
+    } catch (err) {
+      console.warn('savePortfolioLocks skipped:', (err as Error)?.message);
+    }
+  },
   // --- Audit Logs ---
   async logActivity(action: string, details: Record<string, any>) {
     try {
@@ -840,8 +1195,58 @@ export const dataService = {
       columns = list.filter((c) => c !== missing).join(',');
     }
 
-    if (error) throw error;
-    return (data || []).map(mapTradeFromDB);
+    // Bulletproof reads: if the select fails on the portfolio_id column
+    // (stale PostgREST schema cache, RLS/select regression), retry without
+    // it. The overlay covers assignments, so History can never go fully
+    // empty because of one column. The fallback + original error are
+    // recorded for the Diagnostics panel.
+    if (error) {
+      const msg = String((error as any)?.message || (error as any)?.details || (error as any)?.hint || '');
+      const looksColumnish = /portfolio_id|column|schema cache|PGRST2/i.test(msg);
+      setLastTradesLoadError(`${(error as any)?.code || 'ERR'}: ${msg}`.slice(0, 300));
+      if (looksColumnish) {
+        console.warn('getTrades full-column select failed, retrying without portfolio_id:', msg);
+        const fallback = await supabase
+          .from('trades')
+          .select(TRADE_LIST_COLUMNS_WITHOUT_PORTFOLIO)
+          .eq('user_id', userId)
+          .is('deleted_at', null)
+          .order('date', { ascending: false });
+        if (!fallback.error) {
+          setLastTradesLoadError(`fallback-ok (full select failed: ${msg})`.slice(0, 300));
+          data = fallback.data;
+          error = null;
+        } else {
+          setLastTradesLoadError(`${(fallback.error as any)?.code || 'ERR'}: ${String((fallback.error as any)?.message || '')}`.slice(0, 300));
+          throw fallback.error;
+        }
+      } else {
+        throw error;
+      }
+    } else {
+      setLastTradesLoadError(null);
+    }
+    const overlay = readTradePortfolioOverlay(userId);
+    // Rows are typed loosely because the column list is a runtime string;
+    // mapTradeFromDB validates/coerces every field it reads.
+    // Server portfolio_id wins; overlay covers rows written before migration.
+    const out = (data || []).map((row: any) => {
+      const mapped = mapTradeFromDB(row);
+      const pid = (row as DBTrade).portfolio_id || overlay[(row as DBTrade).id] || undefined;
+      if (pid) (mapped as Trade).portfolio_id = pid;
+      return mapped;
+    });
+    // Fire-and-forget: persist overlay for server-assigned rows so a future
+    // offline cold start still resolves them when Supabase is unreachable.
+    try {
+      const fresh = out.filter(t => (t as Trade).portfolio_id && !overlay[t.id]);
+      if (fresh.length > 0) {
+        const entries: Record<string, string> = {};
+        for (const t of fresh) entries[t.id] = (t as Trade).portfolio_id as string;
+        writeTradePortfolioOverlays(userId, entries);
+      }
+    } catch { /* non-fatal */ }
+    return out;
   },
 
   async getTradeChartCandles(tradeId: string) {

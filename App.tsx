@@ -8,7 +8,7 @@ import Auth from './components/Auth';
 import BetaSplash from './components/BetaSplash';
 import { PrivacyPolicy, TermsOfService } from './components/LegalPages';
 
-import { Trade, Note, DailyBias, UserProfile } from './types';
+import { Trade, Note, DailyBias, UserProfile, Portfolio } from './types';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
 import EASetup from './components/EASetup';
@@ -20,7 +20,9 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { getSASTDateTime } from './lib/timeUtils';
 import { buildAnalyticsAiSnapshot } from './lib/analyticsAiSnapshot';
 import { buildPsychologyInsightsPrompt, extractSectionBody, getPsychologyInsightsDayKey, getPsychologyInsightsScopeKey, PSYCHOLOGY_INSIGHTS_STORAGE_KEY, type PsychologyInsightsCache } from './lib/psychologyInsights';
-import { dataService } from './services/dataService';
+import { dataService, isTradeInPortfolio, removeTradePortfolioOverlays, writeTradePortfolioOverlays, writeTradePortfolioOverlay } from './services/dataService';
+import { usePortfolios } from './hooks/usePortfolios';
+import { useCtraderLiveBalance } from './hooks/useCtraderLiveBalance';
 import { modalResearchService } from './services/nvidiaAiService';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { BrandedLoader } from './components/ui/BrandedLoader';
@@ -48,7 +50,7 @@ const AppContent: React.FC = () => {
   const [currentView, setCurrentView] = useState(() => {
     return 'dashboard';
   });
-  const [settingsTab, setSettingsTab] = useState<'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'help'>('profile');
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'developer-tools' | 'help'>('profile');
   const { addToast } = useToast();
   const [isDemoMode, setIsDemoMode] = useLocalStorage<boolean>('jfx_demo_mode', false);
   const [showBetaSplash, setShowBetaSplash] = useState(() => {
@@ -190,10 +192,91 @@ const {
   } = useData(userId, userProfile);
 
   const activeUserProfile = isDemoMode ? getDemoProfile(userProfile) : userProfile;
-  const activeTrades = isDemoMode ? demoTrades : trades;
+  const {
+    portfolios,
+    activePortfolio,
+    activePortfolioId,
+    defaultId: defaultPortfolioId,
+    canAdd: canAddPortfolio,
+    setActiveId: setActivePortfolioId,
+    addPortfolio,
+    updatePortfolio,
+    removePortfolio,
+    findLinkCollision,
+  } = usePortfolios(isDemoMode ? null : userId);
+  // Portfolio scoping: legacy trades without a portfolio live in Default.
+  // Fail open (show all) while the store is still resolving ids or when 'all' is chosen.
+  const portfolioTrades = useMemo(() => {
+    if (!activePortfolioId || activePortfolioId === 'all') return trades;
+    return trades.filter(t => isTradeInPortfolio(t.portfolio_id, activePortfolioId, defaultPortfolioId));
+  }, [trades, activePortfolioId, defaultPortfolioId]);
+
+  const tradeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of trades) {
+      for (const p of portfolios) {
+        if (isTradeInPortfolio(t.portfolio_id, p.id, defaultPortfolioId)) {
+          counts[p.id] = (counts[p.id] || 0) + 1;
+        }
+      }
+    }
+    return counts;
+  }, [trades, portfolios, defaultPortfolioId]);
+
+  // Live balance per portfolio: starting balance + realized PnL of its completed trades.
+  const portfolioBalances = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const p of portfolios) {
+      const isDef = p.isDefault || p.id === defaultPortfolioId || p.id === 'default';
+      const start = p.startingBalance ?? (isDef ? activeUserProfile?.initialBalance : undefined) ?? 0;
+      let pnl = 0;
+      for (const t of trades) {
+        if (!isTradeInPortfolio(t.portfolio_id, p.id, defaultPortfolioId)) continue;
+        if (t.result === 'Pending') continue;
+        pnl += t.pnl || 0;
+      }
+      out[p.id] = start + pnl;
+    }
+    return out;
+  }, [trades, portfolios, defaultPortfolioId, activeUserProfile]);
+
+  const handleRemovePortfolio = useCallback(async (id: string) => {
+    const { from, to } = await removePortfolio(id);
+    if (to) setTrades(prev => prev.map(t => (t.portfolio_id === from ? { ...t, portfolio_id: to } : t)));
+  }, [removePortfolio, setTrades]);
+
+  // Link a cTrader/bridge account to a freshly-created portfolio (one account per portfolio).
+  const handleLinkPortfolioAccount = useCallback(async (portfolioId: string, account: { provider: string; externalAccountId?: string }) => {
+    await updatePortfolio(portfolioId, { accounts: [{ provider: account.provider, externalAccountId: account.externalAccountId }] });
+  }, [updatePortfolio]);
+
+  // Create -> if cTrader/bridge, jump straight to its connector (less confusion).
+  const handleAddPortfolioAndConnect = useCallback(async (input: { name: string; description?: string; purpose?: Portfolio['purpose']; source?: Portfolio['source']; startingBalance?: number; currency?: string }) => {
+    const created = await addPortfolio(input);
+    if ((created.source || 'manual') !== 'manual') {
+      setCurrentView('ea-setup');
+    }
+    return created;
+  }, [addPortfolio]);
+
+  const linkPortfolio = activePortfolio && (activePortfolio.source || 'manual') !== 'manual' ? activePortfolio : null;
+  const activeTrades = isDemoMode ? demoTrades : portfolioTrades;
   const activeNotes = isDemoMode ? demoNotes : notes;
   const activeDailyBias = isDemoMode ? demoDailyBias : dailyBias;
   const activeEaSession = isDemoMode ? demoEASession : eaSession;
+
+  // Live cTrader broker balance for the dashboard card. Prefers the cTrader
+  // account linked to the active portfolio; falls back to the account picked
+  // in Connect & Import so a connected broker still matches the card even
+  // before linking. Disabled in demo mode (demo shows demo-session math).
+  const linkedCtraderAccountId = activePortfolio?.accounts?.find(a => a.provider === 'ctrader')?.externalAccountId ?? null;
+  const selectedCtraderAccountId = useMemo(() => {
+    try { return localStorage.getItem('jfx_ctrader_selected_account'); } catch { return null; }
+    // Re-read when the portfolio or view changes (e.g. back from ea-setup).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePortfolio?.id, currentView]);
+  const ctraderAccountId = !isDemoMode ? (linkedCtraderAccountId ?? selectedCtraderAccountId) : null;
+  const ctraderLive = useCtraderLiveBalance(ctraderAccountId);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -555,6 +638,66 @@ const {
     setCurrentView('log-trade');
   };
 
+  // Broker reconnect can replay a single deal we already have. Merge instead
+  // of duplicating, and stamp the active portfolio so the row is visible in
+  // the journal the user is actually looking at.
+  const handleBrokerTradeAdded = useCallback((newTrade: Trade) => {
+    if (isDemoMode) { blockDemoAction('Cannot save trade'); return; }
+    const targetPid = activePortfolioId || defaultPortfolioId || undefined;
+    const withPortfolio = (newTrade as any)?.portfolio_id ? newTrade : { ...newTrade, portfolio_id: targetPid };
+    if (userId && withPortfolio.id && targetPid) {
+      writeTradePortfolioOverlay(userId, withPortfolio.id, targetPid);
+    }
+    setTrades(prev => [withPortfolio, ...prev.filter(t => t.id !== withPortfolio.id)]);
+  }, [isDemoMode, activePortfolioId, defaultPortfolioId, userId]);
+
+  // Bulk broker-import sync: ONE state update for all saved rows.
+  // Merges into existing rows (fixes realtime echo races) and writes the
+  // portfolio overlay immediately so a refresh cannot lose the assignment.
+  const handleTradesAddedBatch = (savedTrades: Trade[]) => {
+    if (!savedTrades || savedTrades.length === 0) return;
+    const targetPid = activePortfolioId || defaultPortfolioId || undefined;
+
+    const stamped = savedTrades.map(t => ({
+      ...t,
+      portfolio_id: t.portfolio_id || targetPid,
+    }));
+
+    if (userId && targetPid) {
+      const overlayEntries: Record<string, string> = {};
+      for (const t of stamped) {
+        if (t.id && !String(t.id).startsWith('dupe-')) {
+          overlayEntries[t.id] = targetPid;
+        }
+      }
+      if (Object.keys(overlayEntries).length > 0) {
+        writeTradePortfolioOverlays(userId, overlayEntries);
+      }
+    }
+
+    setTrades(prev => {
+      const savedMap = new Map(stamped.filter(t => t?.id && !String(t.id).startsWith('dupe-')).map(t => [t.id, t]));
+      const updated = prev.map(t => {
+        const fresh = savedMap.get(t.id);
+        if (fresh) {
+          savedMap.delete(t.id);
+          return { ...t, ...fresh, portfolio_id: fresh.portfolio_id || targetPid };
+        }
+        return t;
+      });
+      const brandNew = Array.from(savedMap.values());
+      return [...brandNew, ...updated];
+    });
+  };
+
+  // Bulk delete sync: ONE state update + overlay cleanup for many rows.
+  const handleTradesDeletedBatch = (tradeIds: string[]) => {
+    if (!tradeIds || tradeIds.length === 0) return;
+    const idSet = new Set(tradeIds);
+    setTrades(prev => prev.filter(t => !idSet.has(t.id)));
+    if (userId) removeTradePortfolioOverlays(userId, tradeIds);
+  };
+
   const handleBatchAddTrades = async (newTrades: Trade[]) => {
     if (isDemoMode) {
       blockDemoAction('Cannot import trades');
@@ -599,7 +742,25 @@ const {
         }
       }
 
-      const addedTrades = await dataService.batchAddTrades(newTrades);
+      // Imports land in the active portfolio unless the file already stamps one.
+      const targetPid = activePortfolioId || defaultPortfolioId || undefined;
+      const stamped = newTrades.map(t => ({ ...t, portfolio_id: t.portfolio_id || targetPid }));
+      const addedTrades = await dataService.batchAddTrades(stamped);
+
+      // Persist the overlay immediately so a refresh/offline cold start still
+      // resolves the assignment even if trades.portfolio_id lags behind.
+      if (userId && targetPid) {
+        const overlayEntries: Record<string, string> = {};
+        for (const t of addedTrades) {
+          if (t.id && !String(t.id).startsWith('dupe-')) {
+            overlayEntries[t.id] = t.portfolio_id || targetPid;
+          }
+        }
+        if (Object.keys(overlayEntries).length > 0) {
+          writeTradePortfolioOverlays(userId, overlayEntries);
+        }
+      }
+
       setTrades(prev => {
         const existingIds = new Set(prev.map(t => t.id));
         return [...addedTrades.filter(t => !existingIds.has(t.id)), ...prev];
@@ -1193,18 +1354,47 @@ const onLogout = async () => {
   }
 
   const totalPnL = activeTrades.reduce((acc, t) => acc + getSafePnL(t.pnl), 0);
-  // Balance priority:
-  //  1. Bridge is live → use live balance from eaSession
-  //  2. Bridge just went offline → show last known synced balance (from localStorage)
-  //  3. Never synced → fall back to initialBalance + PnL
-  const currentBalance = resolveBridgeBackedBalance({
-    userProfile: activeUserProfile,
-    totalPnL,
-    eaSession: activeEaSession,
-    lastKnownBridgeBalance,
-    isBridgeOnline,
-    isDemoMode,
-  });
+
+  // Balance priority (portfolio-scoped, so one connection's balance never
+  // leaks into an unrelated portfolio):
+  //  1. Portfolio source === 'bridge' (or Default while the EA is connected)
+  //     → resolveBridgeBackedBalance: live eaSession balance, else the last
+  //       synced snapshot, else initialBalance + PnL.
+  //  2. Else if a cTrader broker account is connected (linked to this
+  //     portfolio, or the account picked in Connect & Import): show the live
+  //     broker balance (cached snapshot while offline) so the card matches
+  //     cTrader.
+  //  3. Otherwise: portfolio startingBalance + journaled PnL.
+  const activeInitialBalance = activePortfolio?.startingBalance ?? (
+    (activePortfolio?.isDefault || activePortfolio?.id === defaultPortfolioId)
+      ? activeUserProfile?.initialBalance
+      : 0
+  ) ?? 0;
+
+  const isBridgePortfolio = activePortfolio?.source === 'bridge' || (
+    (!activePortfolio || activePortfolio?.isDefault || activePortfolio?.id === defaultPortfolioId) &&
+    Boolean(activeUserProfile?.eaConnected)
+  );
+
+  const ctraderBalanceForCard = (!isDemoMode && !isBridgePortfolio && ctraderLive.balance !== null)
+    ? ctraderLive.balance
+    : null;
+
+  const currentBalance = (!isDemoMode && isBridgePortfolio)
+    ? resolveBridgeBackedBalance({
+        userProfile: activeUserProfile,
+        totalPnL,
+        eaSession: activeEaSession,
+        lastKnownBridgeBalance,
+        isBridgeOnline,
+        isDemoMode,
+      })
+    : (ctraderBalanceForCard ?? activeInitialBalance + totalPnL);
+
+  const balanceSource: 'bridge' | 'ctrader' | null = (!isDemoMode && isBridgePortfolio)
+    ? 'bridge'
+    : (ctraderBalanceForCard !== null ? 'ctrader' : null);
+  const isLiveBalance = balanceSource === 'bridge' ? isBridgeOnline : ctraderLive.isLive;
 
   const { date: sastDate } = getSASTDateTime();
   const [year, month] = sastDate.split('-').map(Number);
@@ -1290,6 +1480,9 @@ const onLogout = async () => {
           onBatchUpdateTrades={handleBatchUpdateTrades}
           onDeleteTrades={handleDeleteTrades}
           onEditTrade={handleEditTrade}
+          onTradesAddedBatch={handleTradesAddedBatch}
+          onTradesDeletedBatch={handleTradesDeletedBatch}
+          onBrokerTradeAdded={handleBrokerTradeAdded}
           onAddNote={handleAddNote}
           onUpdateNote={handleUpdateNote}
           onDeleteNote={handleDeleteNote}
@@ -1303,7 +1496,23 @@ const onLogout = async () => {
           editingTrade={editingTrade}
           onClearEditingTrade={() => setEditingTrade(null)}
           settingsInitialTab={settingsTab}
+          portfolios={portfolios}
+          activePortfolioId={activePortfolioId}
+          defaultPortfolioId={defaultPortfolioId}
+          canAddPortfolio={canAddPortfolio}
+          tradeCounts={tradeCounts}
+          onSelectPortfolioId={setActivePortfolioId}
+          onAddPortfolio={handleAddPortfolioAndConnect}
+          onRemovePortfolio={handleRemovePortfolio}
+          onLinkPortfolioAccount={handleLinkPortfolioAccount}
+          linkCollisionCheck={findLinkCollision}
+          portfolioBalances={portfolioBalances}
+          activePortfolio={activePortfolio}
           currentBalance={currentBalance}
+          activeInitialBalance={activeInitialBalance}
+          liveBalanceSource={balanceSource}
+          isLiveBalance={isLiveBalance}
+          ctraderAccountId={ctraderAccountId}
           tradesThisMonth={tradesThisMonth}
           totalNotes={totalNotes}
           totalImages={totalImages}
@@ -1324,6 +1533,7 @@ const onLogout = async () => {
               currentView={currentView}
               onViewChange={setCurrentView}
               onSettingsTabChange={setSettingsTab}
+              activePortfolioSource={activePortfolio?.source}
               isDarkMode={isDarkMode}
               onOpenQuickLog={() => setIsQuickLogOpen(true)}
               onLogout={onLogout}

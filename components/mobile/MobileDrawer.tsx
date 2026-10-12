@@ -1,8 +1,8 @@
 import React from 'react';
 import {
-  X, LogOut, Settings, MessageCircle, ChevronRight, Plus
+  X, LogOut, Settings, MessageCircle, ChevronRight, Plus, Lock
 } from 'lucide-react';
-import { UserProfile, EASession, Portfolio } from '../../types';
+import { UserProfile, EASession, Portfolio, MAX_PORTFOLIOS } from '../../types';
 import { haptic } from '../../lib/haptics';
 
 interface MobileDrawerProps {
@@ -28,6 +28,12 @@ interface MobileDrawerProps {
   onRemovePortfolio?: (id: string) => Promise<void>;
   onOpenPortfolios?: () => void;
   onNewPortfolio?: () => void;
+  /**
+   * Source of the active portfolio ('manual' | 'ctrader' | 'bridge'). Passed by
+   * MobileLayout, which already owns the resolution rules. Falls back to the
+   * resolved portfolio's own source, then 'manual'.
+   */
+  activeSource?: Portfolio['source'];
 }
 
 export const MobileDrawer: React.FC<MobileDrawerProps> = ({
@@ -53,6 +59,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
   onRemovePortfolio,
   onOpenPortfolios,
   onNewPortfolio,
+  activeSource,
 }) => {
   if (!isOpen) return null;
 
@@ -60,6 +67,16 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
     { id: 'default', name: portfolioName, description: 'Main Trading Journal', purpose: 'Journal', source: 'manual', isDefault: true, createdAt: '2020-01-01T00:00:00.000Z' },
   ];
   const effectiveActiveId = activePortfolioId || drawerPortfolios.find(p => p.name === portfolioName)?.id || drawerPortfolios[0]?.id || null;
+  const activePortfolio = drawerPortfolios.find(p => p.id === effectiveActiveId) || null;
+  // Legacy rows predate `source`; treat a missing source as manual. When the
+  // prop is absent (drawer mounted outside MobileLayout) fall back to the
+  // resolved portfolio so the gate is never silently open.
+  const resolvedSource: Portfolio['source'] = activeSource ?? activePortfolio?.source ?? 'manual';
+  // Bridge & broker settings owns a broker/bridge connection. Only cTrader and
+  // Desktop Bridge portfolios have one -- Manual portfolios (including the
+  // built-in Default) connect from their own portfolio card, so the entry point
+  // is disabled there rather than opening a connector the portfolio cannot use.
+  const connectionsDisabled = resolvedSource === 'manual';
 
   return (
     <div className="fixed inset-0 z-[200] flex">
@@ -117,7 +134,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             >
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate text-left">{drawerPortfolios.find(p => p.id === effectiveActiveId)?.name || portfolioName}</p>
-                <p className="text-[10px] text-zinc-400 truncate text-left">{drawerPortfolios.length} of 3 slots · tap to manage</p>
+                <p className="text-[10px] text-zinc-400 truncate text-left">{drawerPortfolios.length} of {MAX_PORTFOLIOS} slots · tap to manage</p>
               </div>
               <ChevronRight size={16} className="text-zinc-500 shrink-0" />
             </button>
@@ -138,19 +155,31 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-0.5">Connections</p>
             <button
               onClick={() => {
+                if (connectionsDisabled) return;
                 try { haptic.selection(); } catch {}
                 onNavigate('ea-setup');
                 onClose();
               }}
-              className="w-full p-3 rounded-xl bg-[#0a0a0a] border-0 flex items-center justify-between text-left hover:bg-[#0a0a0a]"
+              disabled={connectionsDisabled}
+              aria-disabled={connectionsDisabled}
+              title={connectionsDisabled ? 'Available on cTrader and Desktop Bridge portfolios' : undefined}
+              className={`w-full p-3 rounded-xl bg-[#0a0a0a] border-0 flex items-center justify-between text-left ${
+                connectionsDisabled
+                  ? 'opacity-40 cursor-not-allowed'
+                  : 'hover:bg-[#0a0a0a] active:scale-[0.98]'
+              }`}
             >
-              <div className="text-left">
-                <p className="text-xs font-bold text-white text-left">Bridge & broker settings</p>
+              <div className="text-left min-w-0">
+                <p className={`text-xs font-bold text-left ${connectionsDisabled ? 'text-zinc-500' : 'text-white'}`}>Bridge & broker settings</p>
                 <p className="text-[10px] text-zinc-400 text-left">
-                  {isBridgeOnline ? 'Bridge Online · Syncing' : 'Logins & pairing · for a portfolio, tap its card instead'}
+                  {connectionsDisabled
+                    ? 'Available on cTrader and Desktop Bridge portfolios'
+                    : isBridgeOnline ? 'Bridge Online · Syncing' : 'Logins & pairing · for a portfolio, tap its card instead'}
                 </p>
               </div>
-              <ChevronRight size={14} className="text-zinc-500 shrink-0" />
+              {connectionsDisabled
+                ? <Lock size={14} className="text-zinc-600 shrink-0" />
+                : <ChevronRight size={14} className="text-zinc-500 shrink-0" />}
             </button>
           </div>
 

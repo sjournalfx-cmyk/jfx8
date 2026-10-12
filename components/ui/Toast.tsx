@@ -157,7 +157,7 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: () => void }> = ({ toast, on
       aria-atomic="true"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`pointer-events-auto relative flex items-start gap-3 p-4 rounded-xl border shadow-lg backdrop-blur-md min-w-[320px] max-w-[420px] overflow-hidden animate-in slide-in-from-right-full fade-in duration-300 ${style.bg}`}
+      className={`pointer-events-auto relative flex items-start gap-3 p-4 rounded-xl border shadow-lg backdrop-blur-md w-full sm:min-w-[320px] sm:max-w-[420px] overflow-hidden animate-in slide-in-from-right-full fade-in duration-300 ${style.bg}`}
     >
       <div 
         className={`absolute bottom-0 left-0 h-1 transition-all duration-100 ease-linear ${style.progress}`}
@@ -285,8 +285,8 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       clearNotifications
     }}>
       {children}
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none" role="region" aria-label="Notifications">
-        {toasts.map((toast, index) => (
+      <div className="fixed inset-x-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom)+12px)] sm:inset-x-auto sm:bottom-6 sm:right-6 z-[100] flex flex-col gap-3 pointer-events-none pb-[env(safe-area-inset-bottom)] sm:pb-0" role="region" aria-label="Notifications">
+        {toasts.map((toast) => (
           <ToastItem 
             key={toast.id} 
             toast={toast} 

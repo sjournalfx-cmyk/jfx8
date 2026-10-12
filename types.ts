@@ -13,7 +13,7 @@ export interface Point {
     logical?: number;
 }
 
-export type ToolType = 'cursor' | 'trendline' | 'ray' | 'arrow' | 'rect' | 'vertical' | 'horizontal' | 'long' | 'short' | 'fib' | 'channel' | 'text';
+export type ToolType = 'cursor' | 'trendline' | 'ray' | 'arrow' | 'rect' | 'vertical' | 'horizontal' | 'long' | 'short' | 'fib' | 'channel' | 'text' | 'measure';
 
 export interface Drawing {
     id: string;
@@ -25,6 +25,13 @@ export interface Drawing {
     strokeStyle?: 'solid' | 'dashed' | 'dotted';
     isLocked?: boolean;
     syncAllTimeframes?: boolean;
+    // Home chart (symbol_timeframe key) for per-chart visibility.
+    originKey?: string;
+    // Trendline / ray extension (TradingView "Extend line").
+    extendLeft?: boolean;
+    extendRight?: boolean;
+    // Rectangle fill toggle.
+    fillVisible?: boolean;
     // Position Tool specific
     entry?: number;
     target?: number;
@@ -46,6 +53,8 @@ export interface UserProfile {
   syncMethod: 'Manual' | 'EA_CONNECT' | 'BROKER_SYNC';
   experienceLevel: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro';
   tradingStyle: 'Scalper' | 'Day Trader' | 'Swing Trader' | 'Investor';
+  /** Analytical engine: what the trader must log per trade. Optional until the profiles table gains a column. */
+  strategyProfile?: 'Fundamental' | 'Technical' | 'Blended';
   onboarded: boolean;
   plan: string;
   syncKey?: string;
@@ -129,6 +138,8 @@ export interface Trade {
   setupId?: string;
   setupName?: string;
   deletedAt?: string;
+  /** Portfolio assignment. Client-generated id (or the legacy 'default' seed). */
+  portfolio_id?: string;
   chartCandles?: Candle[];
   chartTimeframe?: string;
   /** Discipline engine: snapshot of the active checklist at log/edit time. */
@@ -321,6 +332,9 @@ export interface EAPosition {
   magic?: number;
   comment?: string;
   time?: number;
+  /** Stop-loss / take-profit prices as reported by the bridge (may be absent). */
+  sl?: number;
+  tp?: number;
 }
 
 export interface EADeal {

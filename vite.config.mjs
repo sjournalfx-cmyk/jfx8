@@ -1464,6 +1464,12 @@ export default defineConfig(({ mode }) => {
       globals: true,
       environment: 'jsdom',
       setupFiles: './test/setup.ts',
+      // jfx-mobile/ is a SEPARATE git repo (see AGENTS.md §1) that happens to
+      // live inside this working directory. Vitest's default glob was picking
+      // up its suites and failing them against this repo's jsdom setup, so a
+      // green `npx vitest run` here was never actually green. Scope this repo
+      // to its own sources.
+      exclude: ['**/node_modules/**', '**/dist/**', 'jfx-mobile/**'],
     },
     build: {
       rollupOptions: {

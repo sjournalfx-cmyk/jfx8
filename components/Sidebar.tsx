@@ -36,7 +36,7 @@ import { AnimatePresence, motion } from 'motion/react';
 interface SidebarProps {
   currentView: string;
   onViewChange: (view: string) => void;
-  onSettingsTabChange?: (tab: 'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'help') => void;
+  onSettingsTabChange?: (tab: 'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'developer-tools' | 'help') => void;
   isDarkMode: boolean;
   onOpenQuickLog: () => void;
   onLogout: () => void;
@@ -45,6 +45,13 @@ interface SidebarProps {
   offlineQueueCount?: number;
   isDemoMode?: boolean;
   onToggleDemoMode?: () => void;
+  /**
+   * Source of the active portfolio. Broker/bridge connections belong to a
+   * cTrader or Desktop Bridge portfolio, so Connect & Import is disabled on
+   * Manual portfolios. Omitted (undefined) leaves the item enabled so the
+   * sidebar still works in any context that has no portfolio store wired.
+   */
+  activePortfolioSource?: 'manual' | 'ctrader' | 'bridge';
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -59,6 +66,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   offlineQueueCount = 0,
   isDemoMode = false,
   onToggleDemoMode,
+  activePortfolioSource,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -66,6 +74,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const currentPlan = normalizePlan(userProfile?.plan);
   const isBasicTier = !PLAN_FEATURES[currentPlan].advancedAnalytics;
+  // Same rule as the mobile drawer: only cTrader / Desktop Bridge portfolios
+  // own a broker connection. Treat an unknown source as manual so the gate is
+  // never silently open.
+  const connectionsDisabled = (activePortfolioSource ?? 'manual') === 'manual';
 
   const { notifications, unreadCount, clearNotifications, markNotificationsRead } = useToast();
 
@@ -279,6 +291,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               onClick: () => onViewChange(item.id),
               isActive: currentView === item.id,
               isLocked: isBasicTier && item.restricted,
+              isDisabled: item.id === 'ea-setup' && connectionsDisabled,
+              disabledReason: item.id === 'ea-setup' && connectionsDisabled
+                ? 'Needs a cTrader or Desktop Bridge portfolio'
+                : undefined,
               type: 'item' as const
             }))}
             desktopClassName="bg-transparent border-none px-0"

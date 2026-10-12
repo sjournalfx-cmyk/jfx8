@@ -8,7 +8,6 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   rightIcon?: React.ReactNode;
   isDarkMode?: boolean;
 }
-
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, label, error, leftIcon, rightIcon, isDarkMode, id, ...props }, ref) => {
     const inputId = id || `input-${Math.random().toString(36).substr(2, 9)}`;
@@ -35,12 +34,12 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             aria-invalid={!!error}
             aria-describedby={error ? `${inputId}-error` : undefined}
             className={cn(
-              'w-full rounded-lg border outline-none font-medium transition-all text-sm py-3 px-4',
+              'w-full rounded-xl border-0 outline-none font-medium transition-all text-sm py-3 px-4 min-h-[44px] touch-manipulation',
               leftIcon && 'pl-11',
               rightIcon && 'pr-11',
               props.disabled && 'cursor-not-allowed opacity-60',
               isDarkMode
-                ? 'bg-[#000000] border-[#27272a] text-zinc-100 placeholder-zinc-600 focus:bg-[#27272a] focus:border-[#FF4F01]/50 focus:ring-4 focus:ring-[#FF4F01]/5'
+                ? 'bg-[#0a0a0a] border-0 text-zinc-100 placeholder-zinc-600 focus:bg-[#141414] focus:border-0 focus:ring-4 focus:ring-[var(--jfx-accent-soft)]'
                 : 'bg-white border-slate-200 text-slate-900 placeholder-slate-400 focus:border-[#FF4F01] focus:ring-4 focus:ring-[#FF4F01]/5',
               error && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/5',
               className
@@ -54,7 +53,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           )}
         </div>
         {error && (
-          <p id={`${inputId}-error`} className="text-[10px] font-bold text-rose-500 uppercase tracking-wider mt-0.5">
+          <p id={`${inputId}-error`} className="text-[11px] font-bold text-rose-500 uppercase tracking-wider mt-0.5">
             {error}
           </p>
         )}

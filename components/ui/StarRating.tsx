@@ -22,8 +22,8 @@ export const StarRating: React.FC<StarRatingProps> = ({ rating, onChange, isDark
     const currentDisplay = hovered || rating;
 
     return (
-        <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
                 {[1, 2, 3, 4, 5].map((star) => (
                     <button
                         key={star}
@@ -39,7 +39,7 @@ export const StarRating: React.FC<StarRatingProps> = ({ rating, onChange, isDark
                         )}
                         aria-label={`Rate ${star} stars: ${labels[star]}`}
                     >
-                        <Star size={20} strokeWidth={star <= (hovered || rating) ? 1 : 2} />
+                        <Star size={18} strokeWidth={star <= (hovered || rating) ? 1 : 2} />
                     </button>
                 ))}
             </div>
