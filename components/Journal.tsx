@@ -5,9 +5,10 @@ import {
   Brain, ShieldCheck, ArrowUpRight, ArrowDownRight, Edit3,
   ChevronDown, Clock, CheckCircle2, Trash2, CheckSquare, Square, 
   Trophy, CheckCircle, LayoutPanelTop, Target, Star, Eye, Layers, Link, Unlink, RefreshCw, Mic,
-  Pencil, Check
+  Pencil, Check, XCircle
 } from 'lucide-react';
-import { Trade, UserProfile } from '../types';
+import { Trade, UserProfile, Portfolio } from '../types';
+import { haptic } from '../lib/haptics';
 import { getSASTDateTime, getDefaultTimezone } from '../lib/timeUtils';
 import { getPipSize } from '../lib/trade-calculations';
 import { sanitizeRichTextHtml } from '../lib/htmlSanitizer';
@@ -16,6 +17,9 @@ import TradeChartView from './TradeChartView';
 import { AudioNote, isAudioSource } from './ui/AudioNote';
 import ConfirmationModal from './ConfirmationModal';
 import { LinkTradesCard } from './journal/link-trades/LinkTradesCard';
+import { TradeChecklistPanel, GradePill } from './discipline/TradeChecklistPanel';
+import { useChecklistTemplates } from '../lib/useChecklistTemplates';
+import { computeAdherence, derivePlanAdherence, gradeFor, isViolationTag } from '../lib/disciplineChecklist';
 
 interface JournalProps {
   isDarkMode: boolean;
@@ -29,6 +33,11 @@ interface JournalProps {
   isLoading?: boolean;
   offlineQueue?: Trade[];
   isDemoMode?: boolean;
+  portfolios?: Portfolio[];
+  activePortfolioId?: string;
+  defaultPortfolioId?: string;
+  activePortfolioName?: string;
+  onSelectPortfolioId?: (id: string) => void;
 }
 
 interface GroupedTrade {
@@ -155,6 +164,340 @@ const ReadOnlyStarRating = ({ rating, isDarkMode }: { rating: number, isDarkMode
   </div>
 );
 
+type DetailTab = 'overview' | 'chart' | 'journal' | 'rules';
+
+interface MobileTradeDetailSheetProps {
+  trade: Trade;
+  isDarkMode: boolean;
+  userProfile: UserProfile;
+  isDemoMode?: boolean;
+  onClose: () => void;
+  onEdit: (trade: Trade) => void;
+  onDelete: (tradeId: string) => void;
+  onUpdateTrade: (trade: Trade) => void;
+  onViewChange: (view: string) => void;
+  editingComment: { tradeId: string; field: 'notes' | 'exitComment'; value: string } | null;
+  onBeginCommentEdit: (trade: Trade, field: 'notes' | 'exitComment') => void;
+  onSaveCommentEdit: (trade: Trade) => void;
+  onCancelCommentEdit: () => void;
+  onCommentChange: (value: string) => void;
+  onPreviewImage: (url: string, title: string) => void;
+  onUploadImage: (trade: Trade, type: 'before' | 'after', e: React.ChangeEvent<HTMLInputElement>) => void;
+  onDeleteImage: (trade: Trade, type: 'before' | 'after') => void;
+}
+
+// Rules tab body: interactive discipline checklist for one trade.
+// Persists live via onUpdateTrade (same pattern as chart candles) — every
+// tap recomputes adherence, grade and the derived planAdherence tier.
+const RulesTabBody: React.FC<{
+  trade: Trade;
+  isDarkMode: boolean;
+  onUpdateTrade: (trade: Trade) => void;
+  onViewChange: (view: string) => void;
+}> = ({ trade, isDarkMode, onUpdateTrade, onViewChange }) => {
+  const { activeTemplate } = useChecklistTemplates();
+  const checks = trade.checklistChecks ?? {};
+  const tags = trade.behaviorTags ?? [];
+  const hasSnapshot = !!trade.checklistChecks;
+
+  const persist = (nextChecks: Record<string, boolean>, nextTags: string[]) => {
+    const rate = computeAdherence(nextChecks, activeTemplate.items) ?? 0;
+    onUpdateTrade({
+      ...trade,
+      checklistTemplateId: activeTemplate.id,
+      checklistChecks: nextChecks,
+      adherenceRate: rate,
+      executionGrade: gradeFor(rate),
+      planAdherence: derivePlanAdherence(rate),
+      behaviorTags: nextTags,
+    });
+  };
+
+  if (!activeTemplate.items.length) {
+    return (
+      <div className={`rounded-xl border-0 p-4 flex flex-col items-center text-center gap-1.5 ${isDarkMode ? 'bg-[#0a0a0a] text-zinc-500' : 'bg-slate-50 text-slate-400'}`}>
+        <p className="text-[13px] font-bold">No rules yet</p>
+        <p className="text-[11px] leading-snug">Build your checklist first — then grade this trade.</p>
+        <button
+          onClick={() => { try { haptic.selection(); } catch {} onViewChange('discipline'); }}
+          className="mt-1 px-4 py-2 rounded-lg text-xs font-bold bg-[#FF4F01] text-white touch-manipulation min-h-[36px]"
+        >
+          Open Rules
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {!hasSnapshot && (
+        <p className={`text-[10px] leading-snug ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>
+          Tap rules to grade this trade.
+        </p>
+      )}
+      <TradeChecklistPanel
+        template={activeTemplate}
+        checks={checks}
+        behaviorTags={tags}
+        onChecksChange={(c) => persist(c, tags)}
+        onTagsChange={(t) => persist(checks, t)}
+        isDarkMode={isDarkMode}
+      />
+    </div>
+  );
+};
+
+// Full-screen mobile trade detail sheet (header + tab pills + bottom actions).
+const MobileTradeDetailSheet: React.FC<MobileTradeDetailSheetProps> = ({
+  trade, isDarkMode, userProfile, isDemoMode, onClose, onEdit, onDelete, onUpdateTrade, onViewChange,
+  editingComment, onBeginCommentEdit, onSaveCommentEdit, onCancelCommentEdit, onCommentChange,
+  onPreviewImage, onUploadImage, onDeleteImage,
+}) => {
+  const [tab, setTab] = useState<DetailTab>('overview');
+  const [chartSubTab, setChartSubTab] = useState<'candles' | 'screenshots'>('candles');
+  const pnl = safePnL(trade.pnl);
+  const currSym = userProfile?.currencySymbol || '$';
+  const isLong = trade.direction === 'Long';
+  const tabs: { id: DetailTab; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'chart', label: 'Chart' },
+    { id: 'journal', label: 'Journal' },
+    { id: 'rules', label: 'Rules' },
+  ];
+
+  const pipSize = getPipSize(trade.assetType, trade.pair);
+  const hasExit = Number.isFinite(Number(trade.exitPrice));
+  const pipMovement = hasExit && Number.isFinite(Number(trade.entryPrice)) ? (isLong ? Number(trade.exitPrice) - Number(trade.entryPrice) : Number(trade.entryPrice) - Number(trade.exitPrice)) / pipSize : 0;
+
+  const Cell = ({ label, value, valueClassName = '', align = 'left' }: { label: string; value: React.ReactNode; valueClassName?: string; align?: 'left' | 'right' }) => (
+    <div className={align === 'right' ? 'text-right' : ''}>
+      <p className={`text-[11px] font-medium tracking-wide ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{label}</p>
+      <p className={`text-[14px] font-bold tracking-tight mt-0.5 ${valueClassName || (isDarkMode ? 'text-zinc-200' : 'text-slate-800')}`}>{value}</p>
+    </div>
+  );
+
+  const renderNoteEditor = (field: 'notes' | 'exitComment', content: string | undefined, placeholder: string, emptyText: string) => {
+    const isEditing = editingComment?.tradeId === trade.id && editingComment.field === field;
+    return (
+      <div>
+        {isEditing ? (
+          <div className="space-y-2">
+            <textarea
+              value={editingComment.value}
+              onChange={(e) => onCommentChange(e.target.value)}
+              className={`w-full min-h-24 resize-none rounded-xl border px-3 py-2 text-sm outline-none ${isDarkMode ? 'bg-black border-zinc-800 text-zinc-100' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+              placeholder={placeholder}
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={onCancelCommentEdit} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-widest ${isDarkMode ? 'bg-zinc-900 text-zinc-300' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
+              <button onClick={() => onSaveCommentEdit(trade)} className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-blue-600 text-white">Save</button>
+            </div>
+          </div>
+        ) : content ? (
+          <div className="min-w-0 break-words text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(content) }} />
+        ) : (
+          <p className="text-sm opacity-50 italic">{emptyText}</p>
+        )}
+        {!isEditing && (
+          <button onClick={() => onBeginCommentEdit(trade, field)} className={`mt-2 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-widest ${isDarkMode ? 'bg-zinc-900 text-zinc-300' : 'bg-slate-100 text-slate-600'}`}>Edit</button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className={`fixed inset-0 z-[300] flex flex-col ${isDarkMode ? 'bg-[#050505] text-white' : 'bg-white text-slate-900'}`}>
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 flex items-center gap-3 shrink-0">
+        <div className="flex-1 min-w-0 flex items-baseline gap-2">
+          <h2 className="text-[26px] font-black tracking-tight truncate">{trade.pair}</h2>
+          <span className={`text-[15px] font-bold shrink-0 ${isLong ? 'text-emerald-400' : 'text-[#ff4f64]'}`}>{isLong ? 'Buy (Long)' : 'Sell (Short)'}</span>
+        </div>
+        <button onClick={onClose} aria-label="Close" className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'text-zinc-300' : 'text-slate-600'}`}>
+          <X size={24} />
+        </button>
+      </div>
+      {/* Tabs */}
+      <div className="px-4 shrink-0">
+        <div className={`flex items-center gap-1 p-1 rounded-2xl overflow-x-auto no-scrollbar ${isDarkMode ? 'bg-zinc-900/80' : 'bg-slate-100'}`}>
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => { try { haptic.selection(); } catch {} setTab(t.id); }}
+              className={`flex-1 whitespace-nowrap px-4 py-2.5 rounded-xl text-[15px] font-bold transition-all ${tab === t.id ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400' : 'text-slate-500')}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* Body */}
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-5 py-4 pb-28">
+        {tab === 'overview' && (
+          <div className={`divide-y ${isDarkMode ? 'divide-zinc-800/70' : 'divide-slate-100'}`}>
+            <div className="grid grid-cols-2 gap-3 pb-4">
+              <Cell label="Net P&L" value={`${pnl > 0 ? '+' : pnl < 0 ? '-' : ''}${currSym}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} valueClassName={pnl > 0 ? 'text-emerald-400' : pnl < 0 ? 'text-[#ff4f64]' : ''} />
+              <Cell align="right" label="R:R" value={trade.rr > 0 ? `1 : ${trade.rr}` : '—'} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 py-4">
+              <Cell label="Entry" value={safePrice(trade.entryPrice)} />
+              <Cell align="right" label="Exit" value={trade.exitPrice === undefined || trade.exitPrice === null ? '—' : safePrice(trade.exitPrice)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 py-4">
+              <Cell label="Stop Loss" value={safePrice(trade.stopLoss)} valueClassName="text-[#ff4f64]" />
+              <Cell align="right" label="Take Profit" value={safePrice(trade.takeProfit)} valueClassName="text-emerald-400" />
+            </div>
+            <div className="grid grid-cols-2 gap-3 py-4">
+              <Cell label="Volume" value={`${trade.lots} Lots`} />
+              <Cell align="right" label="Pip Movement" value={hasExit ? `${pipMovement >= 0 ? '+' : ''}${pipMovement.toFixed(2)}` : '—'} valueClassName={hasExit ? (pipMovement >= 0 ? 'text-emerald-400' : 'text-[#ff4f64]') : ''} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 py-4">
+              <Cell label="Date" value={trade.date} />
+              <Cell align="right" label="Session" value={trade.session || '—'} />
+            </div>
+            {(trade.openTime || trade.closeTime) && (
+              <div className="grid grid-cols-2 gap-3 py-4">
+                <Cell label="Opened" value={trade.openTime ? new Date(trade.openTime).toLocaleString() : '—'} />
+                <Cell align="right" label="Closed" value={trade.closeTime ? new Date(trade.closeTime).toLocaleString() : '—'} />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 py-4">
+              <Cell label="Mindset" value={trade.mindset || 'Neutral'} />
+              <div className="text-right">
+                <p className={`text-[11px] font-medium tracking-wide ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Rating</p>
+                <div className="mt-1 flex justify-end"><ReadOnlyStarRating rating={trade.rating || 0} isDarkMode={isDarkMode} /></div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 py-4">
+              <Cell label="Type" value={trade.assetType || '—'} />
+              <Cell align="right" label="Duration" value={trade.openTime && trade.closeTime ? formatDuration(trade.openTime, trade.closeTime) : '—'} />
+            </div>
+          </div>
+        )}
+        {tab === 'chart' && (
+          <div className="space-y-4">
+            {/* Sub-tabs for Candlestick vs Screenshots */}
+            <div className={`flex items-center gap-1.5 p-1 rounded-xl ${isDarkMode ? 'bg-zinc-900/60 border border-zinc-800/60' : 'bg-slate-100 border border-slate-200'}`}>
+              <button
+                type="button"
+                onClick={() => { try { haptic.selection(); } catch {} setChartSubTab('candles'); }}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-[12px] font-bold tracking-wide transition-all ${
+                  chartSubTab === 'candles'
+                    ? 'bg-zinc-800 text-white shadow-sm border border-white/10'
+                    : isDarkMode ? 'text-zinc-400 hover:text-zinc-200' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Candlestick
+              </button>
+              <button
+                type="button"
+                onClick={() => { try { haptic.selection(); } catch {} setChartSubTab('screenshots'); }}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-[12px] font-bold tracking-wide transition-all ${
+                  chartSubTab === 'screenshots'
+                    ? 'bg-zinc-800 text-white shadow-sm border border-white/10'
+                    : isDarkMode ? 'text-zinc-400 hover:text-zinc-200' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Screenshots
+              </button>
+            </div>
+
+            {/* Candlestick Canvas Section */}
+            {chartSubTab === 'candles' && (
+              <div className={`h-[480px] rounded-2xl overflow-hidden border ${isDarkMode ? 'border-zinc-800' : 'border-slate-200'}`}>
+                <TradeChartView trade={trade} isDarkMode={isDarkMode} onSaveCandles={(candles, tf) => { onUpdateTrade({ ...trade, chartCandles: candles, chartTimeframe: tf }); }} />
+              </div>
+            )}
+
+            {/* Screenshots Section */}
+            {chartSubTab === 'screenshots' && (
+              <div className="space-y-3 pt-1">
+                <p className={`text-[12px] font-medium ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Before & After Screenshots</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[{ id: 'before', label: 'Before Screenshot', data: trade.beforeScreenshot }, { id: 'after', label: 'After Screenshot', data: trade.afterScreenshot }].map((slot) => (
+                    <div key={slot.id} className={`rounded-2xl overflow-hidden border ${isDarkMode ? 'border-zinc-800 bg-zinc-950/60' : 'border-slate-200 bg-slate-50'}`}>
+                      <div className="px-3.5 py-2 border-b border-white/5 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-zinc-400">{slot.label}</span>
+                        {slot.data && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteImage(trade, slot.id as any)}
+                            className="text-[11px] text-rose-400 hover:text-rose-300"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      {slot.data ? (
+                        <button className="block w-full" onClick={() => onPreviewImage(slot.data!, `${trade.pair} - ${slot.label}`)}>
+                          <img src={slot.data} alt={slot.label} className="w-full h-48 object-cover" />
+                        </button>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center h-40 cursor-pointer opacity-60 hover:opacity-100 transition-opacity">
+                          <span className="text-[11px] font-bold uppercase tracking-widest">{slot.label} · Tap to upload</span>
+                          <input type="file" accept="image/*" className="hidden" aria-label={`Upload ${slot.label}`} onChange={(e) => onUploadImage(trade, slot.id as any, e)} />
+                        </label>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {tab === 'journal' && (
+          <div className={`divide-y ${isDarkMode ? 'divide-zinc-800/70' : 'divide-slate-100'}`}>
+            <div className="pb-4">
+              <p className={`text-[11px] font-medium mb-2 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Entry Note</p>
+              {renderNoteEditor('notes', trade.notes, 'Edit entry comment...', 'No entry comments recorded.')}
+            </div>
+            <div className="py-4">
+              <p className={`text-[11px] font-medium mb-2 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Exit Note</p>
+              {renderNoteEditor('exitComment', trade.exitComment, 'Edit exit comment...', 'No exit comments recorded.')}
+            </div>
+            <div className="py-4">
+              <p className={`text-[11px] font-medium mb-2 ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Voice Note</p>
+              {trade.voiceNote ? (
+                isAudioSource(trade.voiceNote) ? (
+                  <AudioNote src={trade.voiceNote} className="w-full h-10" />
+                ) : (
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{trade.voiceNote}</p>
+                )
+              ) : (
+                <p className="text-sm opacity-50 italic">No voice note.</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3 py-4">
+              <Cell label="Mistake" value={trade.tradingMistake || 'None'} />
+              <Cell align="right" label="Plan" value={trade.planAdherence || 'N/A'} />
+            </div>
+            {(trade.executionGrade || trade.adherenceRate != null) && (
+              <div className="grid grid-cols-2 gap-3 py-4">
+                <div>
+                  <p className={`text-[11px] font-medium tracking-wide ${isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>Grade</p>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <GradePill grade={trade.executionGrade} adherenceRate={trade.adherenceRate} size="sm" />
+                    {trade.adherenceRate != null && (
+                      <span className={`text-[14px] font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-800'}`}>{trade.adherenceRate}%</span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <Cell align="right" label="Violations" value={(trade.behaviorTags ?? []).filter(isViolationTag).join(', ') || 'None'} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {tab === 'rules' && (
+          <RulesTabBody trade={trade} isDarkMode={isDarkMode} onUpdateTrade={onUpdateTrade} onViewChange={onViewChange} />
+        )}
+      </div>
+
+    </div>
+  );
+};
+
 const MiniCalendar = ({ year, month, trades, isDarkMode, onClick, currencySymbol }: any) => {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const firstDay = new Date(year, month, 1).getDay();
@@ -199,10 +542,14 @@ const MiniCalendar = ({ year, month, trades, isDarkMode, onClick, currencySymbol
     );
 };
 
-const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean, trades: Trade[], userProfile: UserProfile }) => {
+const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDarkMode: boolean, trades: Trade[], userProfile: UserProfile, onSelectTrade: (trade: Trade) => void }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [mode, setMode] = useState<'month' | 'year'>('month');
     const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+    const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
+    // Swipe navigation refs for whole calendar canvas (mobile)
+    const calSwipeX = React.useRef<number | null>(null);
+    const calSwipeY = React.useRef<number | null>(null);
     
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -225,6 +572,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
         // denominator silently deflated the win rate.
         const decidedTrades = monthTrades.filter(t => t.result === 'Win' || t.result === 'Loss').length;
         const winRateTotal = decidedTrades > 0 ? (winTrades / decidedTrades) * 100 : 0;
+        const lossTrades = monthTrades.filter(t => t.result === 'Loss').length;
 
         const dayMap: Record<string, number> = {};
         monthTrades.forEach(t => { dayMap[t.date] = (dayMap[t.date] || 0) + safePnL(t.pnl); });
@@ -248,7 +596,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
         });
 
         return { 
-            monthlyStats: { totalPnL, winRate: winRateTotal, totalCount, winTrades, winDays, lossDays },
+            monthlyStats: { totalPnL, winRate: winRateTotal, totalCount, winTrades, lossTrades, winDays, lossDays },
             weekdayStats: wdStats
         };
     }, [trades, year, month]);
@@ -257,6 +605,48 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
         const currentSASTDate = getSASTDateTime().date;
         const targetDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         return currentSASTDate === targetDate;
+    };
+
+    const dateStrForDay = (day: number) => `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+    // Day drawer (replay-speed sheet pattern): Escape to close + lock body scroll.
+    useEffect(() => {
+        if (!selectedDateStr) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedDateStr(null); };
+        window.addEventListener('keydown', onKey);
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            window.removeEventListener('keydown', onKey);
+            document.body.style.overflow = prevOverflow;
+        };
+    }, [selectedDateStr]);
+
+    const selectedDayTrades = useMemo(() => {
+        if (!selectedDateStr) return [];
+        return trades
+            .filter(t => t.date === selectedDateStr)
+            .slice()
+            .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    }, [trades, selectedDateStr]);
+
+    const selectedDayPnL = useMemo(
+        () => selectedDayTrades.reduce((acc, t) => acc + safePnL(t.pnl), 0),
+        [selectedDayTrades]
+    );
+
+    const selectedDateLabel = useMemo(() => {
+        if (!selectedDateStr) return '';
+        try {
+            return new Date(`${selectedDateStr}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+        } catch { return selectedDateStr; }
+    }, [selectedDateStr]);
+
+    const formatSheetPnL = (pnl: number) => {
+        const sym = userProfile?.currencySymbol || '$';
+        if (pnl < 0) return `-${sym}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (pnl > 0) return `+${sym}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return `${sym}0.00`;
     };
 
     return (
@@ -294,6 +684,13 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                             <div className="flex items-center gap-1">
                                 <CheckCircle size={12} className="text-emerald-500" />
                                 <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.winTrades}</span>
+                            </div>
+                        </div>
+                        <div className="flex flex-col items-end">
+                            <span className="text-[9px] uppercase font-bold opacity-50 tracking-wider">Losing Trades</span>
+                            <div className="flex items-center gap-1">
+                                <XCircle size={12} className="text-rose-500" />
+                                <span className={`font-bold text-xs ${isDarkMode ? 'text-zinc-200' : 'text-slate-700'}`}>{monthlyStats.lossTrades}</span>
                             </div>
                         </div>
                         <div className={`w-px h-6 hidden lg:block ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
@@ -374,7 +771,19 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                 )}
 
                 {mode === 'month' ? (
-                    <>
+                    <div
+                        className="touch-pan-y"
+                        onTouchStart={(e) => { calSwipeX.current = e.touches[0].clientX; calSwipeY.current = e.touches[0].clientY; }}
+                        onTouchEnd={(e) => {
+                            if (calSwipeX.current === null || calSwipeY.current === null) return;
+                            const dx = e.changedTouches[0].clientX - calSwipeX.current;
+                            const dy = e.changedTouches[0].clientY - calSwipeY.current;
+                            calSwipeX.current = null; calSwipeY.current = null;
+                            if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+                            try { haptic.selection(); } catch {}
+                            if (dx < 0) next(); else prev();
+                        }}
+                    >
                         <div className="grid grid-cols-7 gap-2 text-center mb-2">
                             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
                                 <div key={d} className="text-[10px] font-bold uppercase opacity-40">{d}</div>
@@ -405,7 +814,13 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                                 };
 
                                 return (
-                                    <div key={day} className={`relative rounded-lg border p-1.5 sm:p-2 flex flex-col items-center justify-center min-h-[70px] sm:min-h-[80px] transition-all duration-200 overflow-hidden group ${getBgColor()} ${isDarkMode ? 'hover:border-zinc-600' : 'hover:shadow-md hover:-translate-y-0.5'} ${isCurrentDay ? 'ring-1.5 ring-indigo-500 ring-offset-1 ring-offset-[#000000]' : ''}`}>
+                                    <button
+                                        key={day}
+                                        type="button"
+                                        disabled={!hasTrades}
+                                        aria-label={hasTrades ? `View ${dayTrades.length} ${dayTrades.length === 1 ? 'trade' : 'trades'} on ${dateStrForDay(day)}` : `No trades on ${dateStrForDay(day)}`}
+                                        onClick={() => { if (!hasTrades) return; try { haptic.selection(); } catch {} setSelectedDateStr(dateStrForDay(day)); }}
+                                        className={`relative rounded-lg border p-1.5 sm:p-2 flex flex-col items-center justify-center min-h-[70px] sm:min-h-[80px] transition-all duration-200 overflow-hidden group w-full text-center ${getBgColor()} ${hasTrades ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'} ${isDarkMode ? 'hover:border-zinc-600' : 'hover:shadow-md hover:-translate-y-0.5'} ${isCurrentDay ? 'ring-1.5 ring-indigo-500 ring-offset-1 ring-offset-[#000000]' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01]`}>
                                         <div className="absolute top-1.5 right-2 z-10">
                                             <span className={`text-[9px] font-bold ${isCurrentDay ? 'text-indigo-400 font-black' : isDarkMode ? 'text-zinc-500' : 'text-slate-400'}`}>{day}</span>
                                         </div>
@@ -420,11 +835,11 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                                                 </div>
                                             </div>
                                         ) : null}
-                                    </div>
+                                    </button>
                                 )
                             })}
                         </div>
-                    </>
+                    </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-in fade-in zoom-in-95">
                         {Array.from({length: 12}).map((_, i) => (
@@ -433,16 +848,170 @@ const CalendarView = ({ isDarkMode, trades, userProfile }: { isDarkMode: boolean
                     </div>
                 )}
             </div>
+            {/* Day trades drawer — same bottom-sheet pattern as backtest replay speed */}
+            {selectedDateStr && (
+                <>
+                    <div className="fixed inset-0 z-[500] bg-black/50" onClick={() => setSelectedDateStr(null)} aria-hidden />
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={`Trades on ${selectedDateLabel}`}
+                        className={`fixed bottom-0 left-0 right-0 z-[510] rounded-t-3xl border-t p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] max-h-[75dvh] flex flex-col ${isDarkMode ? 'bg-black border-white/10' : 'bg-white border-slate-200'}`}
+                    >
+                        <div className="w-10 h-1 rounded-full mx-auto mb-3 bg-zinc-600/40 shrink-0" />
+                        <div className="flex items-start justify-between gap-3 mb-1 shrink-0">
+                            <div className="min-w-0">
+                                <h3 className={`text-[16px] font-black tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{selectedDateLabel}</h3>
+                                <p className={`text-[12px] font-bold mt-0.5 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+                                    {selectedDayTrades.length} {selectedDayTrades.length === 1 ? 'trade' : 'trades'}
+                                    {' · '}
+                                    <span className={`font-mono ${selectedDayPnL < 0 ? 'text-[#ff4f64]' : selectedDayPnL > 0 ? 'text-emerald-400' : ''}`}>{formatSheetPnL(selectedDayPnL)}</span>
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Close day trades"
+                                onClick={() => setSelectedDateStr(null)}
+                                className={`w-9 h-9 min-w-[36px] rounded-full flex items-center justify-center active:scale-95 transition-all ${isDarkMode ? 'bg-white/[0.06] text-zinc-300' : 'bg-slate-100 text-slate-600'}`}
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto min-h-0 -mx-1 px-1">
+                            {selectedDayTrades.map((trade) => {
+                                const pnl = safePnL(trade.pnl);
+                                const displayDate = trade.date || '';
+                                const rowPnL = formatSheetPnL(pnl);
+                                return (
+                                    <button
+                                        key={trade.id}
+                                        type="button"
+                                        onClick={() => { const t = trade; setSelectedDateStr(null); try { haptic.selection(); } catch {} onSelectTrade(t); }}
+                                        className="w-full flex items-center justify-between py-3 border-b border-zinc-800/80 text-left cursor-pointer select-none active:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01]"
+                                    >
+                                        <div className="min-w-0 pr-3 flex-1">
+                                            <h3 className={`text-[16px] font-black uppercase tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                                {trade.pair || 'UNKNOWN'}
+                                            </h3>
+                                            <p className={`text-[13px] font-medium leading-tight mt-1 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+                                                {trade.direction || 'Trade'}{displayDate ? ` · ${displayDate}` : ''}
+                                            </p>
+                                        </div>
+                                        <span className={`text-[16px] font-black jfx-value-mono tracking-tight shrink-0 ${pnl < 0 ? 'text-[#ff4f64]' : pnl > 0 ? 'text-emerald-400' : (isDarkMode ? 'text-zinc-400' : 'text-slate-500')}`}>
+                                            {rowPnL}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </>
+            )}
         </div>
     );
 };
 
-const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, onBatchUpdateTrades, onDeleteTrades, onEditTrade, userProfile, onViewChange, isLoading = false, offlineQueue = [], isDemoMode = false }) => {
+// Hoisted to module level: stable identity across Journal renders, so rows
+// never unmount/remount (no flash frames) and swipe state survives.
+const MobileTradeCard: React.FC<{ trade: Trade; onToggle: () => void; isSelected: boolean; onSelect: () => void; onDelete: (id: string) => void; onEdit: (trade: Trade) => void; showCheckbox: boolean; isDarkMode: boolean; currencySymbol: string }> = ({ trade, onToggle, isSelected, onSelect, onDelete, onEdit, showCheckbox, isDarkMode, currencySymbol }) => {
+    const [swipeX, setSwipeX] = useState(0);
+    const [dragging, setDragging] = useState(false);
+    const touchStartX = React.useRef<number | null>(null);
+    const touchStartY = React.useRef<number | null>(null);
+    const touchMoved = React.useRef(false);
+    const pnl = safePnL(trade.pnl);
+    const currSym = currencySymbol || '$';
+    const displayDate = trade.date || (trade.closeTime ? trade.closeTime.split('T')[0] : trade.openTime ? trade.openTime.split('T')[0] : '');
+    const formattedPnL = pnl < 0
+        ? `-${currSym}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : pnl > 0
+            ? `+${currSym}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            : `${currSym}0.00`;
+
+    return (
+        <div className="relative overflow-hidden">
+            {/* Swipe-right: delete */}
+            {(dragging || swipeX !== 0) && swipeX >= 0 && (
+                <div className="absolute left-0 top-0 bottom-0 w-[76px] flex items-center justify-start pl-1">
+                    <button
+                        aria-label="Delete trade"
+                        onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this trade?')) { onDelete(trade.id); } }}
+                        className="w-[60px] h-[44px] rounded-xl bg-[#ff4f64] text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+                    >
+                        <Trash2 size={20} />
+                    </button>
+                </div>
+            )}
+            {/* Swipe-left: edit */}
+            {(dragging || swipeX !== 0) && swipeX <= 0 && (
+                <div className="absolute right-0 top-0 bottom-0 w-[76px] flex items-center justify-end pr-1">
+                    <button
+                        aria-label="Edit trade"
+                        onClick={(e) => { e.stopPropagation(); setSwipeX(0); onEdit(trade); }}
+                        className="w-[60px] h-[44px] rounded-xl bg-[#FF4F01] text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+                    >
+                        <Pencil size={18} />
+                    </button>
+                </div>
+            )}
+        <div
+            onClick={() => { if (touchMoved.current) { touchMoved.current = false; return; } if (swipeX !== 0) { setSwipeX(0); return; } try { haptic.selection(); } catch {} try { navigator.vibrate?.(10); } catch {} if (showCheckbox) { onSelect(); } else { onToggle(); } }}
+            onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; touchStartY.current = e.touches[0].clientY; touchMoved.current = false; setDragging(true); }}
+            onTouchMove={(e) => {
+                if (touchStartX.current === null || touchStartY.current === null) return;
+                const dx = e.touches[0].clientX - touchStartX.current;
+                const dy = e.touches[0].clientY - touchStartY.current;
+                if (Math.abs(dx) > 10 || Math.abs(dy) > 10) touchMoved.current = true;
+                if (Math.abs(dy) > Math.abs(dx)) { setSwipeX(0); return; }
+                setSwipeX(Math.max(-76, Math.min(76, dx)));
+            }}
+            onTouchEnd={() => { touchStartX.current = null; touchStartY.current = null; setDragging(false); setSwipeX((v) => (v < -38 ? -76 : v > 38 ? 76 : 0)); }}
+            style={{ transform: `translateX(${swipeX}px)` }}
+            className={`relative z-10 flex items-center justify-between py-2.5 px-0 border-b cursor-pointer select-none active:bg-white/[0.04] ${
+                dragging ? '' : 'transition-transform duration-200'
+            } ${
+                isDarkMode ? 'border-zinc-800/80 bg-[#000000]' : 'border-slate-100 bg-white'
+            } ${isSelected ? (isDarkMode ? 'bg-indigo-500/10' : 'bg-indigo-50/50') : ''}`}
+        >
+            {showCheckbox && (
+                <button
+                    aria-label={isSelected ? 'Untick trade' : 'Tick trade'}
+                    onClick={(e) => { e.stopPropagation(); touchMoved.current = true; setSwipeX(0); onSelect(); }}
+                    className={`w-[18px] h-[18px] rounded-full border flex items-center justify-center shrink-0 mr-2.5 transition-all active:scale-90 ${isSelected ? 'bg-violet-600 border-violet-600 text-white shadow-[0_2px_8px_rgba(124,58,237,0.35)]' : (isDarkMode ? 'border-zinc-700 bg-white/[0.03] text-transparent' : 'border-slate-300 bg-slate-50 text-transparent')}`}
+                >
+                    <Check size={8} strokeWidth={4} className={isSelected ? 'opacity-100' : 'opacity-0'} />
+                </button>
+            )}
+            <div className="min-w-0 pr-3 flex-1">
+                <h3 className={`text-[16px] font-black uppercase tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                    {trade.pair || 'UNKNOWN'}
+                </h3>
+                <p className={`text-[13px] font-medium leading-tight mt-1 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+                    {trade.direction || 'Trade'}{displayDate ? ` · ${displayDate}` : ''}
+                </p>
+            </div>
+            <div className="text-right shrink-0 flex flex-col items-end">
+                <span className={`text-[16px] sm:text-[17px] font-black jfx-value-mono tracking-tight ${
+                    pnl < 0 ? 'text-[#ff4f64]' : pnl > 0 ? 'text-emerald-400' : (isDarkMode ? 'text-zinc-400' : 'text-slate-500')
+                }`}>
+                    {formattedPnL}
+                </span>
+                {trade.executionGrade && <GradePill grade={trade.executionGrade} adherenceRate={trade.adherenceRate} size="xs" />}
+            </div>
+        </div>
+        </div>
+    );
+};
+
+const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, onBatchUpdateTrades, onDeleteTrades, onEditTrade, userProfile, onViewChange, isLoading = false, offlineQueue = [], isDemoMode = false, portfolios = [], activePortfolioId, defaultPortfolioId, activePortfolioName, onSelectPortfolioId }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
     const [expandedTradeId, setExpandedTradeId] = useState<string | null>(null);
+    const [detailTradeId, setDetailTradeId] = useState<string | null>(null);
+    const [isLinkMode, setIsLinkMode] = useState(false);
     const [expandedSetupIds, setExpandedSetupIds] = useState<string[]>([]);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    useEffect(() => { if (selectedIds.length === 0) setIsLinkMode(false); }, [selectedIds.length]);
     const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
     const [pendingBreakSetupId, setPendingBreakSetupId] = useState<string | null>(null);
     const [draftSetupName, setDraftSetupName] = useState('');
@@ -690,6 +1259,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
             setSelectedIds([]);
             setIsLinkModalOpen(false);
             setDraftSetupName('');
+            setIsLinkMode(false);
         }
     };
 
@@ -780,7 +1350,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
     };
 
     const renderTradeDetails = (trade: Trade) => (
-        <div key={`details-${trade.id}`} className={`min-w-0 mx-6 mt-1 mb-6 rounded-2xl overflow-hidden border shadow-xl relative ${isDarkMode ? 'bg-[#000000] border-[#27272a] shadow-black' : 'bg-white border-slate-200'}`}>
+        <div key={`details-${trade.id}`} className={`col-span-11 min-w-0 mx-0 sm:mx-6 mt-1 mb-6 rounded-2xl overflow-hidden border shadow-xl relative ${isDarkMode ? 'bg-[#000000] border-[#27272a] shadow-black' : 'bg-white border-slate-200'}`}>
             <div className={`relative px-6 py-4 border-b flex flex-wrap items-center justify-between gap-4 ${isDarkMode ? 'bg-black/50 border-zinc-800' : 'bg-slate-50/50 border-slate-100'}`}>
                 <div className="flex items-center gap-6">
                     <div>
@@ -1350,7 +1920,7 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
     );
 
     return (
-        <div className={`w-full h-full overflow-hidden flex flex-col p-8 pb-0 ${isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-slate-50 text-slate-900'}`}>
+        <div className={`w-full h-full overflow-hidden flex flex-col p-4 sm:p-8 pb-nav ${isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-slate-50 text-slate-900'}`}>
             {previewImage && (
                 <div 
                     className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex flex-col p-4 animate-in fade-in duration-200"
@@ -1376,6 +1946,30 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                     </div>
                 </div>
             )}
+            {(() => {
+                const detailTrade = trades.find((t) => t.id === detailTradeId);
+                return detailTrade ? (
+                    <MobileTradeDetailSheet
+                        trade={detailTrade}
+                        isDarkMode={isDarkMode}
+                        userProfile={userProfile}
+                        isDemoMode={isDemoMode}
+                        onClose={() => setDetailTradeId(null)}
+                        onEdit={(t) => { setDetailTradeId(null); onEditTrade(t); }}
+                        onDelete={(id) => { onDeleteTrades([id]); setDetailTradeId(null); }}
+                        onUpdateTrade={onUpdateTrade}
+                        onViewChange={onViewChange}
+                        editingComment={editingComment}
+                        onBeginCommentEdit={beginCommentEdit}
+                        onSaveCommentEdit={saveCommentEdit}
+                        onCancelCommentEdit={() => setEditingComment(null)}
+                        onCommentChange={(value) => setEditingComment((prev) => (prev ? { ...prev, value } : prev))}
+                        onPreviewImage={(url, title) => setPreviewImage({ url, title })}
+                        onUploadImage={handleUpload}
+                        onDeleteImage={handleDeleteImage}
+                    />
+                ) : null;
+            })()}
             <header className="mb-4 flex flex-col md:flex-row md:items-end justify-between gap-3">
                 <div>
                     <div className="flex items-center gap-2 mb-1">
@@ -1578,12 +2172,84 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
             
             <div className={`flex-1 rounded-t-2xl border-t border-l border-r overflow-hidden flex flex-col ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200 shadow-md'}`}>
                 {viewMode === 'calendar' ? (
-                    <CalendarView isDarkMode={isDarkMode} trades={trades} userProfile={userProfile} />
+                    <CalendarView isDarkMode={isDarkMode} trades={trades} userProfile={userProfile} onSelectTrade={(t) => setDetailTradeId(t.id)} />
                 ) : (
                     <>
-                        {/* Fixed 11-column table: on narrow screens it is scrolled
-                            horizontally instead of crushing every cell. */}
-                        <div className="overflow-x-auto custom-scrollbar flex-1 flex flex-col min-h-0">
+                    {/* Mobile closed trade rows: swipe-left edits, swipe-right deletes,
+                        tap opens the full-screen detail sheet. */}
+                    <div className="sm:hidden flex flex-col px-0 py-1 pb-nav overflow-y-auto no-scrollbar flex-1 min-h-0">
+                        {isLoading ? (
+                            <JournalSkeleton isDarkMode={isDarkMode} />
+                        ) : filteredTrades.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-14 px-6 text-center rounded-2xl border border-dashed border-zinc-700/60 bg-zinc-900/20 my-3">
+                                <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-3 text-zinc-500"><Search size={20} /></div>
+                                <p className="text-[13px] font-black tracking-tight text-white">
+                                    {searchTerm || dateRange ? "No trades match filter" : (activePortfolioName ? `No trades in ${activePortfolioName}` : "No trades found")}
+                                </p>
+                                <p className="text-[12px] font-medium leading-relaxed text-zinc-500 mt-1 max-w-[32ch]">
+                                    {searchTerm || dateRange 
+                                        ? "Try adjusting your search or date filter." 
+                                        : activePortfolioId && activePortfolioId !== 'all'
+                                            ? `This portfolio has no trades yet. Log manual trades to get started.`
+                                            : "Try adjusting your search or date filter — or log manual trades to get started."}
+                                </p>
+                                <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+                                    <button 
+                                        onClick={() => onViewChange('log-trade')} 
+                                        className="h-9 px-4 rounded-xl bg-[#FF4F01] text-white text-[12px] font-black tracking-wide shadow-[0_4px_16px_rgba(255,79,1,0.25)] flex items-center gap-1.5"
+                                    >
+                                        Log Trade
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                {groupedTrades.slice(0, visibleGroupCount).map((group) => (
+                                    group.type === 'pending' ? (
+                                        <div key={group.id} className="flex items-center gap-2 py-3 px-3 border-b border-indigo-500/20 bg-indigo-500/5 min-h-[44px]">
+                                            <RefreshCw size={14} className="text-indigo-500 animate-spin shrink-0" />
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-black leading-none">{group.trades[0].pair} · {group.trades[0].direction}</p>
+                                                <p className="text-[11px] text-zinc-500 mt-1">Syncing… <span className="text-indigo-400 font-bold">Pending</span></p>
+                                            </div>
+                                            <span className="text-[11px] font-bold px-2 py-1 rounded-full border border-indigo-500/30 text-indigo-400">Offline</span>
+                                        </div>
+                                    ) : group.type === 'setup' ? (
+                                        <div key={group.id} className="rounded-xl border border-violet-500/20 overflow-hidden bg-violet-500/[0.04] my-2">
+                                            <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-violet-500/15 bg-violet-500/[0.06]">
+                                                <span className="text-[11px] font-black tracking-widest uppercase text-violet-300">{group.setupName}</span>
+                                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300">{group.trades.length} trades</span>
+                                            </div>
+                                            <div>
+                                                {group.trades.map((trade) => (
+                                                    <div key={`mob-${group.id}-${trade.id}`}>
+                                                        <MobileTradeCard trade={trade} isDarkMode={isDarkMode} currencySymbol={userProfile?.currencySymbol || '$'} isSelected={selectedIds.includes(trade.id)} onSelect={() => handleSelectOne(trade.id)} onToggle={() => setDetailTradeId(trade.id)} onDelete={(id) => { onDeleteTrades([id]); }} onEdit={(tr) => onEditTrade(tr)} showCheckbox={isLinkMode} />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div key={group.id}>
+                                            <MobileTradeCard trade={group.trades[0]} isDarkMode={isDarkMode} currencySymbol={userProfile?.currencySymbol || '$'} isSelected={selectedIds.includes(group.trades[0].id)} onSelect={() => handleSelectOne(group.trades[0].id)} onToggle={() => setDetailTradeId(group.trades[0].id)} onDelete={(id) => { onDeleteTrades([id]); }} onEdit={(tr) => onEditTrade(tr)} showCheckbox={isLinkMode} />
+                                        </div>
+                                    )
+                                ))}
+                                <p className="text-center text-[10px] font-bold tracking-widest uppercase text-zinc-600 py-3">Showing {Math.min(visibleGroupCount, groupedTrades.length)} of {groupedTrades.length} groups · {filteredTrades.length} of {trades.length} trades</p>
+                                {visibleGroupCount < groupedTrades.length && (
+                                    <button
+                                        onClick={() => setVisibleGroupCount(c => c + GROUP_PAGE_SIZE)}
+                                        className="mx-auto mb-4 h-10 px-6 rounded-xl bg-white/[0.06] text-white text-[12px] font-black tracking-wide active:scale-95 transition-all"
+                                    >
+                                        Show more ({groupedTrades.length - visibleGroupCount} left)
+                                    </button>
+                                )}
+                            </>
+                        )}
+                    </div>
+                    {/* Fixed 11-column table: hidden on phones (the cards above take
+                        over), horizontally scrolled from sm up instead of crushing
+                        every cell. */}
+                        <div className="hidden sm:flex sm:flex-col flex-1 min-h-0 overflow-x-auto custom-scrollbar">
                         <div className="min-w-[1180px] flex flex-col flex-1 min-h-0">
                         <div className={`grid grid-cols-[40px_1.4fr_1fr_0.9fr_1.1fr_1.1fr_0.9fr_1.3fr_1.4fr_1.2fr_40px] px-6 py-4 border-b text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'border-[#27272a] text-zinc-500' : 'border-slate-100 text-slate-400'}`}>
                             <div className="col-span-1 flex items-center justify-center">
@@ -1609,8 +2275,8 @@ const Journal: React.FC<JournalProps> = ({ isDarkMode, trades, onUpdateTrade, on
                                 <EmptyState
                                     isDarkMode={isDarkMode}
                                     type="trades"
-                                    title={searchTerm || dateRange ? "No Trades Match Your Filter" : "Your Journal is Empty"}
-                                    description={searchTerm || dateRange ? "Try adjusting your search or date range to find trades." : "Start logging your trades to track your trading performance and build your trading journal."}
+                                    title={searchTerm || dateRange ? "No Trades Match Your Filter" : (activePortfolioName ? `No Trades in ${activePortfolioName}` : "Your Journal is Empty")}
+                                    description={searchTerm || dateRange ? "Try adjusting your search or date range to find trades." : (activePortfolioId && activePortfolioId !== 'all' ? `This portfolio (${activePortfolioName}) doesn't have any trades yet. Log manual trades to get started.` : "Start logging your trades to track your trading performance and build your trading journal.")}
                                     action={!searchTerm && !dateRange ? {
                                         label: "Log Your First Trade",
                                         onClick: () => onViewChange('log-trade')

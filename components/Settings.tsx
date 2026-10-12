@@ -27,7 +27,8 @@ import {
   Code2,
   FileText,
 } from 'lucide-react';
-import { UserProfile, EASession } from '../types';
+import { UserProfile, EASession, Portfolio } from '../types';
+import { PortfolioSwitcher } from './PortfolioSwitcher';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
 import { Select } from './Select';
 import { normalizeThemePreference } from '../lib/theme';
@@ -77,16 +78,31 @@ interface SettingsProps {
   initialTab?: SettingsTab;
   migrationVersion?: string;
   eaSession?: EASession | null;
+  portfolios?: Portfolio[];
+  activePortfolioId?: string | null;
+  defaultPortfolioId?: string | null;
+  canAddPortfolio?: boolean;
+  tradeCounts?: Record<string, number>;
+  onSelectPortfolioId?: (id: string) => void;
+  onAddPortfolio?: (input: { name: string; description?: string; purpose?: Portfolio['purpose']; source?: Portfolio['source']; startingBalance?: number; currency?: string }) => Promise<Portfolio>;
+  onRemovePortfolio?: (id: string) => Promise<void>;
+  /** Tabs to hide entirely. The mobile shell hides account/appearance/help and
+   *  drives those surfaces from the drawer instead. */
+  hiddenTabs?: SettingsTab[];
+  /** Bumping this value saves. The mobile FAB owns Save, so it signals instead
+   *  of rendering the inline button (which .mobile-settings hides anyway). */
+  saveSignal?: number;
+  onSettingsTabChange?: (tab: SettingsTab) => void;
 }
 
-const tabs: Array<{ id: SettingsTab; label: string; icon: React.ElementType; desc: string }> = [
-  { id: 'profile', label: 'Trading Persona', icon: User, desc: 'Identity and style' },
-  { id: 'account', label: 'Account Config', icon: Briefcase, desc: 'Sync and balance' },
-  { id: 'appearance', label: 'Appearance', icon: Palette, desc: 'Theme and motion' },
-  { id: 'billing', label: 'Plan & Billing', icon: CreditCard, desc: 'Usage and plan' },
-  { id: 'security', label: 'Security', icon: Shield, desc: 'Access and session' },
-  { id: 'developer-tools', label: 'Developer Tools', icon: Code2, desc: 'API keys and integrations' },
-  { id: 'help', label: 'Help & Feedback', icon: HelpCircle, desc: 'Docs and support' },
+const tabs: Array<{ id: SettingsTab; label: string; shortLabel: string; icon: React.ElementType; desc: string }> = [
+  { id: 'profile', label: 'Trading Persona', shortLabel: 'Profile', icon: User, desc: 'Identity and style' },
+  { id: 'account', label: 'Account Config', shortLabel: 'Account', icon: Briefcase, desc: 'Sync and balance' },
+  { id: 'appearance', label: 'Appearance', shortLabel: 'Looks', icon: Palette, desc: 'Theme and motion' },
+  { id: 'billing', label: 'Plan & Billing', shortLabel: 'Billing', icon: CreditCard, desc: 'Usage and plan' },
+  { id: 'security', label: 'Security', shortLabel: 'Security', icon: Shield, desc: 'Access and session' },
+  { id: 'developer-tools', label: 'Developer Tools', shortLabel: 'Dev Tools', icon: Code2, desc: 'API keys and integrations' },
+  { id: 'help', label: 'Help & Feedback', shortLabel: 'Help', icon: HelpCircle, desc: 'Docs and support' },
 ];
 
 const profileOptions = {
@@ -123,8 +139,34 @@ const Settings: React.FC<SettingsProps> = ({
   onDeduplicate,
   initialTab = 'profile',
   eaSession,
+  portfolios = [],
+  activePortfolioId = null,
+  defaultPortfolioId = null,
+  canAddPortfolio = true,
+  tradeCounts,
+  onSelectPortfolioId,
+  onAddPortfolio,
+  onRemovePortfolio,
+  hiddenTabs = [],
+  saveSignal = 0,
+  onSettingsTabChange,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const visibleTabs = tabs.filter((t) => !hiddenTabs.includes(t.id));
+  const effectiveTab = hiddenTabs.includes(activeTab) ? (visibleTabs[0]?.id ?? 'profile') : activeTab;
+  // Mobile rail can scroll when squeezed: keep the active chip in view.
+  // Scroll ONLY the aside rail container directly so parent containers
+  // (main/window) NEVER shift horizontally.
+  const railRef = useRef<HTMLElement | null>(null);
+  const activeTabBtnRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const rail = railRef.current;
+    const btn = activeTabBtnRef.current;
+    if (rail && btn) {
+      const left = btn.offsetLeft - rail.clientWidth / 2 + btn.clientWidth / 2;
+      rail.scrollTo({ left, behavior: 'smooth' });
+    }
+  }, [effectiveTab]);
   const [formData, setFormData] = useState<UserProfile>({ ...userProfile, plan: normalizePlan(userProfile.plan) });
 
   const currentPlan = normalizePlan(formData.plan);
@@ -152,7 +194,7 @@ const Settings: React.FC<SettingsProps> = ({
 
 
   useEffect(() => {
-    setActiveTab(initialTab);
+    setActiveTab(hiddenTabs.includes(initialTab) ? (visibleTabs[0]?.id ?? 'profile') : initialTab);
   }, [initialTab]);
 
   useEffect(() => {
@@ -185,6 +227,22 @@ const Settings: React.FC<SettingsProps> = ({
       setIsSaving(false);
     }
   };
+
+  // Mobile floating save button: each saveSignal bump triggers a save
+  // (security/developer-tools tabs own their own actions, so they opt out).
+  const seenSaveSignal = useRef(saveSignal);
+  useEffect(() => {
+    if (seenSaveSignal.current === saveSignal) return;
+    seenSaveSignal.current = saveSignal;
+    if (effectiveTab === 'security' || effectiveTab === 'developer-tools') return;
+    void handleSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveSignal]);
+
+  // Mobile: report tab switches so the FAB can hide where nothing saves.
+  useEffect(() => {
+    onSettingsTabChange?.(effectiveTab);
+  }, [effectiveTab]);
 
   const handleCopyKey = async () => {
     if (!formData.syncKey) return;
@@ -239,7 +297,8 @@ const Settings: React.FC<SettingsProps> = ({
 
   const compactLabelClass = 'text-[10px] font-black uppercase tracking-[0.2em] opacity-50 block mb-1.5';
 
-  const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+
+  const currentTab = tabs.find((tab) => tab.id === effectiveTab) ?? visibleTabs[0] ?? tabs[0];
 
   const renderPlanProgress = (value: number, limit: number) => (
     <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDarkMode ? 'bg-white/[0.08]' : 'bg-slate-200'}`}>
@@ -302,18 +361,19 @@ const Settings: React.FC<SettingsProps> = ({
         </header>
 
         <div className="grid flex-1 min-h-0 gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className={`flex min-h-0 flex-col gap-2.5 rounded-[28px] border p-2.5 ${shellCard} lg:sticky lg:top-8`}>
+          <aside ref={railRef} className={`flex min-h-0 flex-col gap-2.5 rounded-[28px] border p-2.5 ${shellCard} lg:sticky lg:top-8`}>
             <div className="px-3 pb-2 pt-1">
               <p className="text-[10px] font-black uppercase tracking-[0.28em] opacity-40">Sections</p>
             </div>
 
-            {tabs.map((tab) => {
+            {visibleTabs.map((tab) => {
               const Icon = tab.icon;
-              const active = activeTab === tab.id;
+              const active = effectiveTab === tab.id;
 
               return (
                 <button
                   key={tab.id}
+                  ref={active ? activeTabBtnRef : undefined}
                   onClick={() => setActiveTab(tab.id)}
                   className={`group flex items-center gap-3 rounded-2xl px-3.5 py-3.5 text-left transition-all ${
                     active
@@ -327,7 +387,10 @@ const Settings: React.FC<SettingsProps> = ({
                     <Icon size={16} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-bold">{tab.label}</p>
+                    <p className="text-[13px] font-bold">
+                      <span className="tab-label-full">{tab.label}</span>
+                      <span className="tab-label-short">{tab.shortLabel}</span>
+                    </p>
                     <p className={`text-[10px] ${active ? 'text-white/75' : 'opacity-45'}`}>{tab.desc}</p>
                   </div>
                 </button>
@@ -366,7 +429,7 @@ const Settings: React.FC<SettingsProps> = ({
                   <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#FF4F01]">{currentTab.label}</p>
                   <h2 className="mt-1 text-xl font-black tracking-tight">{currentTab.label}</h2>
                 </div>
-                {activeTab === 'help' ? (
+                {effectiveTab === 'help' ? (
                   <a
                     href="https://t.me/+w_KvKM5HESYyMTdk"
                     target="_blank"
@@ -392,7 +455,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             </div>
 
-            {activeTab === 'profile' && (
+            {effectiveTab === 'profile' && (
               <div className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
                 <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="mb-5 flex items-center gap-3.5">
@@ -522,8 +585,24 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
-            {activeTab === 'account' && (
+            {effectiveTab === 'account' && (
               <div className="space-y-5">
+                <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                  <h3 className={`text-sm font-black uppercase tracking-widest mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Portfolios</h3>
+                  <p className={`text-xs mb-4 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Each portfolio keeps its own journal, connection and stats. Imports and new trades land in the active one.</p>
+                  <PortfolioSwitcher
+                    portfolios={portfolios}
+                    activeId={activePortfolioId}
+                    defaultId={defaultPortfolioId}
+                    canAdd={canAddPortfolio}
+                    isDarkMode={isDarkMode}
+                    variant="settings"
+                    tradeCounts={tradeCounts}
+                    onSelect={(id) => onSelectPortfolioId?.(id)}
+                    onAdd={onAddPortfolio || (async () => { throw new Error('Portfolios unavailable right now.'); })}
+                    onRemove={onRemovePortfolio || (async () => { throw new Error('Portfolios unavailable right now.'); })}
+                  />
+                </section>
                 <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
@@ -743,7 +822,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
-            {activeTab === 'appearance' && (
+            {effectiveTab === 'appearance' && (
               <div className="space-y-4">
                 <section className={`rounded-3xl border p-4 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="flex items-start justify-between gap-4">
@@ -839,7 +918,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
-            {activeTab === 'billing' && (
+            {effectiveTab === 'billing' && (
               <div className="space-y-4">
                 <section className="rounded-3xl border border-[#FF4F01]/25 bg-[#FF4F01]/6 p-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -959,7 +1038,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
-            {activeTab === 'security' && (
+            {effectiveTab === 'security' && (
               <div className="space-y-5">
                 <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -995,13 +1074,13 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
-            {activeTab === 'developer-tools' && (
+            {effectiveTab === 'developer-tools' && (
               <div className="settings-developer-tools space-y-5">
                 <ApiKeysPanel isDarkMode={isDarkMode} />
               </div>
             )}
 
-            {activeTab === 'help' && (
+            {effectiveTab === 'help' && (
               <div className="space-y-4">
                 <section className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                   {supportLinks.map((item) => {
@@ -1207,6 +1286,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
+            {effectiveTab !== 'security' && effectiveTab !== 'developer-tools' && (
             <div className={`mt-6 flex flex-col gap-4 border-t pt-5 md:flex-row md:items-center md:justify-between ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}>
               <div className="min-h-[24px]">
                 {saveMessage && (
@@ -1219,12 +1299,13 @@ const Settings: React.FC<SettingsProps> = ({
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-5 py-3 text-sm font-black text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+                className="settings-save-btn inline-flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-5 py-3 text-sm font-black text-white transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSaving ? 'Saving...' : 'Save Settings'}
                 <Save size={15} />
               </button>
             </div>
+            )}
             </div>
           </main>
         </div>

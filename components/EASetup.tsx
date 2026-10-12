@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
     Download, Copy, Check, Info, AlertCircle,
     Terminal, Shield, Cpu, ArrowRight, Loader2,
@@ -8,9 +8,9 @@ import {
     TrendingUp, TrendingDown, DollarSign, BarChart3,
     RefreshCw, Trash2, Edit3, Eye, EyeOff, LogOut, Monitor, Layers
 } from 'lucide-react';
-import { dataService } from '../services/dataService';
+import { dataService, isTradeInPortfolio } from '../services/dataService';
 import { supabase } from '../lib/supabase';
-import { UserProfile, Trade, EASession, EADeal, EAPosition } from '../types';
+import { UserProfile, Trade, EASession, EADeal, EAPosition, Portfolio } from '../types';
 import OpenPositions from './OpenPositions';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useConnectionMode } from '../hooks/useConnectionMode';
@@ -19,6 +19,7 @@ import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
 import { parseMTTradeCSV } from '../lib/trade-import';
 import { hasActiveSession as hasCtraderSession } from '../services/ctraderService';
+import { persistentGetSync, persistentSet } from '../lib/persistentStore';
 
 interface BridgeProps {
     isDarkMode: boolean;
@@ -30,15 +31,38 @@ interface BridgeProps {
     onEditTrade?: (trade: Trade) => void;
     onAddOffline?: (trade: Trade) => void;
     onImportTrades?: (trades: Trade[]) => Promise<void>;
+    /** Bulk state sync: called ONCE per import with all saved rows (avoids N re-renders). */
+    onTradesAddedBatch?: (trades: Trade[]) => void;
+    /** Bulk state sync after bulk delete (single filter + overlay cleanup in App). */
+    onTradesDeletedBatch?: (tradeIds: string[]) => void;
     trades: Trade[];
     userId: string;
     onNavigateToJournal?: () => void;
+    /** When a non-manual portfolio was just created, link it in-place. */
+    linkPortfolio?: Portfolio | null;
+    onLinkAccount?: (portfolioId: string, account: { provider: string; externalAccountId?: string }) => Promise<void> | void;
+    linkCollisionCheck?: (provider: string, externalAccountId: string, excludeId?: string) => Portfolio | null;
+    onDoneLink?: () => void;
+    /** Active/default portfolio ids so broker imports land in the visible portfolio. */
+    activePortfolioId?: string | null;
+    defaultPortfolioId?: string | null;
+    activePortfolioName?: string;
 }
 
-const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, isDemoMode = false, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, trades, userId, onNavigateToJournal }) => {
+const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, isDemoMode = false, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, onTradesAddedBatch, onTradesDeletedBatch, trades, userId, onNavigateToJournal, linkPortfolio, onLinkAccount, linkCollisionCheck, onDoneLink, activePortfolioId, defaultPortfolioId, activePortfolioName }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
     const { connectionMode, updateConnectionMode } = useConnectionMode(userId, userProfile);
+
+    // Auto-open the right connector when we arrived from "New portfolio → Create"
+    // so users never sit on an unlinked portfolio wondering what to do next.
+    const linkSource = linkPortfolio?.source;
+    useEffect(() => {
+        if (!linkPortfolio || isDemoMode) return;
+        if (linkSource === 'ctrader' && connectionMode !== 'ctrader') updateConnectionMode('ctrader');
+        if (linkSource === 'bridge' && connectionMode !== 'bridge') updateConnectionMode('bridge');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [linkPortfolio?.id, linkSource]);
 
     // In demo mode there is nothing to connect — always show the method
     // choice (with Desktop Bridge hidden) and never resume a saved bridge.
@@ -114,6 +138,15 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             onAddOffline={onAddOffline}
             trades={trades}
             onNavigateToJournal={onNavigateToJournal}
+            linkPortfolio={linkPortfolio}
+            onLinkAccount={onLinkAccount}
+            linkCollisionCheck={linkCollisionCheck}
+            onDoneLink={onDoneLink}
+            activePortfolioId={activePortfolioId}
+            defaultPortfolioId={defaultPortfolioId}
+            activePortfolioName={activePortfolioName || linkPortfolio?.name}
+            onTradesAddedBatch={onTradesAddedBatch}
+            onTradesDeletedBatch={onTradesDeletedBatch}
         />;
     }
 
@@ -141,6 +174,9 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
                 onAddOffline={onAddOffline}
                 trades={trades}
                 userId={userId}
+                linkPortfolioId={linkPortfolio?.id}
+                activePortfolioId={activePortfolioId}
+                defaultPortfolioId={defaultPortfolioId}
             />
         );
     }
@@ -238,6 +274,42 @@ const BrokerLogo: React.FC<{ broker: typeof CTRADER_BROKERS[number] }> = ({ brok
             loading="lazy"
             className="w-full h-full object-contain"
             onError={() => setFailed(true)}
+        />
+    );
+};
+
+const normalizeBrokerKey = (s: string | null | undefined): string =>
+    (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Logo path for a connected broker name (e.g. "Fusion Markets" → its brand mark). Null when unknown. */
+const findBrokerLogo = (brokerName: string | null | undefined): string | null => {
+    const needle = normalizeBrokerKey(brokerName);
+    if (!needle) return null;
+    const exact = CTRADER_BROKERS.find(b => normalizeBrokerKey(b.name) === needle);
+    if (exact) return exact.logo;
+    const partial = CTRADER_BROKERS.find(b => {
+        const key = normalizeBrokerKey(b.name);
+        return key.length >= 4 && (needle.includes(key) || key.includes(needle));
+    });
+    return partial ? partial.logo : null;
+};
+
+/** Account-card logo: connected broker's brand mark, cTrader mark as fallback. */
+const AccountBrokerLogo: React.FC<{ brokerName: string | null | undefined }> = ({ brokerName }) => {
+    const logo = findBrokerLogo(brokerName);
+    const [src, setSrc] = useState(logo || '/icon3.jpeg');
+    useEffect(() => { setSrc(logo || '/icon3.jpeg'); }, [logo]);
+    const label = (brokerName || 'cTrader').slice(0, 2).toUpperCase();
+    if (src === 'initials') {
+        return <span className="w-9 h-9 flex items-center justify-center text-[11px] font-black text-[#FF4F00]">{label}</span>;
+    }
+    return (
+        <img
+            src={src}
+            alt={brokerName || 'Broker'}
+            loading="lazy"
+            className="w-9 h-9 object-contain rounded-md bg-white"
+            onError={() => setSrc(prev => (prev === '/icon3.jpeg' ? 'initials' : '/icon3.jpeg'))}
         />
     );
 };
@@ -555,9 +627,13 @@ interface BridgeMonitorProps {
     onAddOffline?: (trade: Trade) => void;
     trades: Trade[];
     userId: string;
+    /** Active/default portfolio ids so broker imports land in the visible portfolio. */
+    linkPortfolioId?: string | null;
+    activePortfolioId?: string | null;
+    defaultPortfolioId?: string | null;
 }
 
-const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, liveData, lastHeartbeat, isHeartbeat, syncKey, syncLog, onDisconnect, onTradeAdded, onEditTrade, onAddOffline, trades, userId }) => {
+const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, liveData, lastHeartbeat, isHeartbeat, syncKey, syncLog, onDisconnect, onTradeAdded, onEditTrade, onAddOffline, trades, userId, linkPortfolioId, activePortfolioId, defaultPortfolioId }) => {
     const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
     const [autoLog, setAutoLog] = useLocalStorage('bridge_auto_log', false);
     const [now, setNow] = useState(new Date());
@@ -756,9 +832,12 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
             const sast = getSASTDateTime(tradeDate);
             const sastEntry = getSASTDateTime(entryDate);
 
+            const targetPortfolioId = linkPortfolioId || activePortfolioId || defaultPortfolioId || undefined;
+
             const newTrade = normalizeTrade({
                 id: '', // Generated by DB
                 ticketId: String(mt5Trade.ticket),
+                portfolio_id: targetPortfolioId,
                 pair: mt5Trade.symbol,
                 assetType: 'Forex',
                 date: sast.date,
@@ -789,6 +868,9 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
 
             try {
                 const saved = await dataService.addTrade(newTrade);
+                if (targetPortfolioId && !(saved as Trade).portfolio_id) {
+                    (saved as Trade).portfolio_id = targetPortfolioId;
+                }
                 // Notify global state
                 if (onTradeAdded) {
                     onTradeAdded(saved);
@@ -796,7 +878,7 @@ const BridgeMonitor: React.FC<BridgeMonitorProps> = ({ isDarkMode, userProfile, 
             } catch (syncError) {
                 console.warn("Sync failed, queuing offline:", syncError);
                 if (onAddOffline) {
-                    onAddOffline(newTrade);
+                    onAddOffline({ ...newTrade, portfolio_id: targetPortfolioId });
                 }
             }
         } catch (error) {
@@ -1454,11 +1536,24 @@ interface CtraderConnectProps {
     userId?: string;
     onTradeAdded?: (trade: Trade) => void;
     onAddOffline?: (trade: Trade) => void;
+    /** Bulk state sync: called ONCE per import with all saved rows (avoids N re-renders). */
+    onTradesAddedBatch?: (trades: Trade[]) => void;
+    /** Bulk state sync after bulk delete (single filter + overlay cleanup in App). */
+    onTradesDeletedBatch?: (tradeIds: string[]) => void;
     trades?: Trade[];
     onNavigateToJournal?: () => void;
+    linkPortfolio?: Portfolio | null;
+    onLinkAccount?: (portfolioId: string, account: { provider: string; externalAccountId?: string }) => Promise<void> | void;
+    linkCollisionCheck?: (provider: string, externalAccountId: string, excludeId?: string) => Portfolio | null;
+    onDoneLink?: () => void;
+    activePortfolioId?: string | null;
+    defaultPortfolioId?: string | null;
+    activePortfolioName?: string;
 }
 
-const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, userProfile, userId, onTradeAdded, onAddOffline, trades, onNavigateToJournal }) => {
+const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, userProfile, userId, onTradeAdded, onAddOffline, onTradesAddedBatch, onTradesDeletedBatch, trades, onNavigateToJournal, linkPortfolio, onLinkAccount, linkCollisionCheck, onDoneLink, activePortfolioId, defaultPortfolioId, activePortfolioName }) => {
+    const [linkMsg, setLinkMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [isLinking, setIsLinking] = useState(false);
     // Start from the persisted session flag so switching views (or reloading)
     // lands straight back on the authenticated terminal instead of flashing
     // the "Connect" button. Only an explicit disconnect resets this to idle.
@@ -1500,6 +1595,90 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     // Tab state
     const [activeTab, setActiveTab] = useState<'overview' | 'positions' | 'history' | 'market' | 'logs'>('overview');
 
+    // --- Guided first-import (empty journal) + auto-sync new closes ---
+    const [showImportPrompt, setShowImportPrompt] = useState(false);
+    const [importRange, setImportRange] = useState<'30d' | 'all'>('30d');
+    const [bannerDismissals, setBannerDismissals] = useState<Record<string, boolean>>({});
+    const [autoSync, setAutoSync] = useState<boolean>(() => {
+        try { return localStorage.getItem('jfx_ctrader_autosync') !== 'off'; } catch { return true; }
+    });
+    const promptShownForRef = useRef<number | null>(null);
+    const guidedCancelRef = useRef(false);
+    const knownDealIdsRef = useRef<Set<number>>(new Set());
+    const knownSeededForRef = useRef<number | null>(null);
+    const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000;
+    const targetPortfolioId = activePortfolioId || linkPortfolio?.id || defaultPortfolioId || undefined;
+
+    // Dual-write (sync mirror + durable native copy) so import bookkeeping
+    // survives APK restarts that clear the WebView's localStorage.
+    // Keys are scoped to both the account ID and target portfolio so importing
+    // deals into a new portfolio is never blocked by deals in an older portfolio.
+    const ctraderStoreGet = (k: string): string | null => { try { return persistentGetSync(k); } catch { return null; } };
+    const ctraderStoreSet = (k: string, v: string) => { try { persistentSet(k, v); } catch { /* blocked */ } };
+    const scopeKey = (ctid: number | string) => `${ctid}_${targetPortfolioId || 'default'}`;
+    const importedKey = (ctid: number | string) => `jfx_ctrader_imported_${scopeKey(ctid)}`;
+    const dismissedKey = (ctid: number | string) => `jfx_ctrader_import_dismissed_${scopeKey(ctid)}`;
+    const savedDealsKey = (ctid: number | string) => `jfx_ctrader_saved_deals_${scopeKey(ctid)}`;
+    const pendingDealsKey = (ctid: number | string) => `jfx_ctrader_pending_deals_${scopeKey(ctid)}`;
+
+    const getPersistedImportedDealIds = (accountId: number | string): Set<number> => {
+        try {
+            const raw = ctraderStoreGet(savedDealsKey(accountId));
+            if (!raw) return new Set();
+            const parsed = JSON.parse(raw);
+            return new Set(Array.isArray(parsed) ? parsed.map(Number) : []);
+        } catch {
+            return new Set();
+        }
+    };
+
+    const persistImportedDealIds = (accountId: number | string, dealIds: (number | string)[]) => {
+        try {
+            const existing = getPersistedImportedDealIds(accountId);
+            dealIds.forEach(id => existing.add(Number(id)));
+            const capped = Array.from(existing).slice(-5000);
+            ctraderStoreSet(savedDealsKey(accountId), JSON.stringify(capped));
+        } catch { /* ignore */ }
+    };
+
+    // Deals that FAILED to persist (offline / throw mid-chunk). Stashed
+    // durably so the next session offers a one-tap retry instead of
+    // silently losing them.
+    const getPendingDeals = (accountId: number | string): any[] => {
+        try {
+            const raw = ctraderStoreGet(pendingDealsKey(accountId));
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    };
+    const stashPendingDeals = (accountId: number | string, deals: any[]) => {
+        try {
+            const existing = getPendingDeals(accountId);
+            const seen = new Set(existing.map(d => String(d?.dealId)));
+            for (const d of deals) {
+                if (d && !seen.has(String(d.dealId))) {
+                    seen.add(String(d.dealId));
+                    existing.push(d);
+                }
+            }
+            ctraderStoreSet(pendingDealsKey(accountId), JSON.stringify(existing.slice(-500)));
+        } catch { /* ignore */ }
+    };
+    const clearPendingDeals = (accountId: number | string, dealIds: (number | string)[]) => {
+        try {
+            const done = new Set(dealIds.map(String));
+            const rest = getPendingDeals(accountId).filter(d => !done.has(String(d?.dealId)));
+            ctraderStoreSet(pendingDealsKey(accountId), JSON.stringify(rest));
+        } catch { /* ignore */ }
+    };
+
+    // Set when user taps "All accounts" — stops the single-account
+    // auto-select below from instantly bouncing them back into details.
+    const manualBackToListRef = useRef(false);
+
     // Trading inputs
     const [tradingSymbolId, setTradingSymbolId] = useState<string>('');
     const [tradingSide, setTradingSide] = useState<'buy' | 'sell'>('buy');
@@ -1528,6 +1707,16 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
     const [bulkResult, setBulkResult] = useState<string | null>(null);
 
+    // Sync persisted deal IDs whenever selected account or target portfolio changes
+    useEffect(() => {
+        if (selectedAccountId != null) {
+            const persisted = getPersistedImportedDealIds(selectedAccountId);
+            setSavedDealIds(persisted);
+        } else {
+            setSavedDealIds(new Set());
+        }
+    }, [selectedAccountId, targetPortfolioId]);
+
     const getSymbolName = (d: any) => {
         if (d.symbol && isNaN(Number(d.symbol))) {
             return d.symbol;
@@ -1542,8 +1731,22 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         return d.symbol || 'EURUSD';
     };
 
-    const isDealInJournal = (deal: any) =>
-        trades?.some(t => String(t.ticketId) === String(deal.dealId)) || savedDealIds.has(deal.dealId);
+    const isDealInJournal = useCallback((deal: any): boolean => {
+        if (!deal) return false;
+        const dealIdNum = Number(deal.dealId);
+        const dealIdStr = String(deal.dealId || '').trim();
+        if (savedDealIds.has(dealIdNum)) return true;
+        if (selectedAccountId != null && getPersistedImportedDealIds(selectedAccountId).has(dealIdNum)) return true;
+        if (trades && trades.length > 0) {
+            return trades.some(t => {
+                const matchesTicket = (t.ticketId && String(t.ticketId).trim() === dealIdStr) ||
+                                      (t.notes && t.notes.includes(`Deal #${dealIdStr}`));
+                if (!matchesTicket) return false;
+                return isTradeInPortfolio(t.portfolio_id, targetPortfolioId, defaultPortfolioId);
+            });
+        }
+        return false;
+    }, [savedDealIds, selectedAccountId, trades, targetPortfolioId, defaultPortfolioId]);
 
     const buildDealTrade = (deal: any): Trade => {
         const pairName = getSymbolName(deal);
@@ -1556,6 +1759,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         return normalizeTrade({
             id: '',
             ticketId: String(deal.dealId || deal.orderId || Date.now()),
+            portfolio_id: targetPortfolioId,
             pair: pairName,
             assetType: 'Forex',
             date: sastClose.date,
@@ -1581,14 +1785,160 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     };
 
     const persistDealTrade = async (newTrade: Trade) => {
-        const saved = await dataService.addTrade(newTrade);
+        const stamped: Trade = targetPortfolioId && !(newTrade as Trade).portfolio_id
+            ? { ...newTrade, portfolio_id: targetPortfolioId }
+            : newTrade;
+        const saved = await dataService.addTrade(stamped);
+        // dataService preserves portfolio_id on the return, but re-attach as a
+        // safety net so the row lands in the visible (active) portfolio.
+        if (targetPortfolioId && !(saved as Trade).portfolio_id) {
+            (saved as Trade).portfolio_id = targetPortfolioId;
+        }
         if (onTradeAdded) {
             onTradeAdded(saved);
         }
+        return saved;
     };
 
-    const markDealSaved = (dealId: number) => {
-        setSavedDealIds(prev => new Set(prev).add(dealId));
+    const markDealSaved = (dealId: number | string) => {
+        const num = Number(dealId);
+        setSavedDealIds(prev => new Set(prev).add(num));
+        if (selectedAccountId != null) {
+            persistImportedDealIds(selectedAccountId, [num]);
+        }
+    };
+
+    // --- Shared bulk import engine -------------------------------------------
+    // One batchAddTrades call per ≤200 chunk (1 SELECT + 1 INSERT per chunk
+    // instead of 2+ round trips per deal), ONE parent state sync at the end
+    // (instead of N re-renders), per-deal fallback only for failed chunks.
+    const bulkInFlightRef = useRef(false);
+    const bulkMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const flashBulkResult = (msg: string | null, ms = 5000) => {
+        if (bulkMsgTimerRef.current) {
+            clearTimeout(bulkMsgTimerRef.current);
+            bulkMsgTimerRef.current = null;
+        }
+        setBulkResult(msg);
+        if (msg != null) {
+            bulkMsgTimerRef.current = setTimeout(() => setBulkResult(null), ms);
+        }
+    };
+
+    const importDealBatch = async (
+        pending: any[],
+        opts?: { isCancelled?: () => boolean },
+    ): Promise<{ added: number; skipped: number; failed: number; firstError: string | null }> => {
+        let added = 0;
+        let skipped = 0;
+        let failed = 0;
+        let firstError: string | null = null;
+        let done = 0;
+        const savedAll: Trade[] = [];
+        const okDealIds: number[] = [];
+        // chunks are only progress granularity — one parent sync at the end
+        const CHUNK = 200;
+        for (let i = 0; i < pending.length; i += CHUNK) {
+            if (opts?.isCancelled?.()) break;
+            const chunk = pending.slice(i, i + CHUNK);
+            try {
+                const built = chunk.map(d => {
+                    const t = buildDealTrade(d);
+                    return targetPortfolioId && !(t as Trade).portfolio_id
+                        ? { ...t, portfolio_id: targetPortfolioId }
+                        : t;
+                });
+                const result = await dataService.batchAddTrades(built as Trade[]);
+                // Web batchAddTrades resolves to the saved rows only — it
+                // filters pre-existing tickets before insert, so anything it did
+                // not confirm was already in the journal (counted as skipped).
+                const confirmed: Trade[] = Array.isArray(result) ? result : [];
+                const confirmedTickets = new Set<string>();
+                for (const s of confirmed) {
+                    const ticket = String((s as Trade).ticketId || '').trim();
+                    if (ticket) confirmedTickets.add(ticket);
+                    savedAll.push(targetPortfolioId && !(s as Trade).portfolio_id
+                        ? { ...s, portfolio_id: targetPortfolioId }
+                        : s);
+                    added++;
+                }
+                skipped += Math.max(0, chunk.length - confirmed.length);
+                for (const d of chunk) {
+                    if (confirmedTickets.has(String(d.dealId).trim())) {
+                        const num = Number(d.dealId);
+                        if (Number.isFinite(num)) okDealIds.push(num);
+                    }
+                }
+            } catch (err) {
+                // Total chunk failure (offline, auth, RLS…): every deal in
+                // this chunk failed — stash all for retry, say so loudly.
+                console.error('Deal import chunk failed:', err);
+                failed += chunk.length;
+                if (!firstError) firstError = String((err as any)?.message || err || 'unknown error').slice(0, 220);
+                if (selectedAccountId != null) {
+                    stashPendingDeals(selectedAccountId, chunk);
+                }
+            }
+            done += chunk.length;
+            setBulkProgress({ done, total: pending.length });
+        }
+        // Tail is exception-safe: a bookkeeping throw must never surface as
+        // "spinner stopped, nothing happened".
+        try {
+            if (okDealIds.length > 0) {
+                setSavedDealIds(prev => {
+                    const next = new Set(prev);
+                    okDealIds.forEach(id => next.add(id));
+                    return next;
+                });
+                if (selectedAccountId != null) {
+                    persistImportedDealIds(selectedAccountId, okDealIds);
+                    clearPendingDeals(selectedAccountId, okDealIds);
+                }
+            }
+            // Single parent sync for the whole import — not one re-render per row.
+            if (savedAll.length > 0) {
+                if (onTradesAddedBatch) onTradesAddedBatch(savedAll);
+                else if (onTradeAdded) savedAll.forEach(s => onTradeAdded(s));
+            }
+        } catch (tailErr) {
+            console.error('Deal import bookkeeping failed:', tailErr);
+            if (!firstError) firstError = `Saved ${added}, but the journal view may need a refresh.`;
+        }
+        return { added, skipped, failed, firstError };
+    };
+
+    // Trade rows already in the journal that came from this account's deals.
+    const importedTradeIds = useMemo(() => {
+        const tickets = new Set(
+            accountDeals.map(d => String(d?.dealId ?? '').trim()).filter(Boolean)
+        );
+        if (tickets.size === 0) return [];
+        return (trades || [])
+            .filter(t => t.ticketId && tickets.has(String(t.ticketId).trim()))
+            .map(t => t.id);
+    }, [accountDeals, trades]);
+
+    const handleRemoveImportedDeals = async () => {
+        if (isBulkAdding || bulkInFlightRef.current) return;
+        if (importedTradeIds.length === 0) {
+            flashBulkResult('No imported trades to remove.');
+            return;
+        }
+        if (typeof window !== 'undefined' && !window.confirm(
+            `Remove ${importedTradeIds.length} imported trade${importedTradeIds.length === 1 ? '' : 's'} from your journal? They move to trash and can be restored within 30 days.`
+        )) return;
+        bulkInFlightRef.current = true;
+        try {
+            await dataService.deleteTrades(importedTradeIds);
+            if (onTradesDeletedBatch) onTradesDeletedBatch(importedTradeIds);
+            flashBulkResult(`Removed ${importedTradeIds.length} imported trade${importedTradeIds.length === 1 ? '' : 's'}.`);
+        } catch (err) {
+            console.error('Failed to remove imported trades:', err);
+            flashBulkResult('Failed to remove imported trades. Please try again.');
+        } finally {
+            bulkInFlightRef.current = false;
+        }
     };
 
     const handleAddDealToJournal = async (deal: any) => {
@@ -1598,40 +1948,270 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             markDealSaved(deal.dealId);
         } catch (err) {
             console.error('Failed to add deal to journal:', err);
+            // Stash durably so a retry is one tap away (see retry banner).
+            if (selectedAccountId != null && deal) {
+                stashPendingDeals(selectedAccountId, [deal]);
+            }
+            flashBulkResult(`Failed to add deal #${deal?.dealId}: ${(err as any)?.message || 'unknown error'}`, 6000);
         } finally {
             setSavingDealId(null);
         }
     };
 
     const handleAddAllDealsToJournal = async () => {
+        if (isBulkAdding || bulkInFlightRef.current) {
+            flashBulkResult('An import is already running — please wait for it to finish.', 4000);
+            return;
+        }
+        if (accountDeals.length === 0) {
+            flashBulkResult('No closed deals found on this cTrader account yet.', 4000);
+            return;
+        }
         const pendingDeals = accountDeals.filter(d => !isDealInJournal(d));
-        if (pendingDeals.length === 0 || isBulkAdding) return;
+        if (pendingDeals.length === 0) {
+            flashBulkResult(`All ${accountDeals.length} trade${accountDeals.length === 1 ? '' : 's'} already in journal — nothing to import.`, 5000);
+            return;
+        }
+        bulkInFlightRef.current = true;
         setIsBulkAdding(true);
         setBulkProgress({ done: 0, total: pendingDeals.length });
         setBulkResult(null);
-        let added = 0;
-        let failed = 0;
-        for (const deal of pendingDeals) {
-            try {
-                await persistDealTrade(buildDealTrade(deal));
-                markDealSaved(deal.dealId);
-                added++;
-            } catch (err) {
-                console.error('Failed to add deal to journal:', deal.dealId, err);
-                failed++;
+        try {
+            const { added, skipped, failed, firstError } = await importDealBatch(pendingDeals);
+            const dest = activePortfolioName || linkPortfolio?.name || 'portfolio';
+            if (failed === 0) {
+                if (selectedAccountId != null) {
+                    ctraderStoreSet(importedKey(selectedAccountId), '1');
+                }
+                if (added === 0) {
+                    flashBulkResult(`Nothing new — all ${pendingDeals.length} already in journal.`, 5000);
+                } else {
+                    flashBulkResult(
+                        skipped > 0
+                            ? `Imported ${added} into ${dest} (${skipped} already in journal)`
+                            : `Imported ${added} trade${added === 1 ? '' : 's'} into ${dest}`,
+                        5000
+                    );
+                    if (onNavigateToJournal) {
+                        setTimeout(() => {
+                            setBulkResult(null);
+                            onNavigateToJournal();
+                        }, 800);
+                        return;
+                    }
+                }
+            } else {
+                // NEVER navigate if there are failed trades!
+                flashBulkResult(
+                    `Imported ${added} (${failed} failed, ${skipped} already in journal).${firstError ? ` First error: ${firstError}` : ' Please retry remaining deals.'}`,
+                    8000
+                );
             }
-            setBulkProgress(prev => ({ ...prev, done: prev.done + 1 }));
+        } catch (err) {
+            console.error('Add-all import failed:', err);
+            flashBulkResult(`Import failed: ${String((err as any)?.message || err || 'unknown error').slice(0, 160)}`, 8000);
+        } finally {
+            bulkInFlightRef.current = false;
+            setIsBulkAdding(false);
         }
-        setIsBulkAdding(false);
-        if (added > 0 && onNavigateToJournal) {
-            onNavigateToJournal();
-            return;
-        }
-        setBulkResult(failed > 0 ? `Added ${added}, ${failed} failed` : `Added ${added} trade${added === 1 ? '' : 's'}`);
-        setTimeout(() => setBulkResult(null), 4000);
     };
 
     const pendingDealsCount = accountDeals.filter(d => !isDealInJournal(d)).length;
+
+    // Deals that failed to persist in a previous session (stashed durably).
+    // Offered as a one-tap retry so an APK kill mid-import never loses them.
+    const stashedPendingDeals = useMemo(() => {
+        if (selectedAccountId == null) return [];
+        const stashed = getPendingDeals(selectedAccountId);
+        return stashed.filter(d => d && !isDealInJournal(d));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedAccountId, accountDeals, savedDealIds, trades]);
+
+    const handleRetryStashedDeals = async () => {
+        if (isBulkAdding || bulkInFlightRef.current) {
+            flashBulkResult('An import is already running — please wait for it to finish.', 4000);
+            return;
+        }
+        if (stashedPendingDeals.length === 0) return;
+        bulkInFlightRef.current = true;
+        setIsBulkAdding(true);
+        setBulkProgress({ done: 0, total: stashedPendingDeals.length });
+        setBulkResult(null);
+        try {
+            const { added, skipped, failed, firstError } = await importDealBatch(stashedPendingDeals);
+            if (failed === 0) {
+                flashBulkResult(`Retried ${stashedPendingDeals.length} deal${stashedPendingDeals.length === 1 ? '' : 's'} — ${added} added${skipped > 0 ? `, ${skipped} already in journal` : ''}.`, 5000);
+            } else {
+                flashBulkResult(`Retry: ${added} added, ${failed} still failing.${firstError ? ` First error: ${firstError}` : ' Check connection and retry.'}`, 8000);
+            }
+        } catch (err) {
+            console.error('Stashed retry failed:', err);
+            flashBulkResult(`Retry failed: ${String((err as any)?.message || err || 'unknown error').slice(0, 160)}`, 8000);
+        } finally {
+            bulkInFlightRef.current = false;
+            setIsBulkAdding(false);
+        }
+    };
+
+    // --- Guided import helpers (30d default, batch, cancellable) ---
+    const dealCloseMs = (d: any): number => {
+        if (!d?.closeTimestamp) return 0;
+        const t = Date.parse(d.closeTimestamp);
+        return Number.isFinite(t) ? t : 0;
+    };
+    const dealsInLast30d = useMemo(
+        () => accountDeals.filter(d => dealCloseMs(d) >= Date.now() - THIRTY_DAYS_MS),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [accountDeals]
+    );
+    const fmtShortDate = (ms: number) => {
+        if (!ms) return '';
+        try { return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); } catch { return ''; }
+    };
+    const rangeBoundsLabel = (deals: any[]): string => {
+        if (deals.length === 0) return '';
+        let min = Infinity, max = 0;
+        for (const d of deals) {
+            const t = dealCloseMs(d);
+            if (!t) continue;
+            if (t < min) min = t;
+            if (t > max) max = t;
+        }
+        if (!Number.isFinite(min) || max === 0) return '';
+        return `${fmtShortDate(min)} → ${fmtShortDate(max)}`;
+    };
+    const destPortfolioName = activePortfolioName || linkPortfolio?.name || 'portfolio';
+
+    const handleGuidedImport = async (range: '30d' | 'all', opts?: { navigate?: boolean }) => {
+        if (isBulkAdding || bulkInFlightRef.current) {
+            flashBulkResult('An import is already running — please wait for it to finish.', 4000);
+            return;
+        }
+        const candidates = range === '30d' ? dealsInLast30d : accountDeals;
+        if (candidates.length === 0) {
+            flashBulkResult('No closed deals found in that range yet.', 4000);
+            return;
+        }
+        if (symbolsList.length === 0 && selectedAccountId != null) {
+            try {
+                const { getSymbolsList } = await import('../services/ctraderService');
+                const fetched = await getSymbolsList(selectedAccountId, selectedAccount?.isDemo).catch(() => []);
+                if (fetched && fetched.length > 0) setSymbolsList(fetched);
+            } catch { /* ignore */ }
+        }
+        const pending = candidates.filter(d => !isDealInJournal(d));
+        if (pending.length === 0) {
+            if (selectedAccountId != null) ctraderStoreSet(importedKey(selectedAccountId), '1');
+            setShowImportPrompt(false);
+            flashBulkResult(`All ${candidates.length} closed deal${candidates.length === 1 ? '' : 's'} already in journal — nothing to import.`, 5000);
+            return;
+        }
+        guidedCancelRef.current = false;
+        bulkInFlightRef.current = true;
+        setIsBulkAdding(true);
+        setBulkProgress({ done: 0, total: pending.length });
+        setBulkResult(null);
+        let added = 0;
+        let failed = 0;
+        let done = 0;
+        let firstError: string | null = null;
+        try {
+            const result = await importDealBatch(pending, { isCancelled: () => guidedCancelRef.current });
+            added = result.added;
+            failed = result.failed;
+            firstError = result.firstError;
+            done = result.added + result.skipped + result.failed;
+        } catch (err) {
+            console.error('Guided import failed:', err);
+            failed = pending.length - added;
+            firstError = String((err as any)?.message || err || 'unknown error').slice(0, 220);
+        } finally {
+            bulkInFlightRef.current = false;
+            setIsBulkAdding(false);
+        }
+        const cancelled = guidedCancelRef.current;
+        const allSucceeded = !cancelled && failed === 0 && done >= pending.length;
+
+        if (allSucceeded && selectedAccountId != null) {
+            ctraderStoreSet(importedKey(selectedAccountId), '1');
+            setShowImportPrompt(false);
+        }
+
+        if (cancelled) {
+            flashBulkResult(`Import paused — ${added} closed deal${added === 1 ? '' : 's'} added (${pending.length - done} remaining).`, 5000);
+        } else if (failed > 0) {
+            // NEVER navigate if there are failed deals! Keep user on import card to retry!
+            flashBulkResult(`Imported ${added} closed deal${added === 1 ? '' : 's'} (${failed} failed).${firstError ? ` First error: ${firstError}` : ' Please retry the remaining deals.'}`, 8000);
+        } else if (allSucceeded) {
+            if (added === 0) {
+                flashBulkResult(`Nothing new — all ${pending.length} already in journal.`, 5000);
+            } else {
+                flashBulkResult(`✓ Successfully imported all ${added} closed deal${added === 1 ? '' : 's'} into ${destPortfolioName}!`, 5000);
+                if (opts?.navigate !== false && onNavigateToJournal) {
+                    setTimeout(() => {
+                        setBulkResult(null);
+                        onNavigateToJournal();
+                    }, 800);
+                    return;
+                }
+            }
+        } else {
+            flashBulkResult(`All closed deals already in journal.`, 5000);
+            setShowImportPrompt(false);
+        }
+    };
+
+    // Show guided prompt when there are unimported closed deals on this account
+    useEffect(() => {
+        if (authState !== 'connected' || selectedAccountId == null || isLoadingDetails || !!detailsError) return;
+        if (accountDeals.length === 0) return;
+        const ctid = selectedAccountId;
+        if (promptShownForRef.current === ctid) return;
+        const unimported = accountDeals.filter(d => !isDealInJournal(d));
+        if (unimported.length === 0) return;
+        promptShownForRef.current = ctid;
+        setImportRange(dealsInLast30d.length > 0 ? '30d' : 'all');
+        setShowImportPrompt(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authState, selectedAccountId, isLoadingDetails, detailsError, accountDeals, trades]);
+
+    // Auto-sync: append only brand-new closes (never backfill).
+    useEffect(() => {
+        if (!autoSync || selectedAccountId == null || isLoadingDetails || !!detailsError) return;
+        if (isBulkAdding) return;
+        if (accountDeals.length === 0) return;
+        const ctid = selectedAccountId;
+        if (knownSeededForRef.current !== ctid) {
+            knownSeededForRef.current = ctid;
+            knownDealIdsRef.current = new Set(accountDeals.map(d => Number(d.dealId)));
+            return;
+        }
+        const known = knownDealIdsRef.current;
+        const fresh = accountDeals.filter(d => !known.has(Number(d.dealId)) && !isDealInJournal(d));
+        accountDeals.forEach(d => known.add(Number(d.dealId)));
+        if (fresh.length === 0) return;
+        // Only closes from the last 24h — older unseen rows are backfill,
+        // left for the guided import / History tab on purpose.
+        const cutoff = Date.now() - 24 * 3600 * 1000;
+        const recent = fresh.filter(d => dealCloseMs(d) >= cutoff).slice(0, 10);
+        if (recent.length === 0) return;
+        (async () => {
+            let added = 0;
+            for (const deal of recent) {
+                try {
+                    await persistDealTrade(buildDealTrade(deal));
+                    markDealSaved(deal.dealId);
+                    added++;
+                } catch (e) {
+                    console.error('Auto-sync failed for deal:', deal.dealId, e);
+                }
+            }
+            if (added > 0) {
+                flashBulkResult(`Synced ${added} new close${added === 1 ? '' : 's'} into ${destPortfolioName}.`, 4000);
+            }
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [accountDeals, selectedAccountId, isLoadingDetails, detailsError, autoSync, isBulkAdding]);
 
     const handleRefreshDetails = async (acc: any) => {
         const id = acc.ctidTraderAccountId;
@@ -1690,7 +2270,39 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
 
         setSelectedAccountId(id);
         await handleRefreshDetails(acc);
+
+        // If we arrived from "New cTrader portfolio", link this account to it
+        // so the portfolio stops showing "Not linked" and future syncs scope here.
+        if (linkPortfolio && onLinkAccount) {
+            const extId = String(id);
+            const collision = linkCollisionCheck?.('ctrader', extId, linkPortfolio.id);
+            if (collision) {
+                setLinkMsg({ type: 'error', text: `That account is already linked to “${collision.name}”. Pick another account.` });
+            } else {
+                setIsLinking(true);
+                setLinkMsg(null);
+                try {
+                    await onLinkAccount(linkPortfolio.id, { provider: 'ctrader', externalAccountId: extId });
+                    setLinkMsg({ type: 'success', text: `Linked to “${linkPortfolio.name}” ✓ No PC needed — you’re good to go.` });
+                } catch (e: any) {
+                    setLinkMsg({ type: 'error', text: e?.message || 'Could not link this portfolio.' });
+                } finally {
+                    setIsLinking(false);
+                }
+            }
+        }
     };
+
+    // Auto-select when the cTrader ID exposes exactly one account so
+    // first-timers don't stall on the picker right after OAuth.
+    // Skipped after a manual "All accounts" tap so the button actually sticks.
+    useEffect(() => {
+        if (manualBackToListRef.current) return;
+        if (authState === 'connected' && !isFetchingAccounts && accounts.length === 1 && selectedAccountId === null) {
+            void handleSelectAccount(accounts[0]);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authState, isFetchingAccounts, accounts, selectedAccountId]);
 
     const handlePlaceOrder = async (isDemo: boolean) => {
         if (!selectedAccountId || !tradingSymbolId) return;
@@ -1787,6 +2399,11 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             const { logout } = await import('../services/ctraderService');
             logout();
             try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
+            manualBackToListRef.current = false;
+            promptShownForRef.current = null;
+            knownSeededForRef.current = null;
+            setShowImportPrompt(false);
+            setLinkMsg(null);
             setAuthState('idle');
             setAccounts([]);
             setSelectedAccountId(null);
@@ -1871,6 +2488,73 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Real-time OAuth resolution listener:
+    // When returning from OAuth, App.tsx or ctraderService exchanges the code
+    // and fires 'ctrader_auth_success'. We catch it immediately so the UI
+    // transitions from 'connecting' to 'connected' in place.
+    useEffect(() => {
+        let isMounted = true;
+        const checkAndTransition = async () => {
+            try {
+                const { isAuthenticated, getCtidProfile } = await import('../services/ctraderService');
+                if (isAuthenticated() && isMounted) {
+                    setAuthState('connected');
+                    setErrorMsg('');
+                    handleFetchAccounts();
+                    getCtidProfile().then(p => { if (isMounted) setProfile(p); }).catch(() => {});
+                }
+            } catch {}
+        };
+
+        const onAuthSuccess = () => {
+            void checkAndTransition();
+        };
+
+        window.addEventListener('ctrader_auth_success', onAuthSuccess);
+
+        // While in 'connecting' state, poll every 800ms so even if an event was missed
+        // the screen transitions within <1 second of the token exchange completing.
+        let interval: any = null;
+        if (authState === 'connecting') {
+            interval = setInterval(checkAndTransition, 800);
+        }
+
+        // When user switches back from external browser to the app:
+        const onVisibilityOrFocus = () => {
+            if (document.visibilityState === 'visible' || !document.hidden) {
+                void checkAndTransition();
+            }
+        };
+        window.addEventListener('focus', onVisibilityOrFocus);
+        document.addEventListener('visibilitychange', onVisibilityOrFocus);
+
+        // Native Capacitor app resume — OPTIONAL and resolved at runtime only.
+        // The web bundle has zero @capacitor dependencies, so the specifier is
+        // indirect: TypeScript and Vite must not try to resolve it, and the
+        // resulting rejection is swallowed by the catch below.
+        let capListener: any = null;
+        (async () => {
+            try {
+                const nativeAppModule: string = '@capacitor/app';
+                const { App: CapApp } = await import(/* @vite-ignore */ nativeAppModule);
+                capListener = await CapApp.addListener('appStateChange', (state: any) => {
+                    if (state.isActive) {
+                        void checkAndTransition();
+                    }
+                });
+            } catch {}
+        })();
+
+        return () => {
+            isMounted = false;
+            window.removeEventListener('ctrader_auth_success', onAuthSuccess);
+            window.removeEventListener('focus', onVisibilityOrFocus);
+            document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+            if (interval) clearInterval(interval);
+            try { capListener?.remove?.(); } catch {}
+        };
+    }, [authState]);
+
     // Real-time Event Listener Setup
     useEffect(() => {
         if (!selectedAccountId) return;
@@ -1942,6 +2626,47 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         }
     };
 
+    const [manualCode, setManualCode] = useState('');
+    const [isExchangingManual, setIsExchangingManual] = useState(false);
+
+    // Manual code paste: on web the OAuth hop is a full page redirect, so this
+    // is the escape hatch when the browser never comes back (popup/redirect
+    // blocked, wrong tab). Accepts a bare code or a whole redirect URL.
+    const handleManualCodeSubmit = async () => {
+        const raw = manualCode.trim();
+        if (!raw) return;
+        setIsExchangingManual(true);
+        setErrorMsg('');
+        try {
+            let extractedCode = raw;
+            if (raw.includes('code=')) {
+                try {
+                    const query = raw.includes('?') ? raw.split('?').slice(1).join('?') : raw;
+                    extractedCode = new URLSearchParams(query).get('code') || raw;
+                } catch {}
+            }
+            const { exchangeCode } = await import('../services/ctraderService');
+            const res = await exchangeCode(extractedCode, null);
+            if (res && res.ok) {
+                try { localStorage.setItem('ctrader_just_authorized', 'true'); } catch {}
+                setAuthState('connected');
+                setManualCode('');
+                handleFetchAccounts();
+            } else {
+                setErrorMsg(res?.error || 'Failed to exchange authorization code. Make sure the code is fresh and valid.');
+            }
+        } catch (e: any) {
+            setErrorMsg(e?.message || 'Error exchanging authorization code');
+        } finally {
+            setIsExchangingManual(false);
+        }
+    };
+
+    const linkedAccountId = linkPortfolio?.accounts?.find(a => a.provider === 'ctrader')?.externalAccountId;
+    const selectedAccount = accounts.find((a: any) => a.ctidTraderAccountId === selectedAccountId);
+    const isAlreadyLinked = !!linkedAccountId && selectedAccountId !== null && String(selectedAccountId) === String(linkedAccountId);
+    const isScopeLinked = isAlreadyLinked || linkMsg?.type === 'success' || !!linkedAccountId;
+
     return (
         <div className="space-y-6">
             <div className="relative mb-6 flex items-center gap-3">
@@ -1953,6 +2678,21 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                     Back to methods
                 </button>
             </div>
+
+            {linkPortfolio && linkPortfolio.source === 'ctrader' && (isScopeLinked ? (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                    <p className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-200">“{linkPortfolio.name}” → {linkedAccountId || selectedAccountId || ''}</p>
+                    {onDoneLink && !showImportPrompt && (
+                        <button onClick={onDoneLink} className="shrink-0 px-2.5 py-1 rounded-lg bg-[#FF4F00] text-white text-[10px] font-bold">Done</button>
+                    )}
+                </div>
+            ) : (
+                <div className="rounded-xl border border-[#FF4F00]/20 bg-[#FF4F00]/[0.05] px-3 py-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF4F00] shrink-0" />
+                    <p className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-200">Link “{linkPortfolio.name}” · pick an account below{linkMsg?.type === 'error' ? <span className="text-rose-400"> · {linkMsg.text}</span> : isLinking ? <span className="text-zinc-500"> · linking…</span> : null}</p>
+                </div>
+            ))}
 
             <div className="rounded-2xl border border-white/5 bg-black overflow-hidden">
                 <div className="px-5 py-4 border-b border-white/5 flex items-center gap-3">
@@ -1988,6 +2728,37 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                 </svg>
                                 Connect with cTrader ID
                             </button>
+
+                            <div className="p-3 rounded-xl border border-white/10 bg-white/[0.02] space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-medium text-zinc-300">Browser never came back?</span>
+                                    <button
+                                        type="button"
+                                        onClick={handleConnect}
+                                        className="text-[11px] text-[#FF4F00] hover:underline flex items-center gap-1"
+                                    >
+                                        Reopen login
+                                    </button>
+                                </div>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={manualCode}
+                                        onChange={(e) => setManualCode(e.target.value)}
+                                        placeholder="Paste code or redirect URL…"
+                                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs rounded-lg border border-white/10 bg-black text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FF4F00]"
+                                    />
+                                    <button
+                                        type="button"
+                                        disabled={!manualCode.trim() || isExchangingManual}
+                                        onClick={() => handleManualCodeSubmit()}
+                                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#FF4F00] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#FF4F00]/90 transition-all flex items-center gap-1.5 shrink-0"
+                                    >
+                                        {isExchangingManual ? <Loader2 size={12} className="animate-spin" /> : null}
+                                        Connect
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -2016,6 +2787,218 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                     <LogOut size={14} />
                                 </button>
                             </div>
+
+                            {/* Guided first-import prompt — unimported closed deals */}
+                            {showImportPrompt && selectedAccount && (() => {
+                                const rangeDeals = importRange === '30d' ? dealsInLast30d : accountDeals;
+                                const rangePending = rangeDeals.filter(d => !isDealInJournal(d));
+                                const bounds = rangeBoundsLabel(rangeDeals);
+                                const pct = bulkProgress.total > 0 ? Math.min(100, Math.round((bulkProgress.done / bulkProgress.total) * 100)) : 0;
+                                const pendingAll = accountDeals.filter(d => !isDealInJournal(d)).length;
+                                const pending30 = dealsInLast30d.filter(d => !isDealInJournal(d)).length;
+                                const accountLabel = selectedAccount.name || `Account #${selectedAccount.login}`;
+                                const rangeLabel = importRange === '30d' ? 'Last 30 days' : 'All history';
+                                const dismissPrompt = () => {
+                                    if (selectedAccountId != null) ctraderStoreSet(dismissedKey(selectedAccountId), '1');
+                                    setShowImportPrompt(false);
+                                };
+                                const handleSwitchAccount = () => {
+                                    if (selectedAccountId != null) ctraderStoreSet(dismissedKey(selectedAccountId), '1');
+                                    manualBackToListRef.current = true;
+                                    promptShownForRef.current = null;
+                                    setShowImportPrompt(false);
+                                    setSelectedAccountId(null);
+                                    try { import('../services/ctraderService').then(m => m.clearSelectedAccountId()).catch(() => {}); } catch { /* noop */ }
+                                    setAccountPositions([]);
+                                    setAccountDeals([]);
+                                    setPendingOrders([]);
+                                    setTraderDetails(null);
+                                    setDetailsError('');
+                                    setActiveTab('positions');
+                                };
+                                const toggleAutoSync = () => {
+                                    const next = !autoSync;
+                                    setAutoSync(next);
+                                    try { localStorage.setItem('jfx_ctrader_autosync', next ? 'on' : 'off'); } catch { /* blocked */ }
+                                };
+
+                                // Done — collapse to a single success row. Only when nothing is
+                                // pending in EITHER range, so users can't get stuck.
+                                if (!isBulkAdding && rangePending.length === 0) {
+                                    const otherPending = importRange === '30d' ? pendingAll - pending30 : 0;
+                                    return (
+                                        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2.5 flex items-center gap-2.5">
+                                            <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-500/15 flex items-center justify-center">
+                                                <Check size={14} className="text-emerald-400" />
+                                            </span>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-xs font-semibold text-white leading-tight">All caught up</p>
+                                                <p className="text-[11px] text-zinc-400 leading-tight mt-0.5 truncate">
+                                                    {rangeDeals.length} deal{rangeDeals.length === 1 ? '' : 's'} in journal · {rangeLabel}
+                                                    {otherPending > 0 ? ` · ${otherPending} older not imported` : ''}
+                                                </p>
+                                            </div>
+                                            {otherPending > 0 ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setImportRange('all')}
+                                                    className="shrink-0 text-[11px] font-semibold text-emerald-300 hover:text-emerald-200 transition-colors"
+                                                >
+                                                    View {otherPending}
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (selectedAccountId != null) ctraderStoreSet(importedKey(selectedAccountId), '1');
+                                                        setShowImportPrompt(false);
+                                                    }}
+                                                    className="shrink-0 text-[11px] font-semibold text-emerald-300 hover:text-emerald-200 transition-colors"
+                                                >
+                                                    View details
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={dismissPrompt}
+                                                className="shrink-0 text-zinc-500 hover:text-white transition-colors p-1 -m-1"
+                                                title="Dismiss"
+                                            >
+                                                <X size={15} />
+                                            </button>
+                                        </div>
+                                    );
+                                }
+
+                                return (
+                                    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="w-2 h-2 rounded-full bg-[#FF4F00] animate-pulse shrink-0" />
+                                                    <p className="text-xs font-bold text-white leading-tight">
+                                                        Import {rangePending.length} deal{rangePending.length === 1 ? '' : 's'}
+                                                    </p>
+                                                </div>
+                                                <p className="text-[11px] text-zinc-400 mt-1 leading-snug truncate" title={`${accountLabel} · ${rangeLabel}${bounds ? ` · ${bounds}` : ''}`}>
+                                                    {accountLabel} · {rangeLabel}{bounds ? ` · ${bounds}` : ''}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={dismissPrompt}
+                                                className="text-zinc-500 hover:text-white transition-colors p-1 -m-1"
+                                                title="Dismiss prompt and view account details"
+                                            >
+                                                <X size={15} />
+                                            </button>
+                                        </div>
+
+                                        {/* Range selector — counts only, bounds merged into subtitle above */}
+                                        <div className="flex items-center gap-1 p-0.5 rounded-lg bg-white/[0.06]">
+                                            {(([{ id: '30d', label: `Last 30 days · ${dealsInLast30d.length}` }, { id: 'all', label: `All · ${accountDeals.length}` }] as const)).map(r => (
+                                                <button
+                                                    key={r.id}
+                                                    type="button"
+                                                    onClick={() => setImportRange(r.id)}
+                                                    className={`flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all ${importRange === r.id ? 'bg-[#FF4F00] text-white shadow-sm' : 'text-zinc-400 hover:text-white'}`}
+                                                >
+                                                    {r.label}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Action / In-flight progress */}
+                                        {isBulkAdding ? (
+                                            <div className="p-3 rounded-lg bg-white/[0.06] space-y-2.5">
+                                                <div className="flex items-center justify-between text-[11px]">
+                                                    <span className="flex items-center gap-1.5 text-white font-medium">
+                                                        <Loader2 size={13} className="animate-spin text-[#FF4F00] shrink-0" />
+                                                        Importing {bulkProgress.done} of {bulkProgress.total} deals…
+                                                    </span>
+                                                    <span className="text-[#FF4F00] font-bold tabular-nums">{pct}%</span>
+                                                </div>
+                                                <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                                                    <div
+                                                        className="bg-[#FF4F00] h-full transition-all duration-200 ease-out"
+                                                        style={{ width: `${pct}%` }}
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { guidedCancelRef.current = true; }}
+                                                    className="w-full py-1.5 rounded-md bg-white/[0.06] text-[11px] font-semibold text-zinc-400 hover:text-white transition-all"
+                                                >
+                                                    Pause / Cancel
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleGuidedImport(importRange)}
+                                                disabled={isBulkAdding}
+                                                className="w-full py-2.5 rounded-lg bg-[#FF4F00] hover:bg-[#FF4F00]/90 disabled:opacity-60 disabled:cursor-wait text-white text-xs font-bold shadow-lg shadow-[#FF4F00]/25 flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+                                            >
+                                                <Download size={14} />
+                                                Import {rangePending.length} closed deal{rangePending.length === 1 ? '' : 's'}
+                                            </button>
+                                        )}
+
+                                        {/* Status message or error banner */}
+                                        {bulkResult && (
+                                            <div className={`p-2.5 rounded-lg text-[11px] leading-snug ${
+                                                bulkResult.includes('✓')
+                                                    ? 'bg-emerald-500/10 text-emerald-300'
+                                                    : bulkResult.includes('failed') || bulkResult.includes('Failed')
+                                                    ? 'bg-rose-500/10 text-rose-300'
+                                                    : 'bg-white/[0.06] text-zinc-300'
+                                            }`}>
+                                                <p>{bulkResult}</p>
+                                            </div>
+                                        )}
+
+                                        <details className="group rounded-lg bg-white/[0.06]">
+                                            <summary className="px-2.5 py-2 text-[11px] font-semibold text-zinc-400 hover:text-zinc-200 cursor-pointer list-none flex items-center justify-between transition-colors">
+                                                <span>Details · {rangeDeals.length} found, {pendingAll} to import</span>
+                                                <ChevronDown size={13} className="transition-transform group-open:rotate-180 shrink-0" />
+                                            </summary>
+                                            <div className="px-2.5 pb-2.5 pt-1 space-y-2">
+                                                <p className="text-[10px] text-zinc-500 leading-snug pt-1.5">
+                                                    Into {destPortfolioName} · Only closed deals import · Open positions track in real-time
+                                                </p>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (selectedAccountId != null) ctraderStoreSet(dismissedKey(selectedAccountId), '1');
+                                                            setShowImportPrompt(false);
+                                                            setActiveTab('history');
+                                                        }}
+                                                        className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                                                    >
+                                                        Pick manually in History
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={toggleAutoSync}
+                                                        className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                                                        title="New closes sync automatically when open"
+                                                    >
+                                                        Auto-sync: <span className={autoSync ? 'text-emerald-400 font-semibold' : 'font-semibold'}>{autoSync ? 'On' : 'Off'}</span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSwitchAccount}
+                                                        className="text-[11px] font-semibold text-[#FF4F00] hover:underline"
+                                                    >
+                                                        Switch
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </details>
+                                    </div>
+                                );
+                            })()}
 
                             {/* Loading state while fetching accounts */}
                             {isFetchingAccounts && (
@@ -2055,6 +3038,14 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
+                                                    {(() => {
+                                                        const clash = linkCollisionCheck?.('ctrader', String(acc.ctidTraderAccountId), linkPortfolio?.id);
+                                                        return clash ? (
+                                                            <span className="block text-[9px] font-semibold text-zinc-500">In “{clash.name}”</span>
+                                                        ) : (linkedAccountId && String(acc.ctidTraderAccountId) === String(linkedAccountId)) ? (
+                                                            <span className="block text-[9px] font-semibold text-emerald-300">Linked</span>
+                                                        ) : null;
+                                                    })()}
                                                     <p className="text-xs font-bold text-white tabular-nums">
                                                         {acc.balance !== undefined
                                                             ? `${acc.currency === 'USD' ? '$' : ''}${Number(acc.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -2099,6 +3090,9 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                 </div>
                                                 <button
                                                     onClick={() => {
+                                                        manualBackToListRef.current = true;
+                                                        promptShownForRef.current = null;
+                                                        setShowImportPrompt(false);
                                                         setSelectedAccountId(null);
                                                         setAccountPositions([]);
                                                         setAccountDeals([]);
@@ -2111,6 +3105,77 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                     <X size={14} />
                                                 </button>
                                             </div>
+
+                                            {/* Broker detection — brand mark for the connected account */}
+                                            {selectedAccount && (
+                                                <div className="px-4 py-3 border-b border-white/5 flex items-center gap-3">
+                                                    <AccountBrokerLogo brokerName={traderDetails?.brokerName || (selectedAccount as any)?.server} />
+                                                    <div className="min-w-0">
+                                                        <p className="text-[10px] text-zinc-500">Connected broker</p>
+                                                        <p className="text-xs font-semibold text-white truncate">{traderDetails?.brokerName || (selectedAccount as any)?.server || 'cTrader Server'}</p>
+                                                    </div>
+                                                    <span className={`ml-auto text-[9px] font-bold uppercase tracking-wider ${selectedAccount.isDemo ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                                        {selectedAccount.isDemo ? 'Demo' : 'Live'}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {/* Backfill nudge — non-empty journal, quiet banner (no modal) */}
+                                            {selectedAccount && !isLoadingDetails && !detailsError && !showImportPrompt
+                                                && trades && trades.length > 0 && pendingDealsCount > 0
+                                                && !ctraderStoreGet(importedKey(selectedAccount.ctidTraderAccountId))
+                                                && !(selectedAccount.ctidTraderAccountId in bannerDismissals ? bannerDismissals[selectedAccount.ctidTraderAccountId] : !!ctraderStoreGet(dismissedKey(selectedAccount.ctidTraderAccountId)))
+                                                && (
+                                                <div className="m-4 mb-0 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 flex items-center gap-2">
+                                                    <p className="min-w-0 flex-1 text-[11px] text-zinc-300 leading-snug">
+                                                        {pendingDealsCount} unjournaled closed deal{pendingDealsCount === 1 ? '' : 's'} on this account
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        disabled={isBulkAdding}
+                                                        onClick={() => handleGuidedImport('30d', { navigate: false })}
+                                                        className="shrink-0 text-[11px] font-semibold text-[#FF4F00] hover:underline disabled:opacity-40"
+                                                    >
+                                                        {isBulkAdding ? `${bulkProgress.done}/${bulkProgress.total}` : 'Import 30d'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setActiveTab('history')}
+                                                        className="shrink-0 text-[11px] font-semibold text-zinc-400 hover:text-white transition-colors"
+                                                    >
+                                                        History
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const ctid = selectedAccount.ctidTraderAccountId;
+                                                            ctraderStoreSet(dismissedKey(ctid), '1');
+                                                            setBannerDismissals(prev => ({ ...prev, [ctid]: true }));
+                                                        }}
+                                                        className="shrink-0 text-zinc-600 hover:text-white transition-colors p-0.5"
+                                                        title="Dismiss"
+                                                    >
+                                                        <X size={13} />
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Stashed retry — deals that failed in a previous session */}
+                                            {selectedAccount && stashedPendingDeals.length > 0 && (
+                                                <div className="m-4 mb-0 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] px-3 py-2 flex items-center gap-2">
+                                                    <p className="min-w-0 flex-1 text-[11px] text-amber-200/90 leading-snug">
+                                                        {stashedPendingDeals.length} deal{stashedPendingDeals.length === 1 ? '' : 's'} failed to save last time
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        disabled={isBulkAdding}
+                                                        onClick={() => { void handleRetryStashedDeals(); }}
+                                                        className="shrink-0 text-[11px] font-semibold text-[#FF4F00] hover:underline disabled:opacity-40"
+                                                    >
+                                                        {isBulkAdding ? `${bulkProgress.done}/${bulkProgress.total}` : 'Retry now'}
+                                                    </button>
+                                                </div>
+                                            )}
 
                                             {isLoadingDetails && (
                                                 <div className="flex items-center justify-center py-8">
@@ -2293,6 +3358,17 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                     <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Deal Execution History</p>
                                                                     <div className="flex items-center gap-2">
                                                                         {bulkResult && <span className="text-[10px] font-bold text-emerald-400">{bulkResult}</span>}
+                                                                        {importedTradeIds.length > 0 && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={handleRemoveImportedDeals}
+                                                                                disabled={isBulkAdding}
+                                                                                className="flex items-center gap-0.5 text-[9px] font-semibold text-zinc-500 hover:text-rose-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                                title="Move all trades imported from this account to trash"
+                                                                            >
+                                                                                Remove imported ({importedTradeIds.length})
+                                                                            </button>
+                                                                        )}
                                                                         <button
                                                                             type="button"
                                                                             onClick={handleAddAllDealsToJournal}
