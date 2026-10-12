@@ -25,6 +25,8 @@ import { modalResearchService } from './services/nvidiaAiService';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { BrandedLoader } from './components/ui/BrandedLoader';
 import { MobileBlocker } from './components/ui/MobileBlocker';
+import { MobileLayout } from './components/mobile/MobileLayout';
+import { MOBILE_ENABLED, IS_CAPACITOR } from './lib/featureFlags';
 import { useAuth } from './hooks/useAuth';
 import { useData } from './hooks/useData';
 import { authService } from './services/authService';
@@ -1077,6 +1079,15 @@ const onLogout = async () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  useEffect(() => {
+    // Scope the mobile design system: body.jfx-mobile gates every ported
+    // mobile-shell CSS rule, so desktop rendering is never affected.
+    // Mirrors the MobileLayout branch condition below exactly.
+    if (typeof document !== 'undefined') {
+      document.body.classList.toggle('jfx-mobile', isMobile && !!activeUserProfile);
+    }
+  }, [isMobile, activeUserProfile]);
+
   if (publicPath === '/privacy') {
     return <PrivacyPolicy />;
   }
@@ -1139,7 +1150,9 @@ const onLogout = async () => {
     );
   }
 
-  if (isMobile) {
+  // Mobile web renders the same mobile shell as the APK. The hard blocker
+  // only returns when explicitly opted out via VITE_MOBILE_ENABLED=false.
+  if (isMobile && !IS_CAPACITOR && !MOBILE_ENABLED) {
     return <MobileBlocker isDarkMode={isDarkMode} />;
   }
 
@@ -1243,6 +1256,67 @@ const onLogout = async () => {
           </div>
         </div>
       )}
+      {isMobile && activeUserProfile ? (
+        <MobileLayout
+          currentView={currentView}
+          onViewChange={setCurrentView}
+          trades={activeTrades}
+          notes={activeNotes}
+          dailyBias={activeDailyBias}
+          userProfile={activeUserProfile}
+          userEmail={userEmail}
+          eaSession={activeEaSession}
+          lastKnownBridgeBalance={lastKnownBridgeBalance}
+          isBridgeOnline={isBridgeOnline}
+          isDemoMode={isDemoMode}
+          onToggleDemoMode={() => {
+            const nextDemo = !isDemoMode;
+            setIsDemoMode(nextDemo);
+            setCurrentView('dashboard');
+            setEditingTrade(null);
+            setIsQuickLogOpen(false);
+            addToast({
+              type: 'info',
+              title: nextDemo ? 'Demo Mode Enabled' : 'Demo Mode Disabled',
+              message: nextDemo
+                ? 'Sample trades, notes, and analytics are now visible.'
+                : 'Your live journal data is visible again.',
+              duration: 4000,
+            });
+          }}
+          onLogout={onLogout}
+          onAddTrade={handleAddTrade}
+          onUpdateTrade={handleUpdateTrade}
+          onBatchUpdateTrades={handleBatchUpdateTrades}
+          onDeleteTrades={handleDeleteTrades}
+          onEditTrade={handleEditTrade}
+          onAddNote={handleAddNote}
+          onUpdateNote={handleUpdateNote}
+          onDeleteNote={handleDeleteNote}
+          onRestoreNote={handleRestoreNote}
+          onUpdateProfile={async (profile: any) => { await handleUpdateProfile(profile); return profile; }}
+          isDarkMode={isDarkMode}
+          userId={userId}
+          offlineQueue={offlineQueue}
+          onAddOffline={addToOfflineQueue}
+          onBatchAddTrades={handleBatchAddTrades}
+          editingTrade={editingTrade}
+          onClearEditingTrade={() => setEditingTrade(null)}
+          settingsInitialTab={settingsTab}
+          currentBalance={currentBalance}
+          tradesThisMonth={tradesThisMonth}
+          totalNotes={totalNotes}
+          totalImages={totalImages}
+          tradesCount={activeTrades.length}
+          dailyPsychologyInsights={dailyPsychologyInsights}
+          onRefreshPsychologyInsights={() => refreshPsychologyInsights(true)}
+          isRefreshingPsychologyInsights={isRefreshingPsychologyInsights}
+          psychologyAnalyzeLimitReached={psychologyAnalyzeLimitReached}
+          cashTransactions={cashTransactions}
+          onDeduplicate={handleDeduplicate}
+          migrationVersion={currentMigrationVersion}
+        />
+      ) : (
       <div className={`compact-scale flex h-screen w-full transition-colors duration-300 ${isDemoMode ? 'pt-16' : ''} ${isDarkMode ? 'text-zinc-100' : 'bg-slate-50 text-slate-900'}`} style={isDarkMode ? { background: '#000000' } : {}}>
 
         {!isFocusMode && (
@@ -1462,6 +1536,7 @@ const onLogout = async () => {
           isDarkMode={isDarkMode}
         />
       </div>
+      )}
     </ErrorBoundary>
   );
 };

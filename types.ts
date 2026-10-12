@@ -473,6 +473,35 @@ export interface DBCashTransaction {
   created_at: string;
 }
 
+// ─── Portfolios (multi-portfolio support; server sync is optional) ───────────
+// Ported from the mobile shell so phone web can render the same MobileLayout.
+// Optional everywhere on desktop; additive only.
+export const MAX_PORTFOLIOS = 5;
+
+export type PortfolioSource = 'manual' | 'ctrader' | 'bridge';
+
+export type PortfolioPurpose = string;
+
+export interface PortfolioAccount {
+  provider: string;
+  externalAccountId?: string;
+}
+
+export interface Portfolio {
+  id: string;
+  name: string;
+  description?: string;
+  purpose?: PortfolioPurpose;
+  source?: PortfolioSource;
+  startingBalance?: number;
+  currency?: string;
+  isDefault?: boolean;
+  isArchived?: boolean;
+  accounts?: PortfolioAccount[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface BrokerCredentials {
   id: string;
   user_id: string;

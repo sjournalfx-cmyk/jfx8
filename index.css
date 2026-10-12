@@ -609,3 +609,90 @@ canvas, svg {
 .animate-pulse-fast {
   animation: pulse-fast 1.2s infinite ease-in-out;
 }
+
+/* ── Polished Mobile Design System (ported from the APK shell) ──
+   Every rule below is scoped under body.jfx-mobile, which App.tsx sets only
+   on phone viewports (<768px) for logged-in users. Desktop rendering cannot
+   match any of it. :root vars and @keyframes are new names (jfx-*) and safe. */
+:root {
+  /* 60% neutral base, 30% zinc, 10% JFX accent */
+  --jfx-bg: #000000;
+  --jfx-surface: #000000;
+  --jfx-surface-2: #000000;
+  --jfx-border: rgba(39,39,42,0.9);
+  --jfx-border-soft: rgba(39,39,42,0.5);
+  --jfx-text: #ffffff;
+  --jfx-text-80: rgba(255,255,255,0.80);
+  --jfx-text-60: rgba(255,255,255,0.60);
+  --jfx-text-40: rgba(255,255,255,0.40);
+  --jfx-accent: #FF4F01;
+  --jfx-accent-soft: rgba(255,79,1,0.08);
+  --jfx-accent-border: rgba(255,79,1,0.18);
+  /* 8pt grid */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+  /* Tinted soft shadows — never pure gray on black */
+  --shadow-soft: 0 8px 24px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.35);
+  --shadow-card: 0 4px 16px rgba(0,0,0,0.40), 0 1px 4px rgba(0,0,0,0.30);
+  --shadow-accent: 0 8px 24px rgba(255,79,1,0.18), 0 2px 8px rgba(255,79,1,0.10);
+}
+
+/* Mobile native feel — safe-area + tap — 44pt minimum */
+body.jfx-mobile .safe-area-inset-bottom { padding-bottom: env(safe-area-inset-bottom); }
+body.jfx-mobile .pb-nav { padding-bottom: calc(5.25rem + env(safe-area-inset-bottom)); }
+body.jfx-mobile .pb-nav-plus-fab { padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
+/* Analytics fullscreen takeover — lock bg scroll + force-hide the floating
+   MobileNav island even if the React event listener misses (CSS fallback).
+   (Unscoped: the class is only ever added by mobile hooks, never on desktop.) */
+.jfx-fullscreen-open { overflow: hidden; }
+.jfx-fullscreen-open .jfx-mobile-nav { display: none !important; }
+body.jfx-mobile * { -webkit-tap-highlight-color: transparent; }
+body.jfx-mobile button, body.jfx-mobile a { touch-action: manipulation; }
+body.jfx-mobile button, body.jfx-mobile [role="button"], body.jfx-mobile a { min-height: 44px; }
+body.jfx-mobile button.min-h-0, body.jfx-mobile a.min-h-0 { min-height: 0; min-width: 0; }
+body.jfx-mobile { overscroll-behavior: contain; overscroll-behavior-y: contain; -webkit-text-size-adjust: 100%; }
+body.jfx-mobile { background: var(--jfx-bg); color: var(--jfx-text); font-family: 'Inter', system-ui, -apple-system, sans-serif; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+/* Keep header/nav 60fps — promote to own layer */
+body.jfx-mobile .jfx-nav-island, body.jfx-mobile .jfx-thumb-zone, body.jfx-mobile .jfx-fab, body.jfx-mobile .jfx-card, body.jfx-mobile .jfx-card-soft { will-change: transform; }
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) { body.jfx-mobile *, body.jfx-mobile *::before, body.jfx-mobile *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+/* Horizontal scroll chips — hide scrollbar but keep scroll */
+body.jfx-mobile .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+body.jfx-mobile .no-scrollbar::-webkit-scrollbar { display: none; }
+/* Shimmer skeleton — black-theme aware */
+@keyframes jfx-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+body.jfx-mobile .jfx-skeleton { background: linear-gradient(90deg, rgba(39,39,42,0.9) 25%, rgba(63,63,70,0.6) 37%, rgba(39,39,42,0.9) 63%); background-size: 200% 100%; animation: jfx-shimmer 1.4s infinite linear; border-radius: 12px; }
+/* Focus ring — accessible on black */
+body.jfx-mobile *:focus-visible { outline: 2px solid var(--jfx-accent); outline-offset: 2px; }
+
+/* Polished card — tinted shadow, 5% accent border on active */
+body.jfx-mobile .jfx-card { background: #000000; border: 1px solid var(--jfx-border); border-radius: 16px; box-shadow: var(--shadow-card); }
+body.jfx-mobile .jfx-card-soft { background: #000000; border: 1px solid var(--jfx-border-soft); border-radius: 20px; box-shadow: var(--shadow-soft); }
+body.jfx-mobile .jfx-card-accent { border-color: var(--jfx-accent-border); background: linear-gradient(180deg, rgba(255,79,1,0.06) 0%, rgba(255,79,1,0) 100%), #000000; }
+
+/* Typography — max 4 sizes, 2 weights (700, 900), monospace for numbers */
+body.jfx-mobile .jfx-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--jfx-text-60); }
+body.jfx-mobile .jfx-value-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+body.jfx-mobile .jfx-h1 { font-size: 22px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.15; }
+body.jfx-mobile .jfx-h2 { font-size: 15px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.3; }
+body.jfx-mobile .jfx-body { font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--jfx-text-80); }
+body.jfx-mobile .jfx-caption { font-size: 11px; font-weight: 700; color: var(--jfx-text-60); }
+
+/* Thumb zone — primary actions bottom 1/3, FAB */
+body.jfx-mobile .jfx-thumb-zone { position: fixed; bottom: calc(5.25rem + env(safe-area-inset-bottom) + 16px); right: 16px; z-index: 45; }
+body.jfx-mobile .jfx-fab { width: 56px; height: 56px; border-radius: 9999px; background: var(--jfx-accent); color: white; box-shadow: var(--shadow-accent), 0 0 0 1px rgba(255,255,255,0.08) inset; display:flex; align-items:center; justify-content:center; }
+body.jfx-mobile .jfx-fab:active { transform: scale(0.96); }
+
+/* Bottom nav — rounded-2xl island, backdrop-blur, soft shadow */
+body.jfx-mobile .jfx-nav-island { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: 0 -8px 32px rgba(0,0,0,0.5), 0 -1px 0 rgba(255,255,255,0.06) inset; }
+
+/* Bottom sheet — slide up + backdrop fade */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+body.jfx-mobile .animate-sheet-up { animation: sheet-up 0.3s cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes sheet-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+body.jfx-mobile .animate-sheet-fade { animation: sheet-fade 0.2s ease-out; }

@@ -26,8 +26,11 @@ interface CustomChartProps {
   children?: React.ReactNode;
 }
 
-const PADDING_RIGHT = 60;
-const PADDING_BOTTOM = 26;
+// Exported for the mobile shell (components/mobile/CtraderChartView) so the
+// cTrader chart and its drawing overlays share the same insets. Values are
+// the desktop defaults — changing them here moves every desktop chart.
+export const PADDING_RIGHT = 60;
+export const PADDING_BOTTOM = 26;
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
