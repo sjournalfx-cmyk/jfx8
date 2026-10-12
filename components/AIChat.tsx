@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trade, UserProfile, DailyBias, EASession, Note } from '../types';
-import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary, describeAiError } from '../services/nvidiaAiService';
+import { Trade, UserProfile, DailyBias, EASession, Note, Goal } from '../types';
+import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary, describeAiError, CHAT_MODELS } from '../services/nvidiaAiService';
 import { browserSpeechService } from '../services/voiceInputService';
 import { calculateStats } from '../lib/statsUtils';
 import { buildAnalyticsAiSnapshot } from '../lib/analyticsAiSnapshot';
@@ -15,6 +15,9 @@ import { useToast } from './ui/Toast';
 
 // Paid data proxies (/api/fmp, /api/finnhub) require an authenticated Supabase
 // session server-side; attach the access token so logged-in users keep working.
+// Web-only path: the app is served from the same origin as the API, so relative
+// /api/* URLs resolve directly. (The APK prefixes these with the hosted backend
+// via apiUrl() — never import a static @capacitor specifier into this bundle.)
 const authedFetch = async (url: string): Promise<Response> => {
   try {
     const { getSessionToken } = await import('../lib/supabase');
@@ -463,8 +466,11 @@ interface AIChatProps {
   eaSession?: EASession | null;
   lastKnownBridgeBalance?: import('../lib/bridgeBalance').StoredBridgeBalance | number | null;
   isBridgeOnline?: boolean;
+  notes?: Note[];
+  goals?: Goal[];
   onAddNote?: (note: Note) => Promise<Note | undefined>;
   onOpenSettings?: () => void;
+  onBackToHome?: () => void;
 }
 
 const STRATEGY_SECTION_ORDER = ['IDENTITY', 'MARKET_SELECTION', 'CORE_EDGE', 'RISK', 'STRATEGY_RULES', 'EXECUTION_FLOW', 'EXIT_PROTOCOL', 'ROUTINE', 'REVIEW'];
@@ -951,7 +957,23 @@ const formatForexFactoryCalendarMarkdown = (events: ForexFactoryEvent[]): string
 };
 
 // --- Slash Commands ---
-const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, onAddNote, onOpenSettings }) => {
+const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, notes = [], goals = [], onAddNote, onOpenSettings, onBackToHome }) => {
+  // Full mentor context: notebook + goals ride as props, live open positions
+  // come from the already-connected EA session. Rules checklist is read from
+  // localStorage inside the AI service at send time (always fresh).
+  const mentorExtraContext = useMemo(() => ({
+    notes,
+    goals,
+    openPositions: (eaSession?.data?.openPositions ?? []).map((p) => ({
+      symbol: p.symbol,
+      side: p.type,
+      volume: p.volume,
+      openPrice: p.open_price,
+      currentPrice: p.current_price,
+      profit: p.profit,
+    })),
+  }), [notes, goals, eaSession]);
+
   const challengeOptions = useMemo(() => ([
     { id: 'emotions', label: 'Emotional Trading', desc: 'FOMO, revenge trading, fear of missing out', icon: <Brain size={20} /> },
     { id: 'discipline', label: 'Lack of Discipline', desc: 'Skipping trades, not following rules', icon: <ListChecks size={20} /> },
@@ -1003,6 +1025,8 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const [wizardData, setWizardData] = useState<WizardData>(() => createInitialWizardData());
   
   const [selectedModel, setSelectedModel] = useLocalStorage<ModalModelType>('jfx_ai_selected_model', 'deepseek');
+  const [selectedChatModelId, setSelectedChatModelId] = useLocalStorage<string>('jfx_ai_chat_model_id', 'muse-spark-1.3-contributor-free');
+  const [showModelDrawer, setShowModelDrawer] = useState(false);
   const [recallMemory, setRecallMemory] = useLocalStorage<boolean>('jfx_ai_recall_memory', true);
   const [dailyCredits, setDailyCredits] = useLocalStorage<DailyCreditState>('jfx_ai_daily_credits', createDailyCreditState());
   const assistantMode = useMemo(() => getAssistantMode(selectedModel), [selectedModel]);
@@ -1695,7 +1719,8 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
           streamedTextRef.current = partial;
           setMessages(prev => prev.map(m => m.id === streamId ? { ...m, content: partial } : m));
         },
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        { extraContext: mentorExtraContext }
       );
       processResponse(res.text, (Date.now() + 1).toString(), {
         replaceId: streamId,
@@ -1993,7 +2018,8 @@ FORMAT REQUIREMENTS
         selectedModel,
         false,
         undefined,
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        { extraContext: mentorExtraContext }
       );
       processResponse(res.text, (Date.now() + 1).toString(), {
         isDeepAnalysis: true,
@@ -2164,7 +2190,8 @@ ${strategyProfile.whyITrade}`;
         selectedModel,
         true,
         undefined,
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        { extraContext: mentorExtraContext }
       );
       processResponse(res.text, Date.now().toString(), {
         isDeepAnalysis: true,
@@ -2442,7 +2469,12 @@ ${strategyProfile.whyITrade}`;
       <header className={`sticky top-0 z-50 flex items-center justify-between px-4 h-14 border-b ${
         isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200'
       }`}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          {onBackToHome && (
+            <button onClick={onBackToHome} className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'hover:bg-zinc-900 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'}`} aria-label="Back to home">
+              <ArrowLeft size={18} />
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-black dark:bg-black flex items-center justify-center shadow-lg shadow-black/20">
               <AssistantIcon size={16} className="text-white" />
@@ -2489,9 +2521,9 @@ ${strategyProfile.whyITrade}`;
             <Plus size={18} />
           </button>
           <button
-            onClick={() => onOpenSettings?.()}
+            onClick={() => setShowModelDrawer(true)}
             className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-black text-zinc-300' : 'hover:bg-slate-100 text-slate-700'}`}
-            title="Settings"
+            title="Model Settings"
           >
             <Settings size={18} />
           </button>
@@ -3427,6 +3459,45 @@ ${strategyProfile.whyITrade}`;
         </div>
       </div>
       )}
+
+      {/* Model Settings Bottom Drawer */}
+      <AnimatePresence>
+        {showModelDrawer && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowModelDrawer(false)} className="fixed inset-0 bg-black/50 z-[60]" />
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 28, stiffness: 320 }} className={`fixed bottom-0 left-0 right-0 z-[61] rounded-t-[24px] max-h-[75vh] overflow-hidden flex flex-col ${isDarkMode ? 'bg-zinc-900 border border-zinc-800' : 'bg-white border border-slate-200'}`}>
+              <div className="flex justify-center pt-3 pb-2"><div className={`w-10 h-1 rounded-full ${isDarkMode ? 'bg-zinc-700' : 'bg-slate-200'}`} /></div>
+              <div className="px-5 pb-3 flex items-center justify-between">
+                <h3 className={`text-[15px] font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Model</h3>
+                <div className="flex items-center gap-2">
+                  {onOpenSettings && (
+                    <button
+                      onClick={() => { setShowModelDrawer(false); onOpenSettings(); }}
+                      className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-colors ${isDarkMode ? 'bg-zinc-800 text-zinc-300 hover:text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900'}`}
+                    >
+                      <Settings size={12} />
+                      All settings
+                    </button>
+                  )}
+                  <button onClick={() => setShowModelDrawer(false)} className={`w-8 h-8 rounded-full grid place-items-center ${isDarkMode ? 'bg-zinc-800 text-zinc-400' : 'bg-slate-100 text-slate-500'}`} aria-label="Close model settings"><X size={14} /></button>
+                </div>
+              </div>
+              <p className={`px-5 pb-3 text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>Switch any time. Applies to next message.</p>
+              <div className="px-3 pb-6 overflow-y-auto space-y-2">
+                {CHAT_MODELS.map(m => {
+                  const active = selectedChatModelId === m.id;
+                  return (
+                    <button key={m.id} onClick={() => { setSelectedChatModelId(m.id); setShowModelDrawer(false); addToast({ type: 'info', title: 'Model Changed', message: `Model: ${m.label}` }); }} className={`w-full text-left px-4 py-3.5 rounded-2xl border flex items-center justify-between transition-all ${active ? (isDarkMode ? 'bg-white text-black border-white' : 'bg-slate-900 text-white border-slate-900') : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900')}`}>
+                      <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold flex items-center gap-2 flex-wrap">{m.label} <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold tracking-widest ${active ? 'bg-white/20' : isDarkMode ? 'bg-zinc-700 text-zinc-300' : 'bg-slate-200 text-slate-600'}`}>{m.badge}</span></div><div className={`text-xs mt-0.5 ${active ? 'opacity-70' : isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{m.desc}</div><div className={`text-[10px] mt-1 font-mono truncate ${active ? 'opacity-50' : 'opacity-40'}`}>{m.id}</div></div>
+                      {active && <Check size={18} className="shrink-0 ml-3" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       </div>
   );

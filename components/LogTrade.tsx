@@ -19,6 +19,8 @@ import { TradeFormStep2 } from './log-trade/TradeFormStep2';
 import { TradeFormStep3 } from './log-trade/TradeFormStep3';
 import { cn } from '../lib/utils';
 import { normalizeTrade } from '../lib/trade-normalization';
+import { useChecklistTemplates } from '../lib/useChecklistTemplates';
+import { computeAdherence, derivePlanAdherence, gradeFor } from '../lib/disciplineChecklist';
 
 interface LogTradeProps {
     isDarkMode: boolean;
@@ -30,6 +32,7 @@ interface LogTradeProps {
     userProfile?: UserProfile | null;
     trades: Trade[];
     isReadOnly?: boolean;
+    portfolioName?: string;
 }
 
 const STEPS = [
@@ -85,7 +88,7 @@ const StepIndicator = ({ current, total, isDarkMode, onSelect }: { current: numb
     </div>
 );
 
-const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, initialTrade, onCancel, currencySymbol, userProfile, trades, isReadOnly = false }) => {
+const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, initialTrade, onCancel, currencySymbol, userProfile, trades, isReadOnly = false, portfolioName }) => {
     const [step, setStep] = useState(1);
     const [isSaving, setIsSaving] = useState(false);
     const { addToast } = useToast();
@@ -101,6 +104,8 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
         title: string;
         description: string;
         showCancel?: boolean;
+        confirmText?: string;
+        cancelText?: string;
         onConfirm: () => void | Promise<void>;
     }>({
         isOpen: false,
@@ -134,7 +139,12 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
         tags: initialTrade?.tags?.join(', ') || '',
         voiceNote: initialTrade?.voiceNote || '',
         setupId: initialTrade?.setupId || '',
+        checklistChecks: initialTrade?.checklistChecks || {} as Record<string, boolean>,
+        behaviorTags: initialTrade?.behaviorTags || [] as string[],
     });
+
+    // Discipline engine: active checklist template (single template, P1).
+    const { activeTemplate: checklistTemplate } = useChecklistTemplates();
 
     const [metrics, setMetrics] = useState({ risk: 0, reward: 0, rr: 0 });
 
@@ -249,8 +259,46 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
   const handleDeleteScreenshot = (type: 'before' | 'after') => setScreenshots(p => ({ ...p, [type]: undefined }));
 
+    // Dirty guard: a new trade with any user input asks before discard,
+    // so backing out of the form can never look like a silent failed save.
+    const isFormDirty = !initialTrade?.id && (
+        (formData.pair || '').trim() !== '' ||
+        (formData.entryPrice || '') !== '' ||
+        step > 1 ||
+        Boolean(screenshots.before || screenshots.after)
+    );
+    const requestCancel = () => {
+        if (isFormDirty && onCancel) {
+            setConfirmModal({
+                isOpen: true,
+                title: 'Discard unsaved trade?',
+                description: 'You have unsaved input. Leaving now will lose this trade.',
+                showCancel: true,
+                confirmText: 'Discard',
+                cancelText: 'Keep editing',
+                onConfirm: () => { setConfirmModal(p => ({ ...p, isOpen: false })); onCancel(); },
+            });
+            return;
+        }
+        onCancel?.();
+    };
+
+    // Client-side id that never throws, even where crypto.randomUUID is
+    // unavailable (non-secure WebViews / older Android system WebView).
+    const newClientId = (): string => {
+        try {
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+        } catch { /* fall through to fallback below */ }
+        return `trade-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    };
+
     const finalizeSave = async () => {
-    if (saveInFlightRef.current) return;
+    if (saveInFlightRef.current) {
+        addToast({ type: 'info', title: 'Already saving', message: 'Your trade is being saved — please wait a moment.', duration: 3000 });
+        return;
+    }
     const entry = parseFloat(formData.entryPrice);
     const stopLoss = parseFloat(formData.stopLoss);
     const takeProfit = parseFloat(formData.takeProfit);
@@ -279,11 +327,13 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
       return;
     }
 
-    const normalizedTrade = normalizeTrade({
+    let normalizedTrade: Trade;
+    try {
+      normalizedTrade = normalizeTrade({
       ...(initialTrade || {}),
       ...formData,
       ...metrics,
-      id: initialTrade?.id || crypto.randomUUID(),
+      id: initialTrade?.id || newClientId(),
       entryPrice: entry,
       exitPrice,
       stopLoss: Number.isFinite(stopLoss) ? stopLoss : 0,
@@ -296,6 +346,26 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
       beforeScreenshot: screenshots.before,
       afterScreenshot: screenshots.after,
     }, initialTrade, { preserveProvidedPnl: initialTrade?.ticketId ? true : (hasInitialTrade ? !hasExecutionChanges : false) });
+    } catch (err) {
+        console.error('Failed to prepare trade for save:', err);
+        addToast({ type: 'error', title: 'Could not prepare trade', message: 'Something went wrong building your trade. Please try again.', duration: 6000 });
+        return;
+    }
+
+    // Discipline snapshot: recompute at save time so the stored grade always
+    // matches the checklist. Untouched trades keep the manual planAdherence.
+    const templateItems = checklistTemplate.items;
+    const checklistTouched =
+        Object.keys(formData.checklistChecks || {}).length > 0 || (formData.behaviorTags || []).length > 0;
+    if (checklistTouched && templateItems.length > 0) {
+        const rate = computeAdherence(formData.checklistChecks, templateItems) ?? 0;
+        normalizedTrade.checklistTemplateId = checklistTemplate.id;
+        normalizedTrade.checklistChecks = formData.checklistChecks;
+        normalizedTrade.adherenceRate = rate;
+        normalizedTrade.executionGrade = gradeFor(rate);
+        normalizedTrade.planAdherence = derivePlanAdherence(rate);
+        normalizedTrade.behaviorTags = formData.behaviorTags;
+    }
 
     const lockedTrade = isDesktopBridgeTrade && initialTrade
       ? {
@@ -313,9 +383,20 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
     saveInFlightRef.current = true;
     setIsSaving(true);
+    // Watchdog: if the save hangs (network stall, hung upload), say so loudly
+    // instead of spinning forever with zero feedback.
+    const saveWatchdog = window.setTimeout(() => {
+        if (saveInFlightRef.current) {
+            addToast({ type: 'warning', title: 'Still saving…', message: 'Taking longer than expected — check your connection. Your input is safe on this form.', duration: 8000 });
+        }
+    }, 20000);
     try {
       await onSave(lockedTrade);
+    } catch (err) {
+      console.error('LogTrade save failed:', err);
+      addToast({ type: 'error', title: 'Save failed', message: (err as any)?.message || 'Could not save your trade. Check your connection and try again.', duration: 7000 });
     } finally {
+      window.clearTimeout(saveWatchdog);
       saveInFlightRef.current = false;
       setIsSaving(false);
     }
@@ -339,7 +420,8 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    {initialTrade && onCancel && <Button variant="destructive" size="sm" onClick={onCancel} leftIcon={<X size={14} />}>Cancel</Button>}
+                    {initialTrade && onCancel && <Button variant="destructive" size="sm" onClick={requestCancel} leftIcon={<X size={14} />}>Cancel</Button>}
+                    {!initialTrade && onCancel && <Button variant="destructive" size="sm" onClick={requestCancel} leftIcon={<X size={14} />}>Cancel</Button>}
                     <Button variant="secondary" size="sm" disabled={isRestricted || isReadOnly} onClick={() => !isReadOnly && importTradesInputRef.current?.click()} leftIcon={isRestricted || isReadOnly ? <Lock size={14} /> : <Upload size={14} />} className="hidden sm:flex">Import</Button>
                     <input type="file" ref={importTradesInputRef} className="hidden" accept=".csv,.txt" onChange={handleImportMT4MT5} />
                     <Button variant="primary" size="sm" onClick={finalizeSave} isLoading={isSaving} disabled={isReadOnly} leftIcon={!isSaving && <Save size={16} />}>{initialTrade?.id ? 'Update' : 'Save'}</Button>

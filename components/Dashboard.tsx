@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Lock, Info, X, Gauge, CalendarDays, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, CalendarDays, AlertTriangle, RefreshCw, Plus, Sparkles, Flame, Inbox } from 'lucide-react';
 import {
     DndContext,
     closestCenter,
@@ -31,6 +31,8 @@ import { Tooltip } from './ui/Tooltip';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { sortTradesChronologically } from '../lib/analyticsUtils';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
+import { haptic } from '../lib/haptics';
+import { fetchEconomicCalendar, getCalendarWindow } from '../lib/economicCalendarClient';
 
 const safePnL = (value: unknown): number => {
     const n = typeof value === 'number' ? value : Number(value);
@@ -72,6 +74,31 @@ interface DashboardProps {
     isDemoMode?: boolean;
 }
 
+// --- MOBILE EMPTY STATE (illustrative, CTA to Log) ---
+const MobileEmptyState: React.FC<{ isDarkMode: boolean; onCta: () => void; isFreeTier?: boolean }> = ({ isDarkMode, onCta, isFreeTier }) => (
+    <div className={`flex flex-col items-center justify-center text-center py-10 px-6 rounded-2xl border border-dashed ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+        <div className={`w-20 h-20 rounded-[20px] flex items-center justify-center mb-4 border ${isDarkMode ? 'bg-[#FF4F01]/10 border-[#FF4F01]/15 text-[#FF4F01]' : 'bg-orange-50 border-orange-100 text-[#FF4F01]'}`}>
+            <Inbox size={32} strokeWidth={1.6} />
+        </div>
+        <h3 className={`text-[16px] font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>No trades yet</h3>
+        <p className={`text-[13px] font-medium leading-relaxed max-w-[320px] mt-1.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
+            Your journal is empty. Log your first trade to unlock stats, equity curve &amp; streak insights.
+        </p>
+        <div className="flex flex-col sm:flex-row items-center gap-3 mt-6 w-full sm:w-auto">
+            <button
+                onClick={() => { try { haptic.light(); } catch {} onCta(); }}
+                className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FF4F01] hover:bg-[#E64601] active:scale-[0.98] text-white rounded-xl text-sm font-black shadow-[0_8px_24px_rgba(255,79,1,0.22)] transition-all touch-manipulation"
+            >
+                <Plus size={16} strokeWidth={2.5} /> Log First Trade
+            </button>
+            {isFreeTier && (
+                <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${isDarkMode ? 'border-zinc-800 text-zinc-500 bg-zinc-900/40' : 'border-slate-200 text-slate-500 bg-slate-50'}`}>Free plan · unlimited demo preview</span>
+            )}
+        </div>
+        <p className={`text-[11px] font-medium mt-3 ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>Takes ~20 seconds — you can edit or delete any time.</p>
+    </div>
+);
+
 // --- WIDGET COMPONENTS ---
 
 const DashboardSkeleton = ({ isDarkMode }: { isDarkMode: boolean }) => (
@@ -102,6 +129,28 @@ const DashboardSkeleton = ({ isDarkMode }: { isDarkMode: boolean }) => (
     </div>
 );
 
+const EASetupPrompt = ({ isDarkMode, onSetupClick }: { isDarkMode: boolean, onSetupClick: () => void }) => (
+    <div className={`mb-6 sm:mb-8 p-4 sm:p-8 rounded-2xl sm:rounded-[32px] border-2 border-dashed flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 transition-all text-center md:text-left ${isDarkMode ? 'bg-indigo-500/5 border-indigo-500/20' : 'bg-indigo-50 border-indigo-200'}`}>
+        <div className="flex flex-col md:flex-row items-center gap-4 sm:gap-6 w-full md:w-auto">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
+                <Cpu size={28} />
+            </div>
+            <div className="min-w-0">
+                <h3 className="text-[15px] sm:text-xl font-black mb-1">Finish your EA Setup</h3>
+                <p className={`text-[13px] sm:text-sm max-w-md mx-auto md:mx-0 leading-relaxed ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+                    You&apos;ve selected EA Sync, but we haven&apos;t received any data yet. Complete the setup to see your real-time trades and equity.
+                </p>
+            </div>
+        </div>
+        <button
+            onClick={() => { try { haptic.light(); } catch {} onSetupClick(); }}
+            className="min-h-[44px] w-full md:w-auto justify-center px-6 sm:px-8 py-3 sm:py-4 bg-indigo-500 hover:bg-indigo-600 active:scale-[0.98] text-white rounded-2xl font-black text-sm transition-all hover:scale-[1.02] shadow-xl shadow-indigo-500/20 flex items-center gap-2 shrink-0 touch-manipulation"
+        >
+            Setup Guide <ArrowRight size={18} />
+        </button>
+    </div>
+);
+
 interface StatCardProps {
     label: string;
     value: string | number;
@@ -114,26 +163,50 @@ interface StatCardProps {
     onInfoClick?: () => void;
 }
 
-const StatCard = ({ label, value, subtext, trend, isDarkMode, icon: Icon, colorClass, tooltip, onInfoClick }: StatCardProps) => (
-    <div className={`h-full p-6 rounded-2xl border transition-all hover:shadow-lg ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
-        <div className="flex justify-between items-start mb-4">
-            <div className={`p-3 rounded-xl ${isDarkMode ? 'bg-[#27272a]' : 'bg-slate-50'}`}>
-                <Icon size={20} className={colorClass} />
+const StatCard = ({ label, value, subtext, trend, isDarkMode, icon: Icon, colorClass, tooltip, onInfoClick }: StatCardProps) => {
+    const isInteractive = !!onInfoClick;
+    const handleTap = useCallback(() => {
+        if (!isInteractive) return;
+        try { haptic.light(); } catch {}
+        onInfoClick?.();
+    }, [isInteractive, onInfoClick]);
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (!isInteractive) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleTap();
+        }
+    };
+
+    return (
+        <div
+            role={isInteractive ? 'button' : undefined}
+            tabIndex={isInteractive ? 0 : undefined}
+            onClick={isInteractive ? handleTap : undefined}
+            onKeyDown={isInteractive ? handleKeyDown : undefined}
+            className={`h-full p-6 rounded-2xl border transition-all hover:shadow-lg ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'} ${isInteractive ? 'cursor-pointer active:scale-[0.98] touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01]/30' : ''}`}
+        >
+            <div className="flex justify-between items-start mb-4">
+                <div className={`p-3 rounded-xl ${isDarkMode ? 'bg-[#27272a]' : 'bg-slate-50'}`}>
+                    <Icon size={20} className={colorClass} />
+                </div>
+                {trend && (
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 ${trend > 0 ? 'bg-teal-500/10 text-teal-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                        {trend > 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                        {Math.abs(trend)}%
+                    </span>
+                )}
             </div>
-            {trend && (
-                <span className={`text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 ${trend > 0 ? 'bg-teal-500/10 text-teal-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                    {trend > 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                    {Math.abs(trend)}%
-                </span>
-            )}
+            <h3 className={`text-2xl font-bold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{value}</h3>
+            <div className="flex items-center gap-2">
+                <p className={`text-xs font-medium uppercase tracking-wider opacity-50 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{label}</p>
+            </div>
+            {subtext && <p className="text-xs text-zinc-500 mt-2">{subtext}</p>}
+            {isInteractive && <span className="sr-only">Tap for details</span>}
         </div>
-        <h3 className={`text-2xl font-bold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{value}</h3>
-        <div className="flex items-center gap-2">
-            <p className={`text-xs font-medium uppercase tracking-wider opacity-50 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{label}</p>
-        </div>
-        {subtext && <p className="text-xs text-zinc-500 mt-2">{subtext}</p>}
-    </div>
-);
+    );
+};
 
 const formatDateLabel = (value?: string) => {
     if (!value) return 'TBA';
@@ -165,19 +238,8 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
     const hasEventsRef = useRef(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     const todayAnchorRef = useRef<HTMLDivElement>(null);
-    const toLocalDateStr = (d: Date) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-    };
     // Window: [today-3, today+7] always visible via scroll; opens on today.
-    const { from: windowFrom, to: windowTo, today: todayStr } = (() => {
-        const base = new Date();
-        const fromD = new Date(base); fromD.setDate(base.getDate() - 3);
-        const toD = new Date(base); toD.setDate(base.getDate() + 7);
-        return { from: toLocalDateStr(fromD), to: toLocalDateStr(toD), today: toLocalDateStr(base) };
-    })();
+    const { from: windowFrom, to: windowTo, today: todayStr } = getCalendarWindow();
 
     const loadCalendar = useCallback(async (options?: { silent?: boolean }) => {
         const silent = options?.silent ?? false;
@@ -194,26 +256,16 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
         setError(null);
 
         try {
-            // Today-first window: fetch max 3 days back + 7 days ahead (local dates).
-            const base = new Date();
-            const fromD = new Date(base); fromD.setDate(base.getDate() - 3);
-            const toD = new Date(base); toD.setDate(base.getDate() + 7);
-            const from = toLocalDateStr(fromD);
-            const to = toLocalDateStr(toD);
+            // Today-first window: max 3 days back + 7 days ahead, all scrollable.
+            const { from, to } = getCalendarWindow(new Date());
             const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-            const response = await fetch(`/api/economic-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&tz=${encodeURIComponent(userTz)}`);
-            const payload = await response.json().catch(() => ({}));
+            // Authenticated via economicCalendarClient (session JWT) with a
+            // direct ForexFactory CDN fallback, so phone-web/APK both load it.
+            const payload = await fetchEconomicCalendar({ from, to, tz: userTz });
 
             if (!mountedRef.current) return;
 
-            if (!response.ok || payload?.error) {
-                setError(payload?.error || 'The economic calendar service did not return data.');
-                setEvents([]);
-                hasEventsRef.current = false;
-                return;
-            }
-
-            const rawEvents = Array.isArray(payload?.data) ? payload.data : [];
+            const rawEvents = Array.isArray((payload as any)?.data) ? (payload as any).data : [];
             const normalizedEvents = rawEvents
                 .filter((item: EconomicCalendarItem) => item && (item.event || item.Event) && item.date)
                 .slice()
@@ -322,33 +374,33 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                         <CalendarDays size={18} className="text-sky-500" />
                         Economic Calendar
                         <button
-                            onClick={() => void loadCalendar({ silent: false })}
+                            onClick={() => { try { haptic.light(); } catch {} void loadCalendar({ silent: false }); }}
                             disabled={isRefreshing || isLoading}
                             title="Refresh calendar data"
-                            className={`p-1 rounded-lg transition-all ${isDarkMode ? 'hover:bg-zinc-800 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-700'} disabled:opacity-50`}
+                            className={`p-1.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-all ${isDarkMode ? 'hover:bg-zinc-800 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-700'} disabled:opacity-50 touch-manipulation`}
                         >
-                            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-sky-500' : ''} />
+                            <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-sky-500' : ''} />
                         </button>
                     </h3>
                 </div>
                 
                 {/* Impact Filter Controls */}
-                <div className="flex items-center gap-1 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800 self-start sm:self-auto">
+                <div className="flex items-center gap-1 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800 self-start sm:self-auto flex-wrap">
                     <button
-                        onClick={() => setImpactFilter('all')}
-                        className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition-all ${impactFilter === 'all' ? 'bg-sky-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                        onClick={() => { try { haptic.selection(); } catch {} setImpactFilter('all'); }}
+                        className={`px-2.5 py-1.5 min-h-[30px] text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'all' ? 'bg-sky-500 text-white' : 'text-zinc-400 hover:text-white'}`}
                     >
                         ALL
                     </button>
                     <button
-                        onClick={() => setImpactFilter('med-high')}
-                        className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition-all ${impactFilter === 'med-high' ? 'bg-amber-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                        onClick={() => { try { haptic.selection(); } catch {} setImpactFilter('med-high'); }}
+                        className={`px-2.5 py-1.5 min-h-[30px] text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'med-high' ? 'bg-amber-500 text-white' : 'text-zinc-400 hover:text-white'}`}
                     >
                         MED+HIGH
                     </button>
                     <button
-                        onClick={() => setImpactFilter('high')}
-                        className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition-all ${impactFilter === 'high' ? 'bg-rose-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                        onClick={() => { try { haptic.selection(); } catch {} setImpactFilter('high'); }}
+                        className={`px-2.5 py-1.5 min-h-[30px] text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'high' ? 'bg-rose-500 text-white' : 'text-zinc-400 hover:text-white'}`}
                     >
                         HIGH ONLY
                     </button>
@@ -390,11 +442,15 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                     </div>
                 </div>
             ) : visibleEvents.length === 0 ? (
-                <div className={`flex-1 rounded-2xl border border-dashed flex items-center justify-center text-center px-6 ${isDarkMode ? 'border-zinc-800 text-zinc-500' : 'border-slate-200 text-slate-400'}`}>
+                <div className={`flex-1 rounded-2xl border border-dashed flex flex-col items-center justify-center text-center px-6 py-8 gap-3 ${isDarkMode ? 'border-zinc-800 text-zinc-500' : 'border-slate-200 text-slate-400'}`}>
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-zinc-900 text-zinc-600' : 'bg-slate-100 text-slate-400'}`}>
+                        <CalendarDays size={20} />
+                    </div>
                     <div>
                         <p className="text-sm font-bold">No economic events in this window</p>
-                        <p className="text-xs mt-1">ForexFactory returned no scheduled events for the selected range.</p>
+                        <p className="text-xs mt-1 max-w-[280px]">ForexFactory returned no scheduled events for the selected range or filter.</p>
                     </div>
+                    <button onClick={() => { try { haptic.light(); } catch {} void loadCalendar({ silent: false }); }} className="min-h-[44px] mt-1 px-4 py-2 rounded-xl text-xs font-black border border-zinc-800 hover:bg-zinc-900 transition-colors touch-manipulation">Try again</button>
                 </div>
             ) : (
                 <div ref={scrollRef} className="space-y-3 flex-1 overflow-y-auto max-h-[290px] custom-scrollbar pr-2.5">
@@ -488,6 +544,7 @@ const DailyBiasWidget = React.memo(({ isDarkMode, dailyBias, onUpdateBias, onInf
     }, [dailyBias]);
 
     const handleCycleBias = (date: string) => {
+        try { haptic.selection(); } catch {}
         const currentBiasObj = dailyBias.find(b => b.date === date);
         const current = currentBiasObj?.bias || 'Neutral';
         let next: 'Bullish' | 'Bearish' | 'Neutral' = 'Bullish';
@@ -586,6 +643,27 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
         return (eaSession?.data?.openPositions || []).reduce((sum: number, pos: any) => sum + Number(pos.profit || 0), 0);
     }, [eaSession]);
 
+    // Streak / momentum tracking (progressive disclosure + motivation).
+    const streakInfo = useMemo(() => {
+        if (trades.length === 0) return null;
+        const sorted = sortTradesChronologically([...trades]);
+        let currentStreak = 0;
+        let currentType: 'Win' | 'Loss' | null = null;
+        // walk backwards from most recent
+        for (let i = sorted.length - 1; i >= 0; i--) {
+            const r = sorted[i].result;
+            if (r !== 'Win' && r !== 'Loss') break;
+            if (currentType === null) {
+                currentType = r as 'Win' | 'Loss';
+                currentStreak = 1;
+            } else if (r === currentType) {
+                currentStreak++;
+            } else break;
+        }
+        if (!currentType) return null;
+        return { count: currentStreak, type: currentType };
+    }, [trades]);
+
     const InfoPanel = ({ info, onClose }: { info: { title: string, content: string }, onClose: () => void }) => (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 sm:p-12 animate-in fade-in duration-300">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -635,6 +713,7 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
     const handleDragEnd = (event: DragEndEvent) => {
         const { active, over } = event;
         if (active && over && active.id !== over.id) {
+            try { haptic.selection(); } catch {}
             setWidgetOrder((items) => {
                 const oldIndex = items.indexOf(String(active.id));
                 const newIndex = items.indexOf(String(over.id));
@@ -656,6 +735,8 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
     }, [trades]);
     const isPro = currentPlan === APP_CONSTANTS.PLANS.HOBBY;
 
+    const hasNoTrades = trades.length === 0 && !isDemoMode;
+
     const LockedView = ({ title, subtitle }: { title: string, subtitle: string }) => (
         <div className={`h-full w-full p-6 rounded-2xl border flex flex-col items-center justify-center text-center relative overflow-hidden ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-100 shadow-md'}`}>
             <div className="absolute inset-0 bg-black/5 dark:bg-white/[0.02] backdrop-blur-[2px] z-10" />
@@ -667,9 +748,9 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
                     <h4 className="text-sm font-black uppercase tracking-widest mb-1">{title}</h4>
                     <p className="text-[10px] font-bold opacity-40 px-6 leading-relaxed">{subtitle}</p>
                 </div>
-                <button 
-                    onClick={() => onViewChange('settings')}
-                    className="mt-2 px-6 py-2 bg-[#FF4F01] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[#FF4F01]/20 hover:scale-105 transition-all"
+                <button
+                    onClick={() => { try { haptic.light(); } catch {} onViewChange('settings'); }}
+                    className="mt-2 px-6 py-2 bg-[#FF4F01] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[#FF4F01]/20 hover:scale-105 active:scale-95 transition-all touch-manipulation"
                 >
                     Upgrade to Unlock
                 </button>
@@ -757,39 +838,62 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
 
     // Helper to determine col-span based on ID
     const getColSpan = (id: string) => {
-        if (id === 'recentTrades') return 'col-span-1 min-h-[250px]';
-        if (id === 'equityCurve') return 'col-span-1 lg:col-span-2 min-h-[250px]';
+        if (id === 'recentTrades') return 'col-span-1 min-h-[280px]';
+        if (id === 'equityCurve') return 'col-span-1 lg:col-span-2 min-h-[320px]';
         // Daily Bias and Open Positions should take full width to avoid the large gap on the right
         return 'col-span-1 lg:col-span-3 min-h-[250px]';
     };
 
     return (
-        <div className={`w-full h-full overflow-y-auto p-8 font-sans ${isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-slate-50 text-slate-900'}`}>
-            <header className="mb-6 flex flex-col md:flex-row md:items-center justify-start gap-6">
-                <div>
-                    <div className="flex items-center gap-3 mb-1">
-                        <h1 className="text-3xl font-bold tracking-tight">{userProfile.accountName || 'Trading Dashboard'}</h1>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-200'}`}>
+        <div className={`w-full h-full overflow-y-auto custom-scrollbar p-4 sm:p-8 pb-nav font-sans ${isDarkMode ? 'bg-[#000000] text-zinc-200' : 'bg-slate-50 text-slate-900'}`}>
+            <header className="mb-6 flex flex-col md:flex-row md:items-center justify-start gap-4 sm:gap-6">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-1 flex-wrap min-w-0">
+                        <h1 className="text-[20px] sm:text-3xl font-bold tracking-tight truncate min-w-0">{userProfile.accountName || 'Trading Dashboard'}</h1>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border shrink-0 ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-200'}`}>
                             {userProfile.experienceLevel}
                         </span>
                         {isDemoMode && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-amber-500/30 bg-amber-500/10 text-amber-300">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest border border-amber-500/30 bg-amber-500/10 text-amber-300 shrink-0">
                                 Demo Mode
                             </span>
                         )}
+                        {/* Streak / momentum badge — progressive disclosure next to the level pill */}
+                        {streakInfo && !isDemoMode && trades.length > 0 && (
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border shrink-0 ${streakInfo.type === 'Win' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
+                                <Flame size={12} className={streakInfo.type === 'Win' ? 'text-emerald-400' : 'text-rose-400'} />
+                                {streakInfo.count}× {streakInfo.type} streak
+                            </span>
+                        )}
                     </div>
-                    <p className={`text-sm ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
-                        {isDemoMode ? 'Sample journal loaded with a recent three-month history of trades, notes, and analytics.' : `Welcome back, ${userProfile.name}. Analyzing markets from ${userProfile.country}.`}
+                    <p className={`text-[13px] sm:text-sm break-words ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
+                        {isDemoMode ? 'Sample journal — 3 months of trades & analytics.' : `Welcome back, ${userProfile.name}. Analyzing markets from ${userProfile.country}.`}
                     </p>
                 </div>
 
         </header>
 
-            {/* Session Clock Widget (Fixed at Top) */}
-            <SessionClock isDarkMode={isDarkMode} />
+            {/* EA Setup Prompt (For new EA users) — hidden in demo mode */}
+            {!isDemoMode && trades.length === 0 && userProfile.syncMethod === 'EA_CONNECT' && !eaSession && (
+                <EASetupPrompt isDarkMode={isDarkMode} onSetupClick={() => onViewChange('ea-setup')} />
+            )}
 
-            {/* Daily Quote Insight */}
-            <DailyQuote isDarkMode={isDarkMode} />
+            {/* MobileEmptyState for no trades — illustrative + CTA to Log (hidden in demo/EA prompt) */}
+            {hasNoTrades && userProfile.syncMethod !== 'EA_CONNECT' && (
+                <div className="mb-6">
+                    <MobileEmptyState isDarkMode={isDarkMode} onCta={() => onViewChange('log-trade')} isFreeTier={isFreeTier} />
+                </div>
+            )}
+
+            {/* Session Clock Widget (Fixed at Top) — compact on mobile via wrapper */}
+            <div className="mb-6 [&>div]:!p-4 sm:[&>div]:!p-6 [&>div]:!rounded-2xl [&>div]:!mb-0">
+                <SessionClock isDarkMode={isDarkMode} />
+            </div>
+
+            {/* Daily Quote Insight — compact on mobile via wrapper */}
+            <div className="mb-6 [&>div]:!p-4 sm:[&>div]:!p-6 [&>div]:!rounded-2xl [&>div]:!mb-0">
+                <DailyQuote isDarkMode={isDarkMode} />
+            </div>
 
             {/* Stats Row (Fixed) */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -844,18 +948,29 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
                 />
             </div>
 
-            {/* Draggable Widget Grid */}
+            {/* Draggable Widget Grid — gap-3 mobile, gap-6 lg; haptics on drag */}
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <SortableContext items={widgetOrder} strategy={rectSortingStrategy}>
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pb-20">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-6 pb-6">
                         {widgetOrder.map(id => (
-                            <SortableWidget key={id} id={id} className={getColSpan(id)}>
+                            <SortableWidget key={id} id={id} className={`${getColSpan(id)} [&>div]:!p-4 sm:[&>div]:!p-6 [&>div]:!rounded-2xl`}>
                                 {renderWidget(id)}
                             </SortableWidget>
                         ))}
                     </div>
                 </SortableContext>
             </DndContext>
+
+            {/* Inline FAB fallback — AI Copilot — visible only if MobileQuickActions not mounted by App shell (thumb zone). Hidden on lg via media query; respects safe-area. */}
+            {!isDemoMode && hasNoTrades && (
+                <button
+                    onClick={() => { try { haptic.light(); } catch {} onViewChange('ai-chat'); }}
+                    aria-label="AI Strategy Copilot"
+                    className="sm:hidden fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom)+16px)] right-4 z-40 w-14 h-14 rounded-full bg-white/[0.10] backdrop-blur-2xl border border-white/[0.14] text-white flex items-center justify-center shadow-[0_8px_32px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.10)] active:scale-95 transition-all touch-manipulation"
+                >
+                    <Sparkles size={26} strokeWidth={2.2} className="text-white" />
+                </button>
+            )}
 
             {activeInfo && (
                 <InfoPanel 

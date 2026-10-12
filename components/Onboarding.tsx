@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { User, DollarSign, Zap, ChevronRight, CheckCircle2, ArrowRight, ArrowLeft, Terminal, Shield, Flame, Check, Wallet, Lock, Camera } from 'lucide-react';
+import { User, DollarSign, Zap, ChevronRight, CheckCircle2, ArrowRight, ArrowLeft, Terminal, Shield, Flame, Check, Wallet, Lock, Camera, Newspaper, LineChart, Layers } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { UserProfile } from '../types';
 import { dataService } from '../services/dataService';
 
@@ -16,6 +17,57 @@ const CURRENCIES = [
   { code: 'GBP', symbol: '£', name: 'British Pound' },
   { code: 'ZAR', symbol: 'R', name: 'South African Rand' },
 ];
+
+// Strategy Selector Matrix — pick an analytical engine and instantly know
+// which metrics must be logged for every single trade.
+type StrategyProfileId = 'Fundamental' | 'Technical' | 'Blended';
+
+const STRATEGY_PROFILES: { id: StrategyProfileId; tagline: string; requires: string[]; icon: LucideIcon }[] = [
+  {
+    id: 'Fundamental',
+    tagline: 'Trade the "why" — central banks & data',
+    requires: [
+      'Central bank bias per trade (Hawkish vs Dovish)',
+      'Unexpected report overrides (#NFP, #CPI, #FOMC)',
+      'Event tag on every entry',
+    ],
+    icon: Newspaper,
+  },
+  {
+    id: 'Technical',
+    tagline: 'Trade the "when" — structure & patterns',
+    requires: [
+      'Exact chart pattern per trade',
+      'Rigid Risk-to-Reward (planned vs actual)',
+      'Multi-timeframe structural alignment',
+      'Before / After screenshots',
+    ],
+    icon: LineChart,
+  },
+  {
+    id: 'Blended',
+    tagline: 'Macro reason + technical trigger',
+    requires: [
+      'Macro reason — the "Why" (bias aligned?)',
+      'Pattern trigger — the "When" (valid setup?)',
+      'Trade valid only if BOTH pass',
+    ],
+    icon: Layers,
+  },
+];
+
+// Mirror the selection locally so it survives reloads even before the
+// profiles table gains a strategy_profile column.
+const persistStrategyProfile = (id: StrategyProfileId) => {
+  try { localStorage.setItem('jfx_strategy_profile', id); } catch { /* blocked */ }
+};
+
+const readPersistedStrategyProfile = (): StrategyProfileId | null => {
+  try {
+    const raw = localStorage.getItem('jfx_strategy_profile');
+    return raw === 'Fundamental' || raw === 'Technical' || raw === 'Blended' ? raw : null;
+  } catch { return null; }
+};
 
 // Journaler Bots (Free Tier)
 const freeAvatars = [
@@ -62,6 +114,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
     syncMethod: 'Manual',
     experienceLevel: 'Beginner',
     tradingStyle: 'Day Trader',
+    strategyProfile: readPersistedStrategyProfile() ?? 'Technical',
     onboarded: true,
     plan: 'FREE TIER (JOURNALER)',
     themePreference: 'obsidian',
@@ -138,6 +191,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
   const currentAvatars = formData.plan === 'FREE TIER (JOURNALER)' ? freeAvatars : 
                         formData.plan === 'PRO TIER (ANALYSTS)' ? proAvatars : premiumAvatars;
+
+  const activeStrategy: StrategyProfileId =
+    formData.strategyProfile === 'Fundamental' || formData.strategyProfile === 'Blended' ? formData.strategyProfile : 'Technical';
+
+  const selectStrategyProfile = (id: StrategyProfileId) => {
+    persistStrategyProfile(id);
+    setFormData(prev => ({ ...prev, strategyProfile: id }));
+  };
 
   return (
     <div className={`fixed inset-0 z-[200] flex flex-col items-center justify-start overflow-y-auto ${containerBg} ${textColor} font-sans`}>
@@ -219,6 +280,41 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
                         {formData.experienceLevel === lvl && <div className="absolute top-3 right-3 text-[#FF4F01]"><Check size={14} /></div>}
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] mb-6 block opacity-60">Select your strategy profile</label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {STRATEGY_PROFILES.map((profile) => {
+                      const Icon = profile.icon;
+                      const isActive = activeStrategy === profile.id;
+                      return (
+                        <button
+                          key={profile.id}
+                          onClick={() => selectStrategyProfile(profile.id)}
+                          className={`p-6 rounded-xl border-2 text-left transition-all relative ${isActive
+                              ? 'border-[#FF4F01] bg-[#FF4F01]/5'
+                              : isDarkMode ? 'border-zinc-800 bg-[#111]' : 'border-zinc-100 bg-white shadow-sm'
+                            }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <Icon size={16} className={isActive ? 'text-[#FF4F01]' : 'opacity-50'} />
+                            <div className="font-bold text-sm">{profile.id}</div>
+                          </div>
+                          <div className={`text-xs mb-4 ${subTextColor}`}>{profile.tagline}</div>
+                          <ul className="space-y-2">
+                            {profile.requires.map((req) => (
+                              <li key={req} className="flex items-start gap-2 text-xs opacity-80">
+                                <Check size={12} className="text-[#FF4F01] shrink-0 mt-0.5" />
+                                <span className="leading-snug">{req}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          {isActive && <div className="absolute top-3 right-3 text-[#FF4F01]"><Check size={14} /></div>}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
