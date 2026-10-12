@@ -25,7 +25,8 @@ import {
   IconMessage,
   IconTerminal2,
   IconFlask,
-  IconRadio
+  IconRadio,
+  IconWallet
 } from '@tabler/icons-react';
 import { UserProfile, Trade } from '../types';
 import { useToast } from './ui/Toast';
@@ -121,6 +122,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     },
     { id: 'analytics', icon: <IconChartBar size={18} />, label: 'Analytics', description: 'Deep dive into your statistics' },
     { id: 'notes', icon: <IconFileText size={18} />, label: 'Notebook', description: 'Trading notes and strategies' },
+    { id: 'portfolios', icon: <IconWallet size={18} />, label: 'Portfolios', description: 'Journals, connections and stats per portfolio' },
     { id: 'charts', icon: <IconChartCandle size={18} />, label: 'Market Grid', restricted: true, description: 'Multi-chart analysis view' },
     { id: 'backtest-lab', icon: <IconFlask size={18} />, label: 'Backtest Lab', restricted: true, description: 'Test strategies historically' },
     { id: 'ai-chat', icon: <IconMessage size={18} />, label: 'AI Assistant', description: 'Get AI trading insights' },

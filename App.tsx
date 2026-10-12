@@ -7,6 +7,8 @@ import Journal from './components/Journal';
 import Auth from './components/Auth';
 import BetaSplash from './components/BetaSplash';
 import { PrivacyPolicy, TermsOfService } from './components/LegalPages';
+import { ChevronLeft } from 'lucide-react';
+import { PortfolioSwitcher } from './components/PortfolioSwitcher';
 
 import { Trade, Note, DailyBias, UserProfile, Portfolio } from './types';
 import Onboarding from './components/Onboarding';
@@ -29,6 +31,7 @@ import { OfflineBlocker, useNetworkStatus } from './components/OfflineBlocker';
 import { BrandedLoader } from './components/ui/BrandedLoader';
 import { MobileBlocker } from './components/ui/MobileBlocker';
 import { MobileLayout } from './components/mobile/MobileLayout';
+import { MobilePortfoliosView } from './components/mobile/MobilePortfoliosView';
 import { MOBILE_ENABLED, IS_CAPACITOR } from './lib/featureFlags';
 import { useAuth } from './hooks/useAuth';
 import { useData } from './hooks/useData';
@@ -1642,6 +1645,35 @@ const onLogout = async () => {
             isDemoMode={isDemoMode}
           />
         )}
+            {currentView === 'portfolios' && (
+              <div className="mx-auto w-full max-w-5xl px-4 pb-16 pt-6">
+                <div className="mb-5 flex items-center gap-3">
+                  <button
+                    onClick={() => setCurrentView('dashboard')}
+                    aria-label="Back to dashboard"
+                    className="w-9 h-9 rounded-xl flex items-center justify-center border border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:text-white transition-all"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <h1 className="text-xl font-black tracking-tight text-white">Portfolios</h1>
+                </div>
+                <div className="mx-auto w-full max-w-2xl rounded-3xl border border-white/[0.08] bg-[#0a0a0a] p-4 sm:p-6">
+                  <PortfolioSwitcher
+                    portfolios={portfolios}
+                    activeId={activePortfolioId}
+                    defaultId={defaultPortfolioId}
+                    canAdd={canAddPortfolio}
+                    isDarkMode={isDarkMode}
+                    variant="settings"
+                    tradeCounts={tradeCounts}
+                    onSelect={(id) => setActivePortfolioId(id)}
+                    onAdd={handleAddPortfolioAndConnect}
+                    onRemove={handleRemovePortfolio}
+                  />
+                </div>
+              </div>
+            )}
+
             {currentView === 'notes' && (
               <Notes
                 isDarkMode={isDarkMode}

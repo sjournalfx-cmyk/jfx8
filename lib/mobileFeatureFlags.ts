@@ -18,6 +18,7 @@ export const MOBILE_ROUTES = new Set<string>([
   'ai-chat',
   'ea-setup',    // keep broker connect reachable; stub on mobile if desired later
   'discipline',  // Strategy Rules & Checklists (Discipline Engine)
+  'portfolios',  // portfolio manager (drawer + desktop nav)
 ]);
 
 // Desktop-only: never render on APK / small screens — show DesktopOnlyStub instead.
