@@ -4,6 +4,21 @@ import { createHash } from 'crypto';
 import { requireUser } from '../_lib/auth.js';
 import { setCtraderRefreshLease } from '../_lib/ctraderTokenLock.js';
 import {
+  hashOrderParams,
+  resolveSymbolId,
+  suggestSymbols,
+} from '../_lib/apiKeys.js';
+import {
+  countOpensToday,
+  evaluateLocks,
+  getUserTimezone,
+  isRuleActive,
+  resolvePortfolioContext,
+  toLots,
+  unlockMsRemaining,
+  type PortfolioContext,
+} from '../_lib/tradingLocks.js';
+import {
   extractRawApiKey,
   isJfxApiKey,
   parseIsDemo,
@@ -297,7 +312,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, X-Access-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, X-Access-Token, Idempotency-Key');
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
@@ -466,6 +481,81 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let accountId: number | null = requestedAccountId;
 
   let session: WsSession | null = null;
+
+  // Idempotency: retries with the same key + identical params replay the
+  // stored result instead of opening a second position. API-key callers MUST
+  // send Idempotency-Key (header or body); app sessions may omit it.
+  const readIdempotencyKey = (): string => {
+    const fromHeader = String((req.headers['idempotency-key'] as string) || '').trim();
+    if (fromHeader) return fromHeader;
+    const fromBody = String((body as any)?.idempotencyKey || '').trim();
+    return fromBody;
+  };
+
+  const lookupIdempotency = async (idemKey: string): Promise<any | null> => {
+    if (!supabaseUrl || !serviceKey) return null;
+    try {
+      const r = await fetch(
+        `${supabaseUrl}/rest/v1/api_order_idempotency?idempotency_key=eq.${encodeURIComponent(idemKey)}`,
+        { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
+      );
+      if (!r.ok) return null;
+      const rows = await r.json();
+      return Array.isArray(rows) && rows.length ? rows[0] : null;
+    } catch {
+      // Fail open: an unreachable idempotency table must not block trading.
+      return null;
+    }
+  };
+
+  const storeIdempotency = async (row: {
+    key: string;
+    user_id: string;
+    account_id: number;
+    params_hash: string;
+    status: 'completed';
+    result: unknown;
+  }): Promise<void> => {
+    if (!supabaseUrl || !serviceKey) return;
+    try {
+      await fetch(`${supabaseUrl}/rest/v1/api_order_idempotency`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          Prefer: 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify({
+          idempotency_key: row.key,
+          user_id: row.user_id,
+          account_id: row.account_id,
+          params_hash: row.params_hash,
+          status: row.status,
+          result: row.result,
+        }),
+      });
+    } catch {
+      // Non-fatal: the order already went through.
+    }
+  };
+
+  const contextWarnings = (ctx: PortfolioContext): string[] => {
+    const warnings: string[] = [];
+    if (ctx.portfolioIds.length > 1) {
+      warnings.push('This broker account is linked to more than one portfolio; limits come from the first match.');
+    }
+    if (ctx.locksUnchecked) {
+      warnings.push('Trading-lock rows were unreachable for this request and were NOT enforced.');
+    }
+    return warnings;
+  };
+
+  const portfolioFields = (ctx: PortfolioContext) => ({
+    portfolioId: ctx.portfolioId,
+    portfolioName: ctx.portfolioName,
+    ...(ctx.portfolioIds.length > 1 ? { portfolioIds: ctx.portfolioIds } : {}),
+  });
 
   const auditLog = async (status: number) => {
     if (keyId && authenticatedUserId && supabaseUrl && serviceKey) {
@@ -689,17 +779,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (!symbolId && rawSymbol) {
         const symbolsRes = await session.send(PT.SYMBOLS_LIST_REQ, { ctidTraderAccountId: accountId });
-        const cleanName = String(rawSymbol).toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const match = (symbolsRes.symbol || []).find((s: any) => {
-          const sName = String(s.symbolName || s.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-          return sName === cleanName || sName.includes(cleanName);
-        });
-        if (match?.symbolId) {
-          symbolId = Number(match.symbolId);
+        // Exact broker listing wins over fuzzy matches (EURUSD must not
+        // resolve to EURUSDm when EURUSD exists). See api/_lib/apiKeys.ts.
+        const resolved = resolveSymbolId(symbolsRes.symbol || [], rawSymbol);
+        if (resolved) {
+          symbolId = Number(resolved.symbolId);
         } else {
+          const suggestions = suggestSymbols(symbolsRes.symbol || [], rawSymbol);
           session.close();
           await auditLog(400);
-          res.status(400).json({ error: `Symbol '${rawSymbol}' not found on account ${accountId}` });
+          res.status(400).json({
+            error: `Symbol '${rawSymbol}' not found on account ${accountId}`,
+            ...(suggestions.length > 0 ? { suggestions } : {}),
+          });
           return;
         }
       }
@@ -709,6 +801,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await auditLog(400);
         res.status(400).json({ error: 'Missing symbol or symbolId' });
         return;
+      }
+
+      // Trading locks: portfolio hard limits bind every new-risk order path
+      // (agents, PATs, apps). Closes/modifies are never gated. Unlinked
+      // accounts warn-but-allow; unreachable lock rows warn-but-allow;
+      // skipped entirely for raw-token calls (no user).
+      let portfolioCtx: PortfolioContext | null = null;
+      if (authenticatedUserId && supabaseUrl && serviceKey) {
+        try {
+          const deps = { supabaseUrl, serviceKey };
+          portfolioCtx = await resolvePortfolioContext(deps, authenticatedUserId, accountId!);
+          const locks = portfolioCtx.locks;
+          if (portfolioCtx.portfolioId && locks) {
+            const volumeLotsForLocks = toLots(body.volume ?? body.volumeLots ?? 0.01);
+            let fillsToday = 0;
+            if (isRuleActive(locks.maxTrades)) {
+              const tz = await getUserTimezone(deps, authenticatedUserId);
+              const counted = await countOpensToday(session, accountId!, tz);
+              fillsToday = counted ?? 0;
+            }
+            const verdict = evaluateLocks(locks, { symbolId, volumeLots: volumeLotsForLocks, fillsToday });
+            if (verdict.allowed === false) {
+              const context: Record<string, unknown> = {};
+              if (verdict.rule === 'pairWhitelist') {
+                context.allowedSymbolIds = (locks.pairWhitelist?.symbolIds || []).map(Number);
+              } else if (verdict.rule === 'maxTrades') {
+                const max = Math.max(1, Math.floor(Number(locks.maxTrades?.maxPerDay) || 1));
+                context.maxPerDay = max;
+                context.fillsToday = fillsToday;
+              } else {
+                if (locks.lotGuard?.minLots !== undefined) context.minLots = Number(locks.lotGuard.minLots);
+                if (locks.lotGuard?.maxLots !== undefined) context.maxLots = Number(locks.lotGuard.maxLots);
+                context.volumeLots = volumeLotsForLocks;
+              }
+              const cooldownMsRemaining = Math.max(
+                0,
+                unlockMsRemaining(locks[verdict.rule]?.unlockRequestedAt ?? null)
+              );
+              session.close();
+              await auditLog(403);
+              res.status(403).json({
+                ok: false,
+                error: 'locked_by_rule',
+                rule: verdict.rule,
+                message: verdict.message,
+                portfolioId: portfolioCtx.portfolioId,
+                portfolioName: portfolioCtx.portfolioName,
+                accountId,
+                isDemo,
+                context,
+                ...(cooldownMsRemaining > 0 ? { cooldownMsRemaining } : {}),
+              });
+              return;
+            }
+          }
+        } catch (e: any) {
+          // Lock checks must never break trading on infra failure.
+          console.warn('[trade] lock check failed (fail-open):', e?.message);
+          portfolioCtx = {
+            portfolioId: null,
+            portfolioName: null,
+            portfolioIds: [],
+            locksUnchecked: true,
+            locks: null,
+          };
+        }
       }
 
       const rawSide = String(body.side || body.tradeSide || 'buy').toLowerCase();
@@ -721,6 +879,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const volumeLots = Number(body.volume || body.volumeLots || 0.01);
       const volumeCents = toVolumeCents(volumeLots);
+
+      // Idempotency: retries with the same key + identical params replay the
+      // stored result instead of opening a second position. API-key callers
+      // MUST send Idempotency-Key; app sessions may omit it.
+      const paramsHash = hashOrderParams({
+        accountId: accountId!,
+        symbolId,
+        side: rawSide,
+        orderType,
+        volumeCents,
+        limitPrice: body.limitPrice !== undefined ? Number(body.limitPrice) : null,
+        stopPrice: body.stopPrice !== undefined ? Number(body.stopPrice) : null,
+        stopLoss: body.stopLoss !== undefined ? Number(body.stopLoss) : null,
+        takeProfit: body.takeProfit !== undefined ? Number(body.takeProfit) : null,
+      });
+      const idemKey = readIdempotencyKey();
+      if (keyId) {
+        if (!idemKey) {
+          session.close();
+          await auditLog(400);
+          res.status(400).json({
+            error: 'idempotency_key_required',
+            message: 'Send a unique Idempotency-Key header (or idempotencyKey body field) with every open order so network retries cannot double-open positions. Reuse the same key only when retrying the identical order.',
+          });
+          return;
+        }
+        const prior = authenticatedUserId ? await lookupIdempotency(idemKey) : null;
+        if (prior && String(prior.user_id) === String(authenticatedUserId)) {
+          if (prior.params_hash === paramsHash && prior.status === 'completed') {
+            session.close();
+            await auditLog(200);
+            res.status(200).json({ ...(prior.result as object), deduplicated: true });
+            return;
+          }
+          session.close();
+          await auditLog(409);
+          res.status(409).json({
+            error: 'idempotency_conflict',
+            message: 'This Idempotency-Key was already used for a different order. Generate a fresh key for new orders.',
+          });
+          return;
+        }
+      }
 
       const payload: Record<string, any> = {
         ctidTraderAccountId: accountId,
@@ -738,8 +939,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const result = await session.send(PT.NEW_ORDER_REQ, payload);
       session.close();
+      const openWarnings = portfolioCtx ? contextWarnings(portfolioCtx) : [];
+      const responseBody = {
+        ok: true,
+        message: 'Order submitted',
+        accountId,
+        isDemo,
+        ...(portfolioCtx ? { ...portfolioFields(portfolioCtx) } : {}),
+        ...(openWarnings.length > 0 ? { warnings: openWarnings } : {}),
+        result,
+      };
+      if (idemKey && authenticatedUserId) {
+        await storeIdempotency({
+          key: idemKey,
+          user_id: authenticatedUserId,
+          account_id: accountId!,
+          params_hash: paramsHash,
+          status: 'completed',
+          result: responseBody,
+        });
+      }
       await auditLog(200);
-      res.status(200).json({ ok: true, message: 'Order submitted', accountId, isDemo, result });
+      res.status(200).json(responseBody);
       return;
     }
 
