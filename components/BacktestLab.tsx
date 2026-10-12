@@ -2,22 +2,24 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react';
 import {
     Play, Pause, ChevronRight, ChevronLeft, RotateCcw,
-    TrendingUp, TrendingDown, XCircle, X,
-    Zap, ArrowLeftToLine, StepForward, ChevronDown,
+    XCircle, X,
+    Zap, ArrowLeftToLine, StepForward, StepBack, ChevronDown,
     Trash2, Lock, Unlock, Check, Search, Download, FileUp, RefreshCw,
     ZoomIn, ZoomOut, Calendar, List, Star, Loader2, Monitor,
-    Maximize, Minimize, Palette, Minus, Copy
+    Maximize, Minimize, LocateFixed, Copy, Palette, Minus,
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
+import Drawer from './ui/Drawer';
 import { DrawingToolbarV2 } from './backtest/DrawingToolbarV2';
-import { ColorDrawer, WidthDrawer, LineStyleDrawer, LineStyleKey } from './backtest/DrawingStyleDrawers';
-import { usePlacementCursor, PlacementCursorPoint, computeAimGap } from './backtest/usePlacementCursor';
 import { DrawingLayer } from './backtest/DrawingLayer';
 import { Drawing, Point, ToolType } from './backtest/types';
 import { timeToNearestBarIndex } from './backtest/utils';
+import { ColorDrawer, WidthDrawer, LineStyleDrawer, LineStyleKey } from './backtest/DrawingStyleDrawers';
+import { usePlacementCursor, PlacementCursorPoint, computeAimGap } from './backtest/usePlacementCursor';
 import { useMT5Bridge } from '../hooks/useMT5Bridge';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { MT5_BRIDGE_URL } from '../lib/constants';
+import { isNative as isNativePlatform } from '../lib/capacitor';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
 import { UserProfile, BacktestSession, Trade, BacktestTrade, Candle } from '../types';
 import { loadSeries, saveSeries, mergeBars, peekMeta, listCachedSeries, CachedSeriesInfo } from '../lib/candleStore';
@@ -34,6 +36,7 @@ interface BacktestLabProps {
     isDarkMode: boolean;
     userProfile: UserProfile;
     onUpdateProfile: (profile: UserProfile) => Promise<void>;
+    onChartOpenChange?: (isChartOpen: boolean) => void;
 }
 
 const BACKTEST_HISTORY_LIMIT = 50;
@@ -71,7 +74,7 @@ const BACKTEST_TF_SECONDS: Record<string, number> = {
 };
 const BACKTEST_TFS = Object.keys(BACKTEST_TF_SECONDS);
 
-// Friendly labels for the armed-tool chip and the style-drawer subtitles.
+// Friendly labels for the armed-tool chip.
 const TOOL_LABELS: Record<string, string> = {
     cursor: 'Cursor', trendline: 'Trend Line', ray: 'Ray', arrow: 'Arrow',
     horizontal: 'Horizontal Line', vertical: 'Vertical Line', rect: 'Rectangle',
@@ -79,11 +82,12 @@ const TOOL_LABELS: Record<string, string> = {
     fib: 'Fib Retracement', text: 'Text', measure: 'Measure',
 };
 
-// ── Orientation lock (web, no @capacitor/*) ─────────────────────────────────
-// Uses the standard Screen Orientation API. Every call is wrapped: Safari iOS
-// rejects `lock()` with NotAllowedError (it requires fullscreen), desktop
-// Firefox/older Safari have no `lock()` at all. The lock is ALWAYS released
-// on exit/unmount so the page can never be left stuck sideways.
+// TradingView-style watchlist (same data as ChartGrid)
+// ── Fullscreen / orientation (web-safe twin of lib/orientation.ts) ──
+// lib/orientation.ts imports @capacitor/core, which this repo deliberately
+// does not ship, so landscape locking uses the standard web API behind a
+// try/catch. Safari iOS has no lock() at all. The lock is ALWAYS released on
+// exit/unmount so the page can never be left stuck sideways.
 const lockOrientation = (orientation: string) => {
     try {
         const so = typeof window !== 'undefined' ? (window.screen as any)?.orientation : null;
@@ -98,15 +102,6 @@ const unlockOrientation = () => {
     } catch { /* no-op */ }
 };
 
-// Coarse pointers (phones/tablets): bigger snap radius + haptic feedback.
-const IS_COARSE_POINTER =
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
-
-const hapticTick = (ms: number = 8) => {
-    try { (navigator as any)?.vibrate?.(ms); } catch { /* no-op */ }
-};
-
-// TradingView-style watchlist (same data as ChartGrid)
 export const WATCHLISTS: Record<string, string[]> = {    'Forex': [
         'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY', 'FX:AUDUSD', 'FX:USDCAD', 'FX:USDCHF', 'FX:NZDUSD',
         'FX:EURGBP', 'FX:EURJPY', 'FX:GBPJPY', 'FX:CADJPY', 'FX:AUDJPY', 'FX:CHFJPY',
@@ -129,7 +124,7 @@ export const WATCHLISTS: Record<string, string[]> = {    'Forex': [
     ]
 };
 
-const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUpdateProfile }) => {
+const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUpdateProfile, onChartOpenChange }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<any>(null);
     const candlestickSeriesRef = useRef<any>(null);
@@ -163,7 +158,9 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [dataSource, setDataSource] = useLocalStorage<'live' | 'cache' | 'ctrader' | 'none'>('jfx_backtest_data_source', 'none');
     // Explicit user-facing data source so timeframe/symbol changes never route
     // to the wrong backend (e.g. MT5 bridge errors while connected to cTrader).
-    const [activeSource, setActiveSource] = useLocalStorage<'mt5' | 'ctrader'>('jfx_backtest_active_source', 'mt5');
+    // Shared/cTrader history is primary; MT5 localhost bridge is an explicit
+    // opt-in fallback only (see handleFetchMT5Data).
+    const [activeSource, setActiveSource] = useLocalStorage<'mt5' | 'ctrader'>('jfx_backtest_active_source', 'ctrader');
     const [isCtraderFetching, setIsCtraderFetching] = useState(false);
     // Chart-area loading feedback: while a pair/timeframe load is in flight,
     // dim the previous candles under a "Loading SYM · TF" overlay so users
@@ -199,6 +196,12 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
     const [watchlistCategory, setWatchlistCategory] = useState<string>('Forex');
     const [starredSymbols, setStarredSymbols] = useLocalStorage<string[]>('jfx_watchlist_starred', []);
+
+    // Screen follows the device sensor: release any previously persisted
+    // orientation lock on mount so portrait/landscape switch automatically.
+    useEffect(() => {
+        unlockOrientation();
+    }, []);
 
     useEffect(() => {
         let mounted = true;
@@ -260,27 +263,20 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     })();
 
     const [showWelcome, setShowWelcome] = useState(!hasCachedData);
-    // Fullscreen canvas: hides the top header and the bottom replay bar so the
-    // chart owns the whole viewport (phone-web landscape). Always releases the
-    // orientation lock on the way out — see lockOrientation/unlockOrientation.
+    // Fullscreen canvas (landscape): hides the top header and floats the
+    // replay dock + this toggle over the chart. Auto-exits on lab menu.
     const [isFullscreenCanvas, setIsFullscreenCanvas] = useState(false);
     useEffect(() => {
-        if (showWelcome && isFullscreenCanvas) {
-            setIsFullscreenCanvas(false);
-            unlockOrientation();
-        }
-    }, [showWelcome, isFullscreenCanvas]);
-    // Unmount safety net: never leave the viewport orientation-locked.
-    useEffect(() => () => { unlockOrientation(); }, []);
-
-    const toggleFullscreenCanvas = useCallback(() => {
-        setIsFullscreenCanvas(prev => {
-            const next = !prev;
-            if (next) lockOrientation('landscape');
-            else unlockOrientation();
-            return next;
-        });
-    }, []);
+        if (showWelcome) setIsFullscreenCanvas(false);
+    }, [showWelcome]);
+    // Chart open = a chart is on screen (welcome/lab menu dismissed).
+    // Parent (MobileLayout) uses this to hide the global MobileDock and
+    // show the replay dock instead. Restored when the back button sets
+    // showWelcome back to true.
+    const isChartOpen = !showWelcome;
+    useEffect(() => {
+        onChartOpenChange?.(isChartOpen);
+    }, [isChartOpen, onChartOpenChange]);
     // Load cached chart data when dataSource is cache
     useEffect(() => {
         if (dataSource === 'cache') {
@@ -302,8 +298,15 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [bridgeStatus, setBridgeStatus] = useState<'online' | 'offline' | 'checking' | 'error'>('checking');
     const [bridgeError, setBridgeError] = useState<string | null>(null);
 
-    // Bridge Heartbeat
+    // Bridge Heartbeat (web/desktop only). On the native APK localhost is the
+    // phone itself, never the PC running MT5 — skip the ping and stay offline
+    // so all loads serve shared/cTrader history without failing localhost calls.
     useEffect(() => {
+        if (isNativePlatform) {
+            setBridgeStatus('offline');
+            setBridgeError('Bridge Offline');
+            return;
+        }
         let cancelled = false;
         const checkBridge = async () => {
             try {
@@ -323,12 +326,43 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
         return () => { cancelled = true; clearInterval(interval); };
     }, []);
 
+    // One-time migration: previous default was 'mt5', so browsers with no
+    // explicit choice still route every symbol/TF change through the localhost
+    // bridge and surface "MT5 Sync Failed". When the bridge is offline, move
+    // those implicit users to the shared/cTrader path (explicit MT5 selection
+    // while the bridge is online is left untouched).
+    useEffect(() => {
+        if (activeSource === 'mt5' && bridgeStatus === 'offline') {
+            setActiveSource('ctrader');
+        }
+    }, [activeSource, bridgeStatus, setActiveSource]);
+
     // Replay State
     const [isPlaying, setIsPlaying] = useState(false);
     const [isAutoFollow, setIsAutoFollow] = useLocalStorage<boolean>('jfx_backtest_autofollow', true);
     const [history, setHistory] = useLocalStorage<BacktestTrade[]>('jfx_backtest_history', []);
     const [playSpeed, setPlaySpeed] = useLocalStorage<number>('jfx_backtest_playSpeed', 500);
     const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
+    // Mobile sheets: speed picker + jump-to-bar (TV-style bottom sheets).
+    const [isSpeedSheetOpen, setIsSpeedSheetOpen] = useState(false);
+    const [isJumpSheetOpen, setIsJumpSheetOpen] = useState(false);
+    const [jumpInput, setJumpInput] = useState('');
+    // Selection-pill style drawers: which one is open (null = none).
+    const [styleDrawer, setStyleDrawer] = useState<'color' | 'width' | 'style' | null>(null);
+    // Fullscreen dock auto-fade (TV controls dim after 3s idle).
+    const [dockFaded, setDockFaded] = useState(false);
+    const dockIdleTimer = useRef<number | null>(null);
+    const pokeDock = useCallback(() => {
+        setDockFaded(false);
+        if (dockIdleTimer.current) window.clearTimeout(dockIdleTimer.current);
+        if (isFullscreenCanvas) {
+            dockIdleTimer.current = window.setTimeout(() => setDockFaded(true), 3000);
+        }
+    }, [isFullscreenCanvas]);
+    useEffect(() => {
+        pokeDock();
+        return () => { if (dockIdleTimer.current) window.clearTimeout(dockIdleTimer.current); };
+    }, [pokeDock, currentIndex, isPlaying, isFullscreenCanvas]);
     const [zoomLevel, setZoomLevel] = useLocalStorage<number>('jfx_backtest_zoom', 100);
 
     // Zoom handlers
@@ -384,21 +418,15 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     const [magnetMode, setMagnetMode] = useLocalStorage<boolean>('jfx_backtest_magnet', false);
     const [currentColor, setCurrentColor] = useLocalStorage<string>('jfx_backtest_color', '#2962ff');
     // Selection & Edit State
-    // selectedIds is the source of truth (TradingView multi-select); the SVG
-    // DrawingLayer on web only knows about a single id, so selectedDrawingId is
-    // derived from the last entry and drives that layer's highlight/handles.
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const selectedDrawingId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+    const [stickyMode, setStickyMode] = useLocalStorage<boolean>('jfx_tool_sticky', false);
+    const [snapIndicator, setSnapIndicator] = useState<{ x: number, y: number } | null>(null);
+
+
     const [hoveredDrawingId, setHoveredDrawingId] = useState<string | null>(null);
     const [dragState, setDragState] = useState<{ drawingId: string, handle: 'p1' | 'p2' | 'move' | 'target' | 'stop' | 'entry' } | null>(null);
     const [dragStartPos, setDragStartPos] = useState<{ time: number, price: number, logical?: number } | null>(null);
-    // Sticky tools (TradingView): when on, a tool stays armed after each draw.
-    const [stickyMode, setStickyMode] = useLocalStorage<boolean>('jfx_tool_sticky', false);
-    // Magnet snap dot (px) — drawn here because web CustomChart has no
-    // snapIndicator prop of its own.
-    const [snapIndicator, setSnapIndicator] = useState<{ x: number, y: number } | null>(null);
-    // Which style drawer is open (null = none).
-    const [styleDrawer, setStyleDrawer] = useState<'color' | 'width' | 'style' | null>(null);
 
     const selectedDrawing = useMemo(() => drawings.find(d => d.id === selectedDrawingId) || null, [drawings, selectedDrawingId]);
     const currentStrokeWidth = selectedDrawing?.strokeWidth || toolDefaults[activeTool]?.strokeWidth || 1;
@@ -418,16 +446,29 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
         }
     }, [zoomLevel, setZoomLevel, setChartViewState, symbol, timeframe]);
 
-    // Toolbar State — DrawingToolbarV2 is a docked rail/top-bar. The legacy
-    // free-floating `toolbarPos` overlay state is gone: V2 ignores it and its
-    // own grip-drag is in-component, so keeping the state would be dead code.
-    const [toolbarOrientation, setToolbarOrientation] = useLocalStorage<'horizontal' | 'vertical'>('jfx_backtest_toolbar_orientation', 'horizontal');
+    // Toolbar State (docked V2: left rail or top bar — no free-floating drag).
+    // V1's fixed+drag overlay forced the chart canvas to recomposite every
+    // pointermove (shadow-2xl layer over a GPU-resident canvas + backdrop-blur
+    // churn), which is what made dragging feel slow/laggy. V2 is a static
+    // flex sibling of the chart: zero window listeners, zero transforms,
+    // zero overlap — the chart lays out once beside it and never repaints
+    // because of the toolbar.
+    // Stable toolbar props (perf): BacktestLab re-renders on every
+    // chart mousemove (mousePos) and replay tick. Fresh inline props defeated
+    // the toolbar's React.memo, re-rendering 25+ buttons per mousemove and
+    // saturating the main thread. These stay referentially stable, so the
+    // toolbar only renders when something it displays actually changes.
+    const [toolbarOrientation, setToolbarOrientation] = useLocalStorage<'horizontal' | 'vertical'>('jfx_backtest_toolbar_orientation_v2', 'vertical');
     const toggleMagnetModeCb = useCallback(() => setMagnetMode((v: boolean) => !v), [setMagnetMode]);
-    const toggleToolbarOrientationCb = useCallback(() => setToolbarOrientation(prev => (prev === 'horizontal' ? 'vertical' : 'horizontal')), [setToolbarOrientation]);
-    // Toolbar lock = unlock-all (TradingView parity): pressing it while any
-    // single drawing is locked clears every lock instead of re-locking.
+    // Toolbar lock = Unlock-all (TradingView parity): locked drawings are
+    // click-through so canvas pan works starting on top of them. Pressing the
+    // button while anything is locked clears ALL locks (global + per-drawing).
     const toggleLockedCb = useCallback(() => {
-        if (isLocked || drawings.some(d => d.isLocked)) {
+        if (isLocked) {
+            setDrawings(prev => prev.map(d => (d.isLocked ? { ...d, isLocked: false } : d)));
+            setSelectedIds([]);
+            setIsLocked(false);
+        } else if (drawings.some(d => d.isLocked)) {
             setDrawings(prev => prev.map(d => (d.isLocked ? { ...d, isLocked: false } : d)));
             setSelectedIds([]);
         } else {
@@ -435,11 +476,11 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
             setIsLocked(true);
         }
     }, [isLocked, drawings, setDrawings, setIsLocked]);
-    // Show the toolbar as locked when the global lock OR any drawing is locked,
-    // so the unlock-all action stays discoverable.
+    // Show the toolbar as locked when global lock OR any single drawing is
+    // locked, so users can discover the unlock-all action.
     const toolbarLocked = isLocked || drawings.some(d => d.isLocked);
-    // Locked drawings are click-through: drop them from selection and close any
-    // style drawer so no selection glow sticks and pan stays free.
+    // Locked drawings are click-through: drop them from selection (and close
+    // their settings) so no selection glow gets stuck and pan stays free.
     useEffect(() => {
         setSelectedIds(prev => {
             if (prev.length === 0) return prev;
@@ -450,36 +491,64 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
             });
             return next.length === prev.length ? prev : next;
         });
-        if (styleDrawer && (isLocked || !selectedIds.some(id => {
-            const d = drawings.find(x => x.id === id);
-            return d && !d.isLocked;
-        }))) setStyleDrawer(null);
+        if (styleDrawer) {
+            const ids = selectedIds.length ? selectedIds : [];
+            const anyValid = ids.some(id => {
+                const d = drawings.find(x => x.id === id);
+                return d && !d.isLocked;
+            });
+            if (!anyValid || isLocked) setStyleDrawer(null);
+        }
     }, [isLocked, drawings, selectedIds, styleDrawer]);
+    const toggleToolbarOrientationCb = useCallback(() => setToolbarOrientation(prev => (prev === 'horizontal' ? 'vertical' : 'horizontal')), [setToolbarOrientation]);
 
 // Replay Modes
     const [isSelectBarMode, setIsSelectBarMode] = useState(false);
+    // TradingView-style replay cut: draggable vertical selector snapped to bar index
+    const [selectBarIndex, setSelectBarIndex] = useState<number | null>(null);
+
+    // Keep selector anchored when entering select-bar mode
+    useEffect(() => {
+        if (isSelectBarMode) {
+            setSelectBarIndex(currentIndex);
+        } else {
+            setSelectBarIndex(null);
+        }
+    }, [isSelectBarMode]);
+    // Keep selector clamped when data length changes
+    useEffect(() => {
+        if (isSelectBarMode && selectBarIndex !== null && allData.length > 0) {
+            if (selectBarIndex < 0) setSelectBarIndex(0);
+            if (selectBarIndex >= allData.length) setSelectBarIndex(allData.length - 1);
+        }
+    }, [allData.length]);
+    // First-run hint for Select-Bar mode (drag-vs-tap).
+    useEffect(() => {
+        if (isSelectBarMode && typeof window !== 'undefined' && !localStorage.getItem('jfx_bar_hint_seen')) {
+            localStorage.setItem('jfx_bar_hint_seen', '1');
+            addToast({ type: 'info', title: 'Select Bar', message: 'Drag the line to preview, then tap to cut replay there.' });
+        }
+    }, [isSelectBarMode, addToast]);
     const [isTFMenuOpen, setIsTFMenuOpen] = useState(false);
     const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
     const [isHistoryFetchOpen, setIsHistoryFetchOpen] = useState(false);
+    const importFileRef = useRef<HTMLInputElement | null>(null);
 
-    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, drawing: Drawing } | null>(null);
     const [clipboard, setClipboard] = useState<Drawing | null>(null);
 
-    // Latest-ref for resetAim (declared further down via usePlacementCursor).
-    // resetDrawingInteractionState must stay above (earlier callbacks list it),
-    // so it reaches resetAim through this ref instead of the TDZ binding.
+    // Latest-ref for resetAim (declared below via usePlacementCursor).
+    // resetDrawingInteractionState must stay up here (earlier callbacks list
+    // it in their deps), so it calls resetAim through this ref instead of
+    // reading the binding directly, which would hit its TDZ on first render.
     const resetAimRef = useRef<() => void>(() => {});
-    const placingOneClickRef = useRef<'horizontal' | 'vertical' | null>(null);
     const resetDrawingInteractionState = useCallback(() => {
         setSelectedIds([]);
         setHoveredDrawingId(null);
         setCurrentDrawing(null);
         placingOneClickRef.current = null;
-        setContextMenu(null);
         setClipboard(null);
         setDragState(null);
         setDragStartPos(null);
-        setSnapIndicator(null);
         setStyleDrawer(null);
         resetAimRef.current();
     }, []);
@@ -594,10 +663,10 @@ useEffect(() => {
             const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
             if (!account) return null;
             // Inclusive fromTimestamp so the still-open live bar gets its
-            // final values. 1000 bars per top-up so even a weeks-long absence
+            // final values. 2000 bars per top-up so even a weeks-long absence
             // heals in a couple of opens and the replay count grows every
-            // fetch until the 2000-bar store cap.
-            const fresh = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 1000, account.isDemo, 2, meta.lastTime * 1000);
+            // fetch until the 10000-bar store cap.
+            const fresh = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 2000, account.isDemo, 2, meta.lastTime * 1000);
             const existing = loadSeries(sym, tf) || [];
             const merged = mergeBars(existing, fresh);
             if (merged.length === 0) return null;
@@ -662,7 +731,7 @@ useEffect(() => {
                         const savedAccountId = getSelectedAccountId();
                         const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
                         if (!account) return;
-                        const candles = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 500, account.isDemo, 2);
+                        const candles = await fetchCtraderCandles(account.ctidTraderAccountId, sym, tf, 2000, account.isDemo, 2);
                         if (candles && candles.length > 0) saveToLocalCache(candles, sym, tf);
                     }
                 } catch { /* silent — background warm-up only */ }
@@ -844,16 +913,22 @@ setAllData(validData);
                     message: `MT5 unavailable — loaded ${sharedFull.length} bars for ${activeSymbol} (${activeTF}) from the shared candle history.`
                 });
             } else {
+                // Both MT5 and the shared store missed — say so explicitly.
+                // MT5 is only an opt-in fallback now (shared/cTrader is
+                // primary), so the message must not imply MT5 is required.
+                const explicitMt5 = activeSource === 'mt5';
                 addToast({
                     type: 'error',
-                    title: 'MT5 Sync Failed',
-                    message: 'MT5 Bridge is offline. Start the JFX-JOURNAL Bridge app to sync live data.'
+                    title: explicitMt5 ? 'MT5 Sync Failed' : 'History Unavailable',
+                    message: explicitMt5
+                        ? `MT5 Bridge is offline and shared history has no bars for ${activeSymbol} ${activeTF}. Start the JFX-JOURNAL Bridge app or pick another pair.`
+                        : `No bars for ${activeSymbol} ${activeTF} — cache empty, shared history empty, MT5 Bridge offline.`
                 });
             }
         } finally {
             if (seq === activeFetchSeqRef.current) endChartLoading();
         }
-    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe, setActiveSource, allData, currentIndex, beginChartLoading, endChartLoading, backfillCtraderTimeframes]);
+    }, [fetchData, addToast, saveToLocalCache, loadFromLocalCache, symbol, timeframe, activeSource, setActiveSource, allData, currentIndex, beginChartLoading, endChartLoading, backfillCtraderTimeframes]);
 
     const handleFetchCtraderData = useCallback(async (
         overrideSymbol?: string, 
@@ -909,7 +984,7 @@ setAllData(validData);
                 if (seq !== activeFetchSeqRef.current) return;
                 // A successful top-up is authoritative: merged is the union of
                 // stored + fresh bars, so the replay count can only grow (or
-                // stay at the 2000-bar cap). Serve it even when added === 0
+                // stay at the 10000-bar cap). Serve it even when added === 0
                 // (live-bar-only update) instead of re-downloading the full
                 // series for zero gain. Null means nothing stored / fetch
                 // failed → fall through to the full load below.
@@ -995,7 +1070,7 @@ setAllData(validData);
             if (!candles) {
                 // When preserving the visible window, fetch enough bars to cover it
                 // (cTrader returns bars within the from/to range, capped by count).
-                const candleCount = customOptions?.count || (prevVisibleRange ? 5000 : 500);
+                const candleCount = customOptions?.count || (prevVisibleRange ? 10000 : 2000);
                 const rangeFromMs = customOptions?.fromTimestamp ?? (prevVisibleRange ? prevVisibleRange.from * 1000 : undefined);
                 const rangeToMs = customOptions?.toTimestamp ?? (prevVisibleRange ? prevVisibleRange.to * 1000 : undefined);
                 candles = await fetchCtraderCandles(
@@ -1144,8 +1219,14 @@ setAllData(validData);
         if (activeSource === 'ctrader') {
             return handleFetchCtraderData(overrideSymbol, overrideTimeframe);
         }
+        // MT5 is an explicit opt-in fallback only. When the bridge isn't
+        // confirmed online, serve shared/cTrader history instead of failing
+        // with "MT5 Sync Failed" for users who never chose MT5.
+        if (bridgeStatus !== 'online') {
+            return handleFetchCtraderData(overrideSymbol, overrideTimeframe);
+        }
         return handleFetchMT5Data(overrideSymbol, overrideTimeframe);
-    }, [activeSource, handleFetchCtraderData, handleFetchMT5Data]);
+    }, [activeSource, bridgeStatus, handleFetchCtraderData, handleFetchMT5Data]);
 
     // ---- Start Screen wiring ------------------------------------------------
     // Cached series snapshot for the "Continue where you left off" cards;
@@ -1158,7 +1239,8 @@ setAllData(validData);
     const handleConnectCtrader = useCallback(async () => {
         try {
             const { getAuthorizeUrl } = await import('../services/ctraderService');
-            window.location.href = getAuthorizeUrl();
+            const { openExternalUrl } = await import('../lib/capacitor');
+            await openExternalUrl(getAuthorizeUrl());
         } catch (err: any) {
             addToast({
                 type: 'error',
@@ -1195,7 +1277,10 @@ setAllData(validData);
     // --------------------------------------------------------------------------
 
     const handleUpdateData = useCallback(async () => {
-        if (activeSource === 'ctrader') {
+        // Shared/cTrader is primary. MT5 refresh only runs when explicitly
+        // selected AND the bridge is confirmed online; otherwise top up from
+        // shared history so refresh never surfaces "MT5 Sync Failed".
+        if (activeSource === 'ctrader' || bridgeStatus !== 'online') {
             return handleFetchCtraderData();
         }
         if (allData.length === 0) return handleFetchMT5Data();
@@ -1207,9 +1292,26 @@ setAllData(validData);
             setActiveSource('mt5');
             addToast({ type: 'success', title: 'Data Updated', message: 'Latest bars synced from MT5' });
         } catch (err: any) {
-            addToast({ type: 'error', title: 'Update Failed', message: err.message });
+            // MT5 refresh failed — try shared history before giving up so an
+            // offline bridge doesn't look like a total sync failure.
+            try {
+                const shared = await fetchSharedCandles(symbol, timeframe);
+                if (shared && shared.length > 0) {
+                    saveToLocalCache(shared, symbol, timeframe);
+                    setAllData(shared);
+                    setDataSource('ctrader');
+                    setActiveSource('ctrader');
+                    addToast({ type: 'info', title: 'Loaded from Shared History', message: `MT5 unavailable — loaded ${shared.length} bars for ${symbol} (${timeframe}).` });
+                    return;
+                }
+            } catch { /* fall through to error toast */ }
+            addToast({
+                type: 'error',
+                title: 'Update Failed',
+                message: `MT5 Bridge offline and shared history has no bars for ${symbol} ${timeframe}.`
+            });
         }
-    }, [activeSource, handleFetchCtraderData, allData.length, handleFetchMT5Data, fetchData, saveToLocalCache, setDataSource, setActiveSource, addToast]);
+    }, [activeSource, bridgeStatus, handleFetchCtraderData, allData.length, handleFetchMT5Data, fetchData, saveToLocalCache, setDataSource, setActiveSource, setAllData, symbol, timeframe, addToast]);
 
     const resolveTradeIsoTime = useCallback((value?: string, fallbackDate?: string, fallbackTime?: string) => {
         if (value) {
@@ -1252,6 +1354,7 @@ setAllData(validData);
             setSelectedIds([id]);
         }
     }, []);
+    const clearSelection = useCallback(() => setSelectedIds([]), []);
     const deleteSelected = useCallback(() => {
         const ids = selectedIds.length ? selectedIds : (selectedDrawingId ? [selectedDrawingId] : []);
         if (!ids.length) return;
@@ -1266,13 +1369,17 @@ setAllData(validData);
         setDrawings(prev => { const next = [...prev, ...copies]; pushToHistory(next); return next; });
         setSelectedIds(copies.map(c => c.id));
     }, [drawings, selectedIds, selectedDrawingId, pushToHistory]);
-    // Sticky tools: when on, a tool stays armed after each drawing.
+    // Sticky tools (TV): when on, the tool stays armed after each drawing.
     const finishToolAfterDraw = useCallback(() => { if (!stickyMode) setActiveTool('cursor'); }, [stickyMode]);
-
-    // Magnet with a pixel snap radius (TradingView): only snaps when the cursor
-    // is within SNAP_PX of an OHLC level, and reports the snap dot position.
-    // Fingers are imprecise — a much wider radius on touch devices.
-    const SNAP_PX = IS_COARSE_POINTER ? 24 : 12;
+    // Coarse pointers (phones/tablets): bigger snap radius + haptics + sheets.
+    const isCoarsePointer = useMemo(
+        () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
+        []
+    );
+    // Magnet with pixel snap radius (TV): only snaps when the cursor is
+    // within SNAP_PX of an OHLC level, and reports the snap dot position.
+    // Fingers are imprecise — use a much wider radius on touch devices.
+    const SNAP_PX = isCoarsePointer ? 24 : 12;
     const snapPoint = useCallback((sx: number, sy: number, time: number, price: number, logical?: number): { point: Point, snapped: boolean, snapY?: number } => {
         if (!magnetMode || !allData.length) return { point: { time, price, logical }, snapped: false };
         const idx = Math.max(0, Math.min(allData.length - 1, Math.round(logical ?? 0)));
@@ -1286,10 +1393,10 @@ setAllData(validData);
         return { point: { time: candle.time, price: best, logical: idx }, snapped, snapY };
     }, [magnetMode, allData, SNAP_PX]);
 
-    // Per-chart drawing visibility (TradingView parity): a drawing remembers
-    // the symbol/timeframe it was created on (originKey). With
-    // syncAllTimeframes === false it only renders on its home chart; the default
-    // (undefined/true) shows everywhere, so existing drawings are unaffected.
+    // Per-chart visibility (TV parity): drawings remember the symbol/timeframe
+    // they were created on (originKey). When syncAllTimeframes === false the
+    // drawing only renders on its home chart; default (undefined/true) shows
+    // everywhere, preserving the old behaviour for existing drawings.
     const symbolTfKey = `${symbol}_${timeframe}`;
     const visibleDrawings = useMemo(
         () => drawings.filter(d => {
@@ -1299,11 +1406,7 @@ setAllData(validData);
         }),
         [drawings, symbolTfKey]
     );
-    const withOrigin = useCallback((obj: any) => ({
-        ...obj,
-        originKey: (obj.originKey || symbolTfKey),
-        syncAllTimeframes: obj.syncAllTimeframes ?? true,
-    }), [symbolTfKey]);
+    const withOrigin = useCallback((obj: any) => ({ ...obj, originKey: (obj.originKey || symbolTfKey), syncAllTimeframes: obj.syncAllTimeframes ?? true }), [symbolTfKey]);
 
     const resetDrawingHistory = useCallback((snapshot: Drawing[] = []) => {
         if (snapshot.length === 0) {
@@ -1323,10 +1426,12 @@ setAllData(validData);
 
     const clearDrawings = useCallback(() => {
         if (drawings.length === 0) return;
+        // Confirm is handled inline by the rail trash two-tap (minimal UI),
+        // so clear directly here — Undo toast stays as the safety net.
         setDrawings([]);
         resetDrawingInteractionState();
         pushToHistory([]);
-        addToast({ type: 'info', title: 'Drawings cleared' });
+        addToast({ type: 'info', title: 'Drawings Cleared', message: 'Tap Undo in the toolbar to restore.' });
     }, [drawings, pushToHistory, addToast, resetDrawingInteractionState]);
 
     const handleUndo = useCallback(() => {
@@ -1455,42 +1560,6 @@ setAllData(validData);
         }));
     }, [activeTool, selectedDrawingId, updateDrawingProperty, setToolDefaults]);
 
-    const handleDuplicateDrawing = useCallback((drawing: Drawing) => {
-        const tfSecondsMap: Record<string, number> = {
-            'M1': 60, 'M5': 300, 'M15': 900, 'M30': 1800, 'H1': 3600, 'H4': 14400, 'D1': 86400
-        };
-        const offsetTime = tfSecondsMap[timeframe] || 3600;
-
-        const newDrawing: Drawing = {
-            ...drawing,
-            id: Date.now().toString(),
-            p1: {
-                ...drawing.p1,
-                time: drawing.p1.time + offsetTime,
-                logical: drawing.p1.logical !== undefined ? drawing.p1.logical + 1 : undefined
-            },
-            p2: drawing.p2 ? {
-                ...drawing.p2,
-                time: drawing.p2.time + offsetTime,
-                logical: drawing.p2.logical !== undefined ? drawing.p2.logical + 1 : undefined
-            } : undefined,
-            entry: drawing.entry,
-            target: drawing.target,
-            stop: drawing.stop
-        };
-        setDrawings(prev => {
-            const next = [...prev, newDrawing];
-            pushToHistory(next);
-            return next;
-        });
-        addToast({ type: 'success', title: 'Duplicated', message: 'Drawing duplicated with offset' });
-    }, [timeframe, pushToHistory, addToast]);
-
-    const handleCopyDrawing = useCallback((drawing: Drawing) => {
-        setClipboard(drawing);
-        addToast({ type: 'info', title: 'Copied', message: 'Drawing copied to clipboard' });
-    }, [addToast]);
-
     const getChartCoordinates = useCallback((x: number, y: number) => {
         if (!chartRef.current || !candlestickSeriesRef.current) return null;
         const price = candlestickSeriesRef.current.coordinateToPrice(y);
@@ -1532,13 +1601,21 @@ setAllData(validData);
             pushToHistory(next);
             return next;
         });
-        addToast({ type: 'success', title: 'Pasted', message: 'Drawing pasted at cursor' });
+
     }, [clipboard, getChartCoordinates, pushToHistory, addToast]);
+
+    const getSnappedPoint = useCallback((time: number, price: number, logical?: number): Point => {
+        if (!magnetMode || !allData.length) return { time, price, logical };
+        const candle = allData[Math.round(logical ?? 0)];
+        if (!candle) return { time, price, logical };
+        const levels = [candle.open, candle.high, candle.low, candle.close];
+        const closestLevel = levels.reduce((p, c) => Math.abs(c - price) < Math.abs(p - price) ? c : p);
+        return { time: candle.time, price: closestLevel, logical: Math.round(logical ?? 0) };
+    }, [magnetMode, allData]);
 
     const onMouseDown = (e: React.MouseEvent) => {
         if ((e.target as Element)?.closest?.('[data-drawing-toolbar]')) return;
         if (!chartRef.current || !candlestickSeriesRef.current || e.button !== 0) return;
-        if (contextMenu) setContextMenu(null);
 
         const rect = chartContainerRef.current?.getBoundingClientRect();
         if (!rect) return;
@@ -1549,25 +1626,27 @@ setAllData(validData);
         if (!coords) return;
 
         if (isSelectBarMode) {
-            const foundIdx = Math.round(coords.logical);
-            if (foundIdx >= 0 && foundIdx < allData.length) {
-                setCurrentIdx(foundIdx);
-                setIsSelectBarMode(false);
-            }
+            // TradingView confirm model: mouse-down / hover only moves the cut
+            // line (preview). The actual cut happens on mouse-up tap
+            // (container + CustomChart), so drag-to-preview never cuts early.
+            const foundIdx = Math.max(0, Math.min(allData.length - 1, Math.round(coords.logical as number)));
+            if (selectBarIndex !== foundIdx) setSelectBarIndex(foundIdx);
+            selectBarMouseDownRef.current = { x: e.clientX, y: e.clientY };
             return;
         }
 
         // If clicking while a drawing is already in progress, finalize it at
-        // THIS click (tap-tap drawing). The preview p2 is stale between clicks,
-        // so rebase it onto the click point — otherwise tap-tap creates a
-        // zero-length drawing.
+        // THIS click (tap-tap drawing). The preview p2 is stale between
+        // clicks, so rebase it onto the click point — otherwise tap-tap
+        // creates a zero-length drawing.
         if (currentDrawing && (currentDrawing.type !== 'horizontal' && currentDrawing.type !== 'vertical')) {
             const snapEnd = snapPoint(x, y, coords.time, coords.price as any, coords.logical).point;
             const finalized: any = { ...currentDrawing, p2: snapEnd };
             const fdx = (snapEnd.logical ?? coords.logical ?? 0) - (currentDrawing.p1.logical ?? 0);
             const fdy = (snapEnd.price ?? 0) - (currentDrawing.p1.price ?? 0);
             if (Math.abs(fdx) < 0.5 && Math.abs(fdy) < 1e-9) {
-                // Second click landed on the anchor — keep the preview armed.
+                // Second click landed on the anchor — keep the preview armed
+                // so the user can pick a real endpoint (TV discards the tap).
                 return;
             }
             const next = [...drawings, withOrigin(finalized)];
@@ -1575,14 +1654,12 @@ setAllData(validData);
             pushToHistory(next);
             setSelectedIds([currentDrawing.id]);
             setCurrentDrawing(null);
-            addToast({ type: 'success', title: 'Drawing placed', duration: 1000 });
+            hapticTick(8);
             finishToolAfterDraw();
             return;
         }
 
         if (activeTool === 'cursor') {
-            // A press that began on a drawing already selected it in the layer;
-            // don't immediately clear it. Same guard for the floating toolbar.
             const startedOnDrawing = (e.target as Element)?.closest?.('[data-drawing-hit]');
             const startedOnToolbar = (e.target as Element)?.closest?.('[data-drawing-toolbar]');
             if (startedOnToolbar || startedOnDrawing) return;
@@ -1590,7 +1667,6 @@ setAllData(validData);
             return;
         }
         if (isLocked) {
-            addToast({ type: 'info', title: 'Drawings Locked', message: 'Unlock to place new drawings' });
             return;
         }
 
@@ -1607,7 +1683,7 @@ setAllData(validData);
             ...toolStyle,
             color: toolStyle.color || currentColor || '#2962ff',
         });
-        // Pause autoplay the moment a drawing starts (TradingView parity).
+        // Pause autoplay the moment a drawing starts (TV parity).
         setIsPlaying(false);
 
         // Initialize Long/Short position tool with entry/target/stop
@@ -1628,7 +1704,7 @@ setAllData(validData);
             drawingProps.stop = isLong ? entryPrice - defaultRisk : entryPrice + defaultRisk;
         }
 
-        // Text tool (TradingView): a single click places it, already selected.
+        // Text tool (TV): single click places it, selected with default text.
         if (activeTool === 'text') {
             drawingProps.text = drawingProps.text || 'Text';
             const next = [...drawings, drawingProps];
@@ -1651,9 +1727,17 @@ setAllData(validData);
         const coords = getChartCoordinates(x, y);
         if (!coords) return;
 
+        // TradingView-style: selector follows cursor while in select-bar mode (move line left/right then click to cut)
+        if (isSelectBarMode) {
+            const idx = Math.max(0, Math.min(allData.length - 1, Math.round((coords.logical as number) ?? 0)));
+            if (selectBarIndex !== idx) setSelectBarIndex(idx);
+            // Don't run drawing drag logic while selecting a bar
+            return;
+        }
+
         if (dragState && dragStartPos) {
-            // 4px dead-zone: a plain click on a selected drawing must not nudge
-            // it by 1-2px and pollute undo history.
+            // 4px dead-zone: plain clicks on a selected drawing must not nudge
+            // it by 1–2px and pollute undo history.
             const startDrag = dragStartPos as any;
             if (typeof startDrag.startClientX === 'number' && typeof e.clientX === 'number') {
                 const movedPx = Math.hypot(e.clientX - startDrag.startClientX, (e.clientY ?? 0) - (startDrag.startClientY ?? 0));
@@ -1675,8 +1759,7 @@ setAllData(validData);
                 if (dragState.handle === 'move') {
                     const p1Base = initialData.initialP1;
                     const p2Base = initialData.initialP2;
-                    // Axis lock (TradingView): horizontal lines only move in
-                    // price, vertical lines only in time.
+                    // Axis lock (TV): horizontal lines only move in price, vertical only in time.
                     const lockTime = d.type === 'horizontal';
                     const lockPrice = d.type === 'vertical';
                     const getRebasedPoint = (base: any) => {
@@ -1704,8 +1787,7 @@ setAllData(validData);
                 } else {
                     const snp = snapPoint(x, y, coords.time, coords.price as any, coords.logical).point;
                     if (dragState.handle === 'p1') {
-                        // Axis lock per handle: horizontal p1 moves price only,
-                        // vertical time only.
+                        // Axis lock per handle (TV): horizontal p1 moves price only, vertical time only.
                         if (d.type === 'horizontal') newD.p1 = { ...newD.p1, price: snp.price };
                         else if (d.type === 'vertical') newD.p1 = { ...snp, price: newD.p1.price };
                         else newD.p1 = snp;
@@ -1744,17 +1826,8 @@ setAllData(validData);
                     target: isLong ? entryPrice + (risk * rrRatio) : entryPrice - (risk * rrRatio),
                     stop: isLong ? entryPrice - risk : entryPrice + risk
                 } : null);
-            } else if (currentDrawing.type === 'ray') {
-                // WEB-ONLY: rays stay locked to a horizontal line. Web's
-                // utils.getRayCoordinates documents this as intentional and the
-                // canvas renderer forces it, so the preview must match.
-                setCurrentDrawing(prev => prev ? {
-                    ...prev,
-                    p2: { ...snp, price: prev.p1.price }
-                } : null);
             } else {
-                // One-click line tools keep their axis while the preview follows
-                // the cursor along the free axis.
+                // Ray keeps its drag angle (TV) - no horizontal lock.
                 const nextP2 = currentDrawing.type === 'horizontal'
                     ? { ...snp, time: currentDrawing.p1.time, logical: currentDrawing.p1.logical }
                     : currentDrawing.type === 'vertical'
@@ -1766,9 +1839,33 @@ setAllData(validData);
         }
     };
 
-    const handleMouseUp = () => {
-        // Only snapshot history when the drawing actually moved — a plain click
-        // on a selected drawing must leave history untouched.
+    const handleMouseUp = (e?: React.MouseEvent) => {
+        // Select-bar tap-to-cut (desktop): a press without drag commits the
+        // previewed index. Works even when the press started on a drawing
+        // (canvas never sees those events).
+        if (isSelectBarMode) {
+            const down = selectBarMouseDownRef.current;
+            selectBarMouseDownRef.current = null;
+            const upX = e?.clientX ?? down?.x ?? null;
+            const upY = e?.clientY ?? down?.y ?? null;
+            const moved = down && upX !== null && upY !== null
+                ? Math.hypot(upX - down.x, upY - down.y)
+                : 0;
+            if (down && moved !== null && moved < 8 && selectBarIndex !== null) {
+                setCurrentIdx(selectBarIndex);
+                setTick(t => t + 1);
+                if (chartRef.current) chartRef.current.timeScale().updateOffsetForNewBar(isAutoFollow);
+                setIsSelectBarMode(false);
+                setSelectBarIndex(null);
+                return;
+            }
+            // Drag-release (or hover-click handled by CustomChart): keep the
+            // preview parked, don't cut.
+            if (!down) return;
+            return;
+        }
+        // Only snapshot history when the drawing actually moved — a plain
+        // click on a selected drawing leaves history untouched.
         if (dragState && dragMovedRef.current) pushToHistory(drawings);
         dragMovedRef.current = false;
 
@@ -1790,7 +1887,7 @@ setAllData(validData);
                 // If it's a one-click tool OR a significant drag (dist > 5px), finalize it.
                 // Otherwise, keep it as an active preview (supporting click-move-click).
                 if (isOneClickTool || dist > 5) {
-                    const next = [...drawings, withOrigin(currentDrawing)];
+                    const next = [...drawings, currentDrawing];
                     setDrawings(next);
                     pushToHistory(next);
                     setSelectedIds([currentDrawing.id]);
@@ -1804,24 +1901,17 @@ setAllData(validData);
         setSnapIndicator(null);
     };
 
-    // A click on a selected drawing selects it (and clears the context menu).
-    // NOTE: web's DrawingLayer emits this for mouse double-click only — it has
-    // no touch event plumbing — so this is the desktop path.
-    const handleDoubleClickDrawing = useCallback((drawing: Drawing) => {
-        setContextMenu(null);
-        setSelectedIds([drawing.id]);
-    }, []);
-
     const handleMouseDownHandle = useCallback((e: React.MouseEvent, drawingId: string, handle: 'p1' | 'p2' | 'move' | 'target' | 'stop' | 'entry') => {
         if (isLocked) return;
         // Creation wins over dragging: with a drawing tool armed, presses that
         // land on old drawings must fall through to the container so the NEW
         // drawing starts — never grab/move the old one (body or handles).
         if (activeTool !== 'cursor') return;
-        // Grab origin MUST come from the event itself. Touch paths synthesize a
-        // mouse event carrying the real finger location, but the old code read
-        // the cached `mousePos` state (stale on touch) — so dragStartPos was
-        // captured away from the finger and drawings jumped on grab.
+        // Grab origin MUST come from the event itself. Touch paths synthesize
+        // a mouse event carrying the real finger location, but the old code
+        // read the cached `mousePos` state (stale on touch) — so dragStartPos
+        // was captured away from the finger and every drawing jumped sideways
+        // on grab. Fall back to mousePos only when the event has no coords.
         const rect = chartContainerRef.current?.getBoundingClientRect();
         let px: number | null = null;
         let py: number | null = null;
@@ -1855,32 +1945,38 @@ setAllData(validData);
         }
     }, [mousePos, isLocked, activeTool, getChartCoordinates, drawings]);
 
-    // Suppress the native browser menu on the chart canvas. Right-click on a
-    // drawing is handled by DrawingLayer -> handleContextMenuDrawing.
+    // Suppress the native browser menu on the chart. Selection actions live
+    // in the floating pill (Lock / Copy / Delete / Close) — no popup menu.
     const handleContextMenuInternal = (e: React.MouseEvent) => {
         e.preventDefault();
-        if (activeTool !== 'cursor' || currentDrawing) { setActiveTool('cursor'); setCurrentDrawing(null); resetAimRef.current(); return; }
-        if (clipboard) setContextMenu({ x: e.clientX, y: e.clientY, drawing: { id: 'paste-dummy' } as any });
+        if (activeTool !== 'cursor' || currentDrawing) { setActiveTool('cursor'); setCurrentDrawing(null); }
     };
 
-    const handleContextMenuDrawing = useCallback((e: React.MouseEvent, drawing: Drawing) => {
-        setContextMenu({ x: e.clientX, y: e.clientY, drawing });
+    // Double-click a drawing selects it.
+    const handleDoubleClickDrawing = useCallback((e: React.MouseEvent, drawing: Drawing) => {
+        e.stopPropagation();
+        setSelectedIds([drawing.id]);
     }, []);
 
-    // ── Touch drawing + placement cursor (TradingView aim model) ───────────
-    // While a drawing tool is armed on a coarse pointer, a single-finger drag
-    // moves a decoupled cursor (blue dot + crosshair, rendered below as an
-    // overlay because web CustomChart has no `placementCursor` prop) and a TAP
-    // commits at the cursor — the finger never covers the target. The desktop
-    // mouse flow is untouched: aimPlacement is false there.
+    // ── Touch handling for drawing (single-finger = draw, long-press = context menu) ──
     const longPressTimerRef = useRef<number | null>(null);
     const longPressTriggeredRef = useRef(false);
     const touchStartClientRef = useRef<{ x: number; y: number } | null>(null);
+    // Tap/drag disambiguation (TV parity): a touch that barely moves is a tap
+    // (select / open settings), only real movement starts a drag + history.
+    const touchStartTimeRef = useRef(0);
     const touchMovedRef = useRef(false);
-    // Drag dead-zone bookkeeping (shared by mouse and touch).
     const dragMovedRef = useRef(false);
-    const snapHapticOnRef = useRef(false);
+    const touchStartDrawingRef = useRef<{ id: string; wasSelected: boolean } | null>(null);
     const lastEmptyTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+    const snapHapticOnRef = useRef(false);
+    // A touch-driven horizontal/vertical placement in progress. The 500ms
+    // hold timer + touchend must not discard it: lifting the finger always
+    // places the line at the release point (even after a hold-aim).
+    const placingOneClickRef = useRef<'horizontal' | 'vertical' | null>(null);
+    const hapticTick = useCallback((ms: number = 8) => {
+        try { (navigator as any)?.vibrate?.(ms); } catch { /* no-op */ }
+    }, []);
     // rAF-throttled tick: touchmove fires faster than React can re-render the
     // SVG layer — coalesce per frame so low-end phones don't lag mid-drag.
     const rafTickRef = useRef<number | null>(null);
@@ -1894,6 +1990,8 @@ setAllData(validData);
     useEffect(() => () => {
         if (rafTickRef.current !== null) cancelAnimationFrame(rafTickRef.current);
     }, []);
+    // NOTE: long-press no longer opens a menu. Tap selects (DrawingLayer),
+    // tap-again opens Style settings, and the floating pill handles the rest.
 
     const getTouchCoords = useCallback((touch: Touch | React.Touch) => {
         const rect = chartContainerRef.current?.getBoundingClientRect();
@@ -1909,10 +2007,17 @@ setAllData(validData);
             longPressTimerRef.current = null;
         }
     }, []);
+
     useEffect(() => () => { clearLongPress(); }, [clearLongPress]);
 
-    // Pause replay the moment a drawing tool is armed: the chart must not scroll
-    // new bars under the aiming finger.
+    // ── Placement cursor (TradingView aim model, touch only) ─────────────
+    // While a drawing tool is armed on a coarse pointer, single-finger drags
+    // move a decoupled cursor (blue dot + crosshair, rendered by CustomChart)
+    // and taps commit AT THE CURSOR — the finger never covers the target.
+    // Desktop mouse flow below is untouched (aimPlacement is false there).
+    // Pause replay the moment a drawing tool is armed (TV parity): the
+    // chart must not scroll new bars under the aiming finger, or the
+    // cursor and in-progress drawings visibly drift mid-gesture.
     useEffect(() => {
         if (activeTool !== 'cursor') setIsPlaying(false);
     }, [activeTool]);
@@ -1922,9 +2027,9 @@ setAllData(validData);
         const c = getChartCoordinates(x, y);
         if (!c) return null;
         const r = snapPoint(x, y, c.time as number, c.price as number, c.logical);
-        // WYSIWYG dot: when magnet snaps, the dot must sit ON the snapped bar —
-        // not at the finger's x — or the drawing visibly shifts horizontally the
-        // moment it commits.
+        // WYSIWYG dot: when magnet snaps, the dot must sit ON the snapped
+        // bar — not at the finger's x — or the drawing visibly shifts
+        // horizontally the moment it commits.
         let cx = x;
         if (r.snapped) {
             const idx = Math.round((r.point as any).logical ?? (c.logical as number) ?? 0);
@@ -1946,22 +2051,23 @@ setAllData(validData);
         beginAim, moveAim, endAim, setPhase: setAimPhase, reset: resetAim,
     } = usePlacementCursor(
         resolvePlacementCursor,
-        // Adaptive thumb gap: ~18% of chart height mid-chart, shrinking toward
-        // thumb clearance near the bottom edge. `dimensions` is declared below,
-        // so read it lazily at event time (see the hook's own docs).
+        // Adaptive thumb gap: ~18% of chart height mid-chart, shrinking
+        // toward thumb clearance near the bottom edge. dimensions is
+        // declared below, so read it lazily at event time (see hook docs).
         (fingerYPx: number) => computeAimGap(fingerYPx, dimensions.height),
     );
-    // Latest-ref: resetDrawingInteractionState is declared above this hook but
-    // still needs to call resetAim. Reading resetAim directly up there hits its
-    // TDZ and crashes first render, so it goes through this ref.
+    // Latest-ref: resetDrawingInteractionState is declared above this hook
+    // but still needs to call resetAim. Reading resetAim directly up there
+    // hits its TDZ and crashes first render, so it goes through this ref.
     useEffect(() => {
         resetAimRef.current = resetAim;
     }, [resetAim]);
 
-    const aimPlacement = activeTool !== 'cursor' && IS_COARSE_POINTER && !isSelectBarMode && !isLocked;
+    const aimPlacement = activeTool !== 'cursor' && isCoarsePointer && !isSelectBarMode && !isLocked;
 
-    // Shared first-point assembly for the touch paths: tool style plus
-    // long/short entry/target/stop defaults from the trailing 20-bar range.
+    // Shared first-point assembly (tap-tap path below AND aim taps): tool
+    // style + long/short entry/target/stop defaults from the trailing
+    // 20-bar average range.
     const makeDrawingProps = useCallback((point: any): any => {
         const toolStyle = (toolDefaults as any)[activeTool] || {};
         const props: any = withOrigin({
@@ -1993,10 +2099,11 @@ setAllData(validData);
         if (!c) return;
         if (c.snapped && !snapHapticOnRef.current) { snapHapticOnRef.current = true; hapticTick(5); }
         if (!c.snapped) snapHapticOnRef.current = false;
-    }, []);
+    }, [hapticTick]);
 
-    // Arm a two-point stub at the aim cursor (tap-tap model). One-click and text
-    // tools never enter this path.
+    // Arm a two-point stub at the aim cursor (tap-tap model): called from
+    // commitAimTap when the first tap lifts in phase aim-p1.
+    // One-click/text tools never enter this path.
     const armAimStub = useCallback((): boolean => {
         if (aimPhaseRef.current !== 'aim-p1') return false;
         const tool = activeTool;
@@ -2005,15 +2112,17 @@ setAllData(validData);
         if (!c) return false;
         const pt = { time: c.time, price: c.price, logical: c.logical };
         const props = makeDrawingProps(pt);
+        // Pause autoplay the moment a drawing starts (TV parity).
         setIsPlaying(false);
+        hapticTick(8);
         setCurrentDrawing(props);
         setMousePos({ x: c.x, y: c.y });
         setAimPhase('aim-p2');
         return true;
-    }, [aimPhaseRef, aimCursorRef, setAimPhase, activeTool, makeDrawingProps, setIsPlaying, setCurrentDrawing]);
+    }, [aimPhaseRef, aimCursorRef, setAimPhase, activeTool, makeDrawingProps, setIsPlaying, hapticTick, setCurrentDrawing]);
 
-    // Commit a tap at the aim cursor: p1 for one-click/text/two-point tools, p2
-    // finalize when a stub is armed. Aim drags commit nothing.
+    // Commit a tap at the aim cursor: p1 for one-click/text/two-point tools,
+    // p2 finalize when a stub is armed.  Aim drags commit nothing.
     const commitAimTap = useCallback(() => {
         const c = aimCursorRef.current;
         if (!c || aimPhaseRef.current === 'idle') return;
@@ -2041,28 +2150,27 @@ setAllData(validData);
                 return;
             }
             if (tool === 'text') {
-                const props = makeDrawingProps(pt);
-                props.text = props.text || 'Text';
-                const nextT = [...drawings, props];
-                setDrawings(nextT);
-                pushToHistory(nextT);
-                setSelectedIds([props.id]);
-                hapticTick(8);
-                finishToolAfterDraw();
-                afterCommit();
-                return;
-            }
-            // Two-point tools: the first tap arms the stub at the cursor
-            // (tap-tap p1); the second tap finalizes via the aim-p2 path below.
-            hapticTick(8);
-            armAimStub();
+            const props = makeDrawingProps(pt);
+            props.text = props.text || 'Text';
+            const nextT = [...drawings, props];
+            setDrawings(nextT);
+            pushToHistory(nextT);
+            setSelectedIds([props.id]);
+            finishToolAfterDraw();
+            afterCommit();
             return;
         }
+        // Two-point tools: the first tap arms the stub at the cursor
+        // (tap-tap p1); the second tap finalizes via the aim-p2 path below.
+        armAimStub();
+        return;
+    }
         const cur = currentDrawing;
         if (!cur) { setAimPhase('aim-p1'); return; }
-        // Screen-space minimum extent: a second point landing within 6px of the
-        // anchor (finger jitter, not intent) keeps the preview armed instead of
-        // committing a dot-sized drawing.
+        // Screen-space minimum extent: a second point landing within 6px of
+        // the anchor (finger jitter, not intent) keeps the preview armed
+        // instead of committing a dot-sized drawing. Matches the old
+        // release-distance rule, in the same screen space the dot shows in.
         try {
             const p1 = (cur as any).p1;
             const p1x = chartRef.current?.timeScale()?.logicalToCoordinate?.(p1.logical ?? 0);
@@ -2073,6 +2181,7 @@ setAllData(validData);
         } catch { /* fall through to the data guard below */ }
         const tdx = (pt.logical ?? 0) - ((cur as any).p1.logical ?? 0);
         const tdy = (pt.price ?? 0) - ((cur as any).p1.price ?? 0);
+        // Tap on the anchor keeps the preview armed (same guard as tap-tap).
         if (Math.abs(tdx) < 0.5 && Math.abs(tdy) < 1e-9) return;
         let finalized: any;
         if (cur.type === 'long' || cur.type === 'short') {
@@ -2115,57 +2224,100 @@ setAllData(validData);
             return;
         }
         // Multi-touch (pinch zoom) must never start — or keep alive — a drawing drag.
-        if (e.touches.length !== 1) { clearLongPress(); setDragState(null); setDragStartPos(null); return; }
+        if (e.touches.length !== 1) { clearLongPress(); setDragState(null); setDragStartPos(null); return; };
         const touch = e.touches[0];
         const coords = getTouchCoords(touch);
         if (!coords) return;
         // When a drawing tool is active pan is disabled (CustomChart disablePan),
         // so prevent browser scroll/zoom and treat the gesture as drawing.
         if (activeTool !== 'cursor' || isSelectBarMode) e.preventDefault();
+        // Track start position for tap/drag disambiguation + long-press cancel.
         touchStartClientRef.current = { x: touch.clientX, y: touch.clientY };
+        touchStartTimeRef.current = Date.now();
         touchMovedRef.current = false;
+        touchStartDrawingRef.current = null;
         longPressTriggeredRef.current = false;
         clearLongPress();
         const holdX = coords.clientX;
         const holdY = coords.clientY;
-        // While aiming, press-hold-drag IS the gesture (no hold-to-cancel).
+        // Which drawing (if any) is under this touch? The SVG hit shapes carry
+        // data-drawing-hit / data-drawing-id — hover state never exists on touch.
+        const hitEl = (e.target as Element)?.closest?.('[data-drawing-hit]');
+        const hitId = hitEl?.getAttribute?.('data-drawing-id') || null;
+        const hitDrawing = hitId ? drawings.find(d => d.id === hitId) || null : null;
+        if (hitDrawing) {
+            touchStartDrawingRef.current = { id: hitDrawing.id, wasSelected: selectedIds.includes(hitDrawing.id) };
+        } else if (activeTool === 'cursor' && !currentDrawing && !isSelectBarMode) {
+            // Double-tap empty chart = deselect + cancel preview (TV behavior).
+            const prevEmpty = lastEmptyTapRef.current;
+            const nowEmpty = Date.now();
+            if (prevEmpty && nowEmpty - prevEmpty.t < 300 &&
+                Math.hypot(touch.clientX - prevEmpty.x, touch.clientY - prevEmpty.y) < 24) {
+                lastEmptyTapRef.current = null;
+                setSelectedIds([]);
+                setCurrentDrawing(null);
+                return;
+            }
+            lastEmptyTapRef.current = { t: nowEmpty, x: touch.clientX, y: touch.clientY };
+        }
+        // While aiming, press-hold-drag IS the gesture (no hold-to-cancel);
+        // two-finger tap and the chip X remain the touch cancels. The timer
+        // stays for cursor mode (select-on-hold) and desktop.
         if (!aimPlacement) longPressTimerRef.current = window.setTimeout(() => {
             longPressTriggeredRef.current = true;
-            // A horizontal/vertical placement in progress survives the hold: the
-            // ghost stays armed so lifting the finger still places the line at
-            // the release point (touchend finalizes it).
-            if (placingOneClickRef.current) { hapticTick(30); return; }
+            // A horizontal/vertical placement in progress survives the hold:
+            // the ghost stays armed so lifting the finger still places the
+            // line at the release point (touchend finalizes it).
+            if (placingOneClickRef.current) {
+                hapticTick(30);
+                return;
+            }
+            // Long-press mirrors right-click: if a tool is active clear it,
+            // otherwise (re)select the drawing under the finger so the
+            // floating pill acts on it. No popup menu.
             if (activeTool !== 'cursor' || currentDrawing) {
                 setActiveTool('cursor');
                 setCurrentDrawing(null);
                 placingOneClickRef.current = null;
-                resetAim();
                 return;
             }
-            // Long-press mirrors right-click: hit-test the hold point and select.
-            const elAt = typeof document !== 'undefined'
-                ? document.elementFromPoint(holdX, holdY)?.closest?.('[data-drawing-hit]')
-                : null;
-            const idAt = elAt?.getAttribute?.('data-drawing-id') || null;
-            const target = (idAt && drawings.find(d => d.id === idAt))
-                || (selectedDrawingId && drawings.find(d => d.id === selectedDrawingId))
-                || null;
-            if (target) setSelectedIds([target.id]);
+            // Hit-test the hold point directly (elementFromPoint survives SVG
+            // group nesting); fall back to the tapped drawing / selection.
+            let target = hitDrawing;
+            if (!target) {
+                const elAt = typeof document !== 'undefined'
+                    ? document.elementFromPoint(holdX, holdY)?.closest?.('[data-drawing-hit]')
+                    : null;
+                const idAt = elAt?.getAttribute?.('data-drawing-id') || null;
+                target = (idAt && drawings.find(d => d.id === idAt))
+                    || hitDrawing
+                    || (selectedDrawingId && drawings.find(d => d.id === selectedDrawingId))
+                    || null;
+            }
+            if (target) {
+                setSelectedIds([target.id]);
+            }
+            // Haptic feedback when available
             hapticTick(30);
         }, 500);
 
+        // Reuse mouse-down drawing logic via touch coordinates
         if (!chartRef.current || !candlestickSeriesRef.current) return;
         const chartCoords = getChartCoordinates(coords.x, coords.y);
         if (!chartCoords) return;
         if (isSelectBarMode) {
+            // Move the cut line only — the tap-to-cut confirm happens on
+            // touch-end (tap without drag), so drag-to-preview never cuts early.
             const foundIdx = Math.max(0, Math.min(allData.length - 1, Math.round(chartCoords.logical ?? 0)));
-            if (foundIdx !== currentIndex) setCurrentIdx(foundIdx);
+            if (selectBarIndex !== foundIdx) setSelectBarIndex(foundIdx);
             return;
         }
         if (aimPlacement && !dragState) {
-            // Tap-tap model (touch): touch-down only seeds the aim cursor. The
-            // first tap arms p1 on lift (commitAimTap), the second finalizes p2;
-            // drags only move the cursor.
+            // Tap-tap model (touch): touch-down only seeds the aim cursor.
+            // The first tap arms p1 on lift (commitAimTap), the second tap
+            // finalizes p2; drags only move the cursor, nothing arms here.
+            // One-click/text tools only seed the cursor here — their tap
+            // commits on lift via commitAimTap.
             snapHapticOnRef.current = false;
             const ac = beginAim(touch.identifier, coords.x, coords.y);
             if (ac) {
@@ -2175,8 +2327,8 @@ setAllData(validData);
             return;
         }
         if (currentDrawing && (currentDrawing.type !== 'horizontal' && currentDrawing.type !== 'vertical')) {
-            // Second tap finalizes AT this tap (tap-tap drawing). Rebase p2 onto
-            // the tap point; a tap on the anchor keeps the preview armed.
+            // Second tap finalizes AT this tap (tap-tap drawing). Rebase p2
+            // onto the tap point; a tap on the anchor keeps the preview armed.
             const snapEndT = snapPoint(coords.x, coords.y, chartCoords.time as number, chartCoords.price as number, chartCoords.logical).point;
             const tdx = (snapEndT.logical ?? 0) - ((currentDrawing as any).p1.logical ?? 0);
             const tdy = (snapEndT.price ?? 0) - ((currentDrawing as any).p1.price ?? 0);
@@ -2192,26 +2344,23 @@ setAllData(validData);
             return;
         }
         if (activeTool === 'cursor') {
-            // Double-tap empty chart = deselect + cancel preview (TV behaviour).
-            const prevEmpty = lastEmptyTapRef.current;
-            const nowEmpty = Date.now();
-            if (prevEmpty && nowEmpty - prevEmpty.t < 300 &&
-                Math.hypot(touch.clientX - prevEmpty.x, touch.clientY - prevEmpty.y) < 24) {
-                lastEmptyTapRef.current = null;
-                setSelectedIds([]);
-                setCurrentDrawing(null);
-                return;
-            }
-            lastEmptyTapRef.current = { t: nowEmpty, x: touch.clientX, y: touch.clientY };
+            // A tap that began on a drawing already selected it in DrawingLayer;
+            // don't immediately deselect it (and let the chart pan from there).
+            const startedOnDrawing = (e.target as Element)?.closest?.('[data-drawing-hit]');
+            const startedOnToolbar = (e.target as Element)?.closest?.('[data-drawing-toolbar]');
+            if (selectedDrawingId && !startedOnDrawing && !startedOnToolbar) setSelectedIds([]);
             return;
         }
-        if (isLocked) return;
+        if (isLocked) {
+            return;
+        }
         const snapResT = snapPoint(coords.x, coords.y, chartCoords.time as number, chartCoords.price as number, chartCoords.logical);
         const snapped = snapResT.point;
         setSnapIndicator(snapResT.snapped && snapResT.snapY !== undefined ? { x: coords.x, y: snapResT.snapY } : null);
         if (snapResT.snapped && !snapHapticOnRef.current) { snapHapticOnRef.current = true; hapticTick(5); }
         if (!snapResT.snapped) snapHapticOnRef.current = false;
-        const drawingProps: any = makeDrawingProps(snapped);
+        let drawingProps: any = makeDrawingProps(snapped);
+        // Pause autoplay the moment a drawing starts (TV parity) + anchor tick.
         setIsPlaying(false);
         hapticTick(8);
         if (activeTool === 'text') {
@@ -2224,38 +2373,40 @@ setAllData(validData);
             return;
         }
         setCurrentDrawing(drawingProps);
-        // One-click placement tools are placed on lift: remember the in-progress
-        // placement so a hold-aim never discards it.
+        // One-click placement tools (horizontal/vertical) are placed on lift:
+        // remember the in-progress placement so a hold-aim never discards it.
         placingOneClickRef.current = (activeTool === 'horizontal' || activeTool === 'vertical') ? activeTool : null;
         setMousePos({ x: coords.x, y: coords.y });
-    }, [getTouchCoords, getChartCoordinates, snapPoint, activeTool, currentDrawing, drawings, isSelectBarMode, allData, currentIndex, isLocked, selectedDrawingId, pushToHistory, addToast, clearLongPress, finishToolAfterDraw, withOrigin, hapticTick, aimPlacement, dragState, beginAim, noteAimSnap, makeDrawingProps, aimPhaseRef, resetAim]);
+    }, [getTouchCoords, getChartCoordinates, getSnappedPoint, snapPoint, activeTool, currentDrawing, drawings, isSelectBarMode, allData, currentIndex, isLocked, selectedDrawingId, selectedIds, selectBarIndex, toolDefaults, currentColor, hoveredDrawingId, pushToHistory, addToast, clearLongPress, finishToolAfterDraw, withOrigin, hapticTick, aimPlacement, dragState, beginAim, noteAimSnap, makeDrawingProps, aimPhaseRef, resetAim]);
 
     const onTouchMove = useCallback((e: React.TouchEvent) => {
         // Second finger down mid-gesture (pinch) cancels any drawing drag so
-        // zooming never moves a drawing.
+        // zooming never moves a drawing and no stale drag survives the pinch.
         if (e.touches.length !== 1) { setDragState(null); setDragStartPos(null); return; }
         const touch = e.touches[0];
         const coords = getTouchCoords(touch);
         if (!coords) return;
-        // Cancel long-press if the finger drifts.
+        // Cancel long-press if finger drifts
         if (touchStartClientRef.current) {
             const dx = touch.clientX - touchStartClientRef.current.x;
             const dy = touch.clientY - touchStartClientRef.current.y;
-            if (Math.sqrt(dx * dx + dy * dy) > 10) { clearLongPress(); touchMovedRef.current = true; }
+            if (Math.sqrt(dx * dx + dy * dy) > 10) clearLongPress();
+            if (Math.sqrt(dx * dx + dy * dy) > 10) touchMovedRef.current = true;
         }
-        // If we are drawing or dragging a handle, suppress native scrolling.
+        // If we are drawing or dragging a handle, suppress native scrolling
         if (activeTool !== 'cursor' || dragState || currentDrawing || isSelectBarMode) e.preventDefault();
         setMousePos({ x: coords.x, y: coords.y });
         const chartCoords = getChartCoordinates(coords.x, coords.y);
         if (!chartCoords) return;
         if (isSelectBarMode) {
             const idx = Math.max(0, Math.min(allData.length - 1, Math.round((chartCoords.logical as number) ?? 0)));
-            if (idx !== currentIndex) setCurrentIdx(idx);
+            if (selectBarIndex !== idx) setSelectBarIndex(idx);
             return;
         }
         if (aimPlacement && !dragState) {
             // Aim drag: move the decoupled cursor (magnet applied inside the
-            // resolver). Tap-tap model: nothing arms or commits on move.
+            // resolver). Tap-tap model: nothing arms or commits on move; the
+            // first tap's lift arms p1 and the ghost follows after that.
             const mc = moveAim(touch.identifier, coords.x, coords.y);
             if (mc) {
                 setMousePos({ x: mc.x, y: mc.y });
@@ -2265,6 +2416,7 @@ setAllData(validData);
             return;
         }
         if (dragState && dragStartPos) {
+            // 4px dead-zone shared with mouse: taps must not nudge drawings.
             const startDragT = dragStartPos as any;
             if (typeof startDragT.startClientX === 'number') {
                 const movedPxT = Math.hypot(touch.clientX - startDragT.startClientX, touch.clientY - (startDragT.startClientY ?? touch.clientY));
@@ -2283,6 +2435,8 @@ setAllData(validData);
                 if (dragState.handle === 'move') {
                     const p1Base = initialData.initialP1;
                     const p2Base = initialData.initialP2;
+                    // Axis lock (TV): horizontal lines only move in price,
+                    // vertical only in time — same as the mouse path.
                     const lockTime = d.type === 'horizontal';
                     const lockPrice = d.type === 'vertical';
                     const getRebasedPoint = (base: any) => {
@@ -2333,42 +2487,49 @@ setAllData(validData);
             } else {
                 const nextP2 = (currentDrawing as any).type === 'horizontal'
                     ? { ...snp, time: (currentDrawing as any).p1.time, logical: (currentDrawing as any).p1.logical }
-                    : (currentDrawing as any).type === 'ray'
+                    : (currentDrawing as any).type === 'vertical'
                         ? { ...snp, price: (currentDrawing as any).p1.price }
-                        : (currentDrawing as any).type === 'vertical'
-                            ? { ...snp, price: (currentDrawing as any).p1.price }
-                            : snp;
+                        : snp;
                 setCurrentDrawing(prev => prev ? { ...prev, p2: nextP2 } as any : null);
             }
             queueTick();
         }
-    }, [getTouchCoords, getChartCoordinates, snapPoint, activeTool, dragState, dragStartPos, currentDrawing, allData, currentIndex, toolDefaults, clearLongPress, queueTick, hapticTick, aimPlacement, moveAim, noteAimSnap, isSelectBarMode]);
+    }, [getTouchCoords, getChartCoordinates, getSnappedPoint, snapPoint, activeTool, dragState, dragStartPos, currentDrawing, allData, currentIndex, toolDefaults, clearLongPress, queueTick, hapticTick, aimPlacement, moveAim, noteAimSnap, aimPhaseRef]);
 
     const onTouchEnd = useCallback((e: React.TouchEvent) => {
         clearLongPress();
         const wasTap = !touchMovedRef.current;
+        const tapDuration = Date.now() - touchStartTimeRef.current;
         touchStartClientRef.current = null;
         touchMovedRef.current = false;
+        // Select-bar mode: only a clean tap cuts (drag-and-release just parks
+        // the line — TV confirm model). The cut commits selectBarIndex.
         if (isSelectBarMode) {
             if (wasTap && !longPressTriggeredRef.current) {
-                setCurrentIdx(currentIndex);
-                hapticTick(8);
+                const cutIdx = selectBarIndex ?? null;
+                if (cutIdx !== null) {
+                    setCurrentIdx(cutIdx);
+                    hapticTick(8);
+                }
                 setIsSelectBarMode(false);
+                setSelectBarIndex(null);
             }
             longPressTriggeredRef.current = false;
             setDragState(null);
             setDragStartPos(null);
             return;
         }
-        // Placement-cursor model (touch): taps commit at the cursor — the first
-        // tap arms p1, the second tap finalizes p2 (tap-tap). Drags only moved
-        // the cursor, so a drag-lift arms p1 at the lift point.
+        // Placement-cursor model (touch): taps commit at the cursor — the
+        // first tap arms p1, the second tap finalizes p2 (tap-tap). Drags
+        // only moved the cursor, so a drag-lift arms p1 at the lift point.
         if (aimPlacement && !dragState) {
             const lift = e.changedTouches[0];
             const liftCoords = lift ? getTouchCoords(lift) : null;
             const kind = lift && liftCoords ? endAim(lift.identifier, liftCoords.x, liftCoords.y) : null;
-            // Skip when another finger is still down — pinch/multi-touch
-            // contaminates the gesture and must never commit.
+            // Taps route through commitAimTap (p1 arm / h-v-text / p2
+            // finalize). Skip when another finger is still down —
+            // pinch/multi-touch contaminates the gesture and must never
+            // commit.
             if (kind && e.touches.length === 0) commitAimTap();
             longPressTriggeredRef.current = false;
             setDragState(null);
@@ -2376,7 +2537,8 @@ setAllData(validData);
             return;
         }
         // One-click placement (horizontal/vertical): lifting the finger always
-        // places the line at the exact release point — even after a hold-aim.
+        // places the line at the exact release point — even after a hold-aim
+        // (long-press must never swallow it). Same path for both tools.
         if (placingOneClickRef.current && currentDrawing &&
             (currentDrawing.type === 'horizontal' || currentDrawing.type === 'vertical')) {
             const release = e.changedTouches[0];
@@ -2402,6 +2564,7 @@ setAllData(validData);
             finishToolAfterDraw();
             placingOneClickRef.current = null;
             longPressTriggeredRef.current = false;
+            touchStartDrawingRef.current = null;
             setDragState(null);
             setDragStartPos(null);
             setSnapIndicator(null);
@@ -2409,10 +2572,23 @@ setAllData(validData);
             return;
         }
         placingOneClickRef.current = null;
+        // If this was a long-press we already handled the menu – don't also finalize a drawing
         if (longPressTriggeredRef.current) {
             longPressTriggeredRef.current = false;
             setDragState(null);
             setDragStartPos(null);
+            touchStartDrawingRef.current = null;
+            return;
+        }
+        // Tap again on an already-selected drawing = re-affirm selection.
+        // Drags (moved) fall through to the drag-commit path instead.
+        const tapInfo = touchStartDrawingRef.current;
+        touchStartDrawingRef.current = null;
+        if (wasTap && tapDuration < 500 && tapInfo?.wasSelected && activeTool === 'cursor' && !currentDrawing) {
+            setSelectedIds([tapInfo.id]);
+            setDragState(null);
+            setDragStartPos(null);
+            dragMovedRef.current = false;
             return;
         }
         if (dragState && dragMovedRef.current) pushToHistory(drawings);
@@ -2434,16 +2610,20 @@ setAllData(validData);
                     setCurrentDrawing(null);
                     hapticTick(8);
                     finishToolAfterDraw();
+                } else if (!isOneClickTool) {
+                    // Lifted finger without dragging: KEEP the stub armed so
+                    // the next tap finalizes tap-tap (mirrors desktop
+                    // mouse-up, which never discards). Discarding here made
+                    // touch tap-tap impossible — the stub never survived to
+                    // the second tap. A tap on the anchor keeps it armed.
                 }
-                // A lift without dragging KEEPS the stub armed so the next tap
-                // can finalize it — discarding here made touch tap-tap impossible.
             }
         }
         setDragState(null);
         setDragStartPos(null);
         setSnapIndicator(null);
         snapHapticOnRef.current = false;
-    }, [clearLongPress, dragState, drawings, currentDrawing, mousePos, pushToHistory, finishToolAfterDraw, isSelectBarMode, currentIndex, activeTool, withOrigin, hapticTick, getTouchCoords, getChartCoordinates, snapPoint, aimPlacement, endAim, commitAimTap]);
+    }, [clearLongPress, dragState, drawings, currentDrawing, mousePos, pushToHistory, finishToolAfterDraw, isSelectBarMode, selectBarIndex, activeTool, withOrigin, hapticTick, getTouchCoords, getChartCoordinates, snapPoint, aimPlacement, endAim, commitAimTap]);
 
     const [tick, setTick] = useState(0);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -2479,13 +2659,27 @@ setAllData(validData);
     };
 
     const stepForward = () => {
-        if (currentIndex < allData.length - 1) {
-            setCurrentIdx(currentIndex + 1);
+        stepForwardRef.current();
+    };
+
+    // Ref-stable stepper for the autoplay interval: the timer never resets
+    // mid-play (no drift at slow speeds) because the effect below only
+    // depends on [isPlaying, playSpeed]. Latest values flow through a mirror.
+    const replayLiveRef = useRef({ currentIndex, allDataLen: allData.length, isAutoFollow });
+    replayLiveRef.current = { currentIndex, allDataLen: allData.length, isAutoFollow };
+    const stepForwardRef = useRef<() => void>(() => {});
+    stepForwardRef.current = () => {
+        const s = replayLiveRef.current;
+        if (s.currentIndex < s.allDataLen - 1) {
+            setCurrentIdx(s.currentIndex + 1);
             setTick(t => t + 1);
             if (chartRef.current) {
-                // Handle horizontal following logic intelligently
-                chartRef.current.timeScale().updateOffsetForNewBar(isAutoFollow);
-            }        } else { setIsPlaying(false); addToast({ type: 'info', title: 'End of Data' }); }
+                chartRef.current.timeScale().updateOffsetForNewBar(s.isAutoFollow);
+            }
+        } else {
+            setIsPlaying(false);
+            addToast({ type: 'info', title: 'End of Data' });
+        }
     };
 
     const stepBack = useCallback(() => {
@@ -2511,10 +2705,60 @@ setAllData(validData);
         }
     }, [allData.length, isAutoFollow]);
 
+    // ── Touch scrubbing (TV): drag across the progress bar to jump live ──
+    const scrubbingRef = useRef(false);
+    const scrubToRatio = useCallback((clientX: number, el: HTMLElement) => {
+        if (allData.length === 0) return;
+        const rect = el.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        const idx = Math.round(ratio * (allData.length - 1));
+        setIsPlaying(false);
+        setCurrentIdx(idx);
+        setTick(t => t + 1);
+        if (chartRef.current) {
+            chartRef.current.timeScale().updateOffsetForNewBar(isAutoFollow);
+        }
+    }, [allData.length, isAutoFollow]);
+
+    // ── Jump-to-bar sheet helpers ──
+    const jumpToBar = useCallback((n: number) => {
+        if (allData.length === 0 || !isFinite(n)) return;
+        const idx = Math.max(0, Math.min(allData.length - 1, Math.round(n)));
+        setIsPlaying(false);
+        setCurrentIdx(idx);
+        setTick(t => t + 1);
+        if (chartRef.current) chartRef.current.timeScale().updateOffsetForNewBar(isAutoFollow);
+        setIsJumpSheetOpen(false);
+        hapticTick(8);
+    }, [allData.length, isAutoFollow, hapticTick]);
+    const jumpLive = useCallback(() => {
+        if (allData.length === 0) return;
+        setIsPlaying(false);
+        setCurrentIdx(allData.length - 1);
+        setTick(t => t + 1);
+        if (chartRef.current) chartRef.current.timeScale().scrollToRealtime();
+        setIsJumpSheetOpen(false);
+    }, [allData.length]);
+
+    // Select-bar mouse tap tracking: mouse-down only previews the cut line,
+    // mouse-up commits on a tap (<8px). This keeps hover-then-click working
+    // on drawings (which the canvas never sees) while preserving
+    // drag-to-preview without cutting early (TradingView confirm model).
+    const selectBarMouseDownRef = useRef<{ x: number; y: number } | null>(null);
+
+    // Long-press the step-back button = restart from bar 0 (saves dock space).
+    const dockLpTimer = useRef<number | null>(null);
+    const dockLpFired = useRef(false);
+    const clearDockLp = useCallback(() => {
+        if (dockLpTimer.current !== null) { window.clearTimeout(dockLpTimer.current); dockLpTimer.current = null; }
+    }, []);
+    useEffect(() => () => { clearDockLp(); }, [clearDockLp]);
+
     useEffect(() => {
-        let interval: any; if (isPlaying) interval = setInterval(stepForward, playSpeed);
+        let interval: any;
+        if (isPlaying) interval = setInterval(() => stepForwardRef.current(), playSpeed);
         return () => clearInterval(interval);
-    }, [isPlaying, currentIndex, playSpeed, allData]);
+    }, [isPlaying, playSpeed]);
 
     const handleUndoTrade = useCallback(() => {
         if (history.length === 0) return;
@@ -2569,16 +2813,12 @@ setAllData(validData);
         'KeyH': 'horizontal',
         'KeyN': 'vertical',
         'KeyB': 'rect',
+        'KeyC': 'channel',
         'KeyL': 'long',
         'KeyS': 'short',
         'KeyF': 'fib',
-        'KeyC': 'channel',
         'KeyW': 'text',
-        // WEB-ONLY: 'KeyX' also arms the text tool (pre-existing web binding).
-        'KeyX': 'text',
-        // NOTE: 'KeyU' (measure) is deliberately NOT bound. The measure
-        // renderer + getDrawingMeasure/formatMeasureLabel are missing from web
-        // (utils.ts / CustomChart.tsx), so a measure drawing would be invisible.
+        'KeyU': 'measure',
     };
 
     // Global Keyboard Shortcuts
@@ -2598,7 +2838,6 @@ setAllData(validData);
                 if (tool) {
                     e.preventDefault();
                     setActiveTool(tool);
-                    addToast({ type: 'info', title: 'Tool Selected', message: tool.charAt(0).toUpperCase() + tool.slice(1), duration: 1000 });
                 }
             }
 
@@ -2606,14 +2845,12 @@ setAllData(validData);
             if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey) {
                 e.preventDefault();
                 setMagnetMode(!magnetMode);
-                addToast({ type: 'info', title: 'Magnet Mode', message: magnetMode ? 'Disabled' : 'Enabled', duration: 1000 });
             }
 
             // Toggle lock with L (when not drawing)
             if (e.code === 'KeyL' && !e.ctrlKey && !e.metaKey && e.shiftKey) {
                 e.preventDefault();
-                toggleLockedCb();
-                addToast({ type: 'info', title: 'Drawings', message: toolbarLocked ? 'Unlocked' : 'Locked', duration: 1000 });
+                setIsLocked(!isLocked);
             }
 
             // Undo/Redo with Ctrl/Cmd
@@ -2626,7 +2863,7 @@ setAllData(validData);
                 handleRedo();
             }
 
-            // Delete selected drawing(s)
+            // Delete selected drawings (multi-select parity)
             if (e.code === 'Delete' || e.code === 'Backspace') {
                 if (selectedIds.length && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
                     e.preventDefault();
@@ -2634,12 +2871,10 @@ setAllData(validData);
                     setDrawings(next);
                     pushToHistory(next);
                     setSelectedIds([]);
-                    setStyleDrawer(null);
-                    addToast({ type: 'info', title: 'Deleted' });
                 }
             }
 
-            // TradingView clipboard: Ctrl+D duplicate, Ctrl+C copy, Ctrl+V paste
+            // TV clipboard: Ctrl+D duplicate, Ctrl+C copy, Ctrl+V paste, Ctrl+A select all
             if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
                 e.preventDefault();
                 duplicateSelected();
@@ -2649,10 +2884,15 @@ setAllData(validData);
                 if (sel.length) { e.preventDefault(); setClipboard(sel[0]); }
             }
             if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
-                if (clipboard && mousePos) {
+                if (clipboard && mousePos && chartContainerRef.current) {
                     e.preventDefault();
+                    const rect = chartContainerRef.current.getBoundingClientRect();
                     handlePasteDrawing(mousePos.x, mousePos.y);
+                    void rect;
                 }
+            }
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+                if (drawings.length) { e.preventDefault(); setSelectedIds(drawings.map(d => d.id)); }
             }
 
             // Escape to deselect or exit modes
@@ -2661,7 +2901,7 @@ setAllData(validData);
                 setSelectedIds([]);
                 setCurrentDrawing(null); // Cancel active drawing
                 placingOneClickRef.current = null;
-                resetAimRef.current();
+                resetAim();
                 setIsSelectBarMode(false);
                 setActiveTool('cursor');
             }
@@ -2669,132 +2909,129 @@ setAllData(validData);
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [centerChart, magnetMode, toolbarLocked, toggleLockedCb, selectedIds, handleUndo, handleRedo, drawings, pushToHistory, addToast, duplicateSelected, clipboard, mousePos, handlePasteDrawing]);
+    }, [centerChart, magnetMode, isLocked, selectedIds, handleUndo, handleRedo, drawings, pushToHistory, addToast, duplicateSelected, clipboard, mousePos, handlePasteDrawing, resetAim]);
+
 
     return (
         <div className={`w-full h-full flex flex-col overflow-hidden font-sans ${isDarkMode ? 'bg-black text-zinc-200' : 'bg-white text-slate-900'}`} onMouseUp={handleMouseUp}>
-            {!isFullscreenCanvas && (
-            <div className={`h-16 shrink-0 border-b flex items-center justify-between px-8 z-50 relative shadow-sm ${isDarkMode ? 'border-zinc-800 bg-black/95 backdrop-blur-sm' : 'border-slate-200 bg-white/95 backdrop-blur-sm'}`}>
-                <div className="flex items-center gap-3 w-[18rem]">
+            {!isFullscreenCanvas && !showWelcome && (
+            <div className={`h-12 sm:h-16 shrink-0 border-b flex items-center justify-between px-2.5 sm:px-6 z-50 relative shadow-sm gap-2 sm:gap-4 overflow-visible ${isDarkMode ? 'border-[#1f1f1f] bg-[#0a0a0a]/95 backdrop-blur-sm' : 'border-slate-200 bg-white/95 backdrop-blur-sm'}`}>
+                {/* Replay Counter + Wide Progress Bar closing the empty space */}
+                {allData.length > 0 ? (
+                    <div className="flex-1 flex items-center justify-center min-w-0 px-1 sm:px-2">
+                        <div className="flex flex-col items-center justify-center gap-0.5 w-full max-w-[280px] sm:max-w-[380px]">
+                            <div className="hidden sm:flex justify-center items-center gap-2 w-full mb-0.5">
+                                <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-500">Replay</span>
+                                <button
+                                    onClick={() => { setJumpInput(String(currentIndex + 1)); setIsJumpSheetOpen(true); }}
+                                    title="Jump to bar"
+                                    className={`min-h-0 text-[9px] font-mono font-bold tabular-nums px-1 rounded hover:bg-white/10 ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}
+                                >
+                                    {currentIndex + 1}/{allData.length}
+                                </button>
+                            </div>
+                            <button
+                                onClick={() => { setJumpInput(String(currentIndex + 1)); setIsJumpSheetOpen(true); }}
+                                title="Jump to bar"
+                                className={`sm:hidden min-h-0 relative z-10 text-[9px] font-mono font-bold leading-none tabular-nums whitespace-nowrap px-1.5 py-0.5 rounded ${isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}
+                            >
+                                {currentIndex + 1}/{allData.length}
+                            </button>
+                            <div
+                                onClick={handleProgressBarClick}
+                                onPointerDown={(e) => {
+                                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                                    scrubbingRef.current = true;
+                                    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+                                    scrubToRatio(e.clientX, e.currentTarget);
+                                }}
+                                onPointerMove={(e) => {
+                                    if (scrubbingRef.current) scrubToRatio(e.clientX, e.currentTarget);
+                                }}
+                                onPointerUp={() => { scrubbingRef.current = false; }}
+                                onPointerCancel={() => { scrubbingRef.current = false; }}
+                                className={`w-full min-w-[28px] h-1.5 sm:h-2 rounded-full cursor-pointer touch-none select-none ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'} transition-colors relative`}
+                                title="Drag to scrub, click to jump"
+                            >
+                                <div
+                                    className="h-full bg-emerald-500 transition-all duration-150 ease-out rounded-full pointer-events-none"
+                                    style={{ width: `${Math.min(100, ((currentIndex + 1) / allData.length) * 100)}%` }}
+                                />
+                                {/* Fat invisible grab strip for fingers */}
+                                <div className="absolute -inset-y-2.5 inset-x-0" />
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex-1" />
+                )}
+
+                {/* Right Section: Back button placed near orange icon, Auto-follow, Timeframe, Watchlist */}
+                <div className="flex items-center gap-1 sm:gap-1.5 justify-end shrink-0 min-w-0">
                     {(!showWelcome || allData.length > 0) && (
                         <button
-                            onClick={() => { setShowWelcome(true); setAllData([]); localStorage.removeItem('jfx_backtest_cached_chart'); localStorage.setItem('jfx_backtest_data_source', 'none'); }}
-                            className={`p-1.5 rounded-xl border transition-all ${isDarkMode ? 'bg-black border-zinc-700 text-zinc-400 hover:text-[#FF4F01] hover:border-[#FF4F01]/50' : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-[#FF4F01] hover:border-[#FF4F01]/50'}`}
+                            onClick={() => {
+                                setIsFullscreenCanvas(false);
+                                setIsPlaying(false);
+                                setShowWelcome(true);
+                            }}
+                            className={`p-1.5 rounded-lg transition-all shrink-0 ${isDarkMode ? 'text-zinc-400 hover:text-white hover:bg-white/10' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}
                             title="Back to Lab Menu"
+                            aria-label="Back to Lab Menu"
                         >
-                            <ArrowLeftToLine size={14} />
+                            <ArrowLeftToLine size={16} />
                         </button>
                     )}
-                    <h2 className={`text-base font-black uppercase tracking-tight leading-none ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Backtest Lab</h2>
-                </div>
-
-                <div className={`absolute left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 rounded-2xl border shadow-xl ${isDarkMode ? 'bg-black/80 border-zinc-800 shadow-black/20' : 'bg-slate-50 border-slate-200 shadow-slate-200/50'}`}>
-                    <div className={`flex items-center rounded-xl border px-2 relative ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center gap-2 px-1">
-                        <span className={`text-xs font-black uppercase ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{symbol}</span>
-                            {(isCtraderFetching || isFetching) && <Loader2 size={11} className="animate-spin text-[#FF4F01] shrink-0" />}
-                        </div>
-                        <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`} />
-                        <div className="relative group/tf">
-                            <button onClick={() => setIsTFMenuOpen(!isTFMenuOpen)} className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isDarkMode ? 'text-zinc-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}>
-                                <span className="text-xs font-black">{timeframe}</span>
-                                <ChevronDown size={12} />
-                            </button>
-                            {isTFMenuOpen && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setIsTFMenuOpen(false)} />
-                                    <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-2 w-16 border rounded-2xl shadow-2xl p-1.5 z-[100] ${isDarkMode ? 'bg-black border-zinc-700' : 'bg-white border-slate-200'}`}>
-                                        {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
-                                            <button key={tf} onClick={() => { setTimeframe(tf); setIsTFMenuOpen(false); handleFetchActiveSourceData(undefined, tf); }} className={`w-full flex items-center justify-center gap-1 px-1 py-2 rounded-xl ${timeframe === tf ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
-                                                <span className="text-[11px] font-black">{tf}</span>
-                                                {timeframe === tf && <Check size={12} className="text-white shrink-0" />}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 ml-1 border-l pl-2 border-zinc-800">
-                        <button onClick={handleUpdateData} disabled={isFetching} title="Update to Latest" className={`p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-white/5 text-emerald-500' : 'hover:bg-emerald-50 text-emerald-600'}`}>
-                            <RefreshCw size={18} className={isFetching ? 'animate-spin' : ''} />
-                        </button>
-                    </div>
-
-                    {/* Data source chip: the shared candle store serves every
-                        pair — no switching or connecting needed. */}
-                    <div className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 border bg-[#1689ff]/15 border-[#1689ff]/40 text-[#1689ff]`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        Shared History
-                    </div>
-                    {/* Series freshness: the shared store refreshes a bounded
-                        batch per harvest tick, so an individual series can lag
-                        days/weeks behind live. Show the last bar's date so a
-                        stale chart never passes as current. */}
-                    {allData.length > 0 && (() => {
-                        const lastT = allData[allData.length - 1]?.time ?? 0;
-                        const ageSec = Date.now() / 1000 - lastT;
-                        const stale = ageSec > 2 * 24 * 3600;
-                        const label = lastT > 0
-                            ? new Date(lastT * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-                            : '—';
-                        return (
-                            <div
-                                title={`Last bar: ${lastT > 0 ? new Date(lastT * 1000).toLocaleString() : 'unknown'} (${allData.length} bars). Refresh the harvest queue if this lags live prices.`}
-                                className={`h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest hidden sm:flex items-center gap-1.5 border ${stale ? 'bg-amber-500/15 border-amber-500/40 text-amber-500' : isDarkMode ? 'bg-white/5 border-white/10 text-zinc-400' : 'bg-white border-slate-200 text-slate-500'}`}
-                            >
-                                as of {label}
-                            </div>
-                        );
-                    })()}
-                </div>
-
-                <div className="flex items-center gap-4 justify-end">
                     {allData.length > 0 && (
-                        <div className="flex items-center gap-2">
-                            <button onClick={stepBack} disabled={currentIndex <= 0} title="Scroll Left" className={`p-1 rounded-lg transition-all ${currentIndex <= 0 ? 'opacity-30 cursor-not-allowed' : isDarkMode ? 'hover:bg-white/5 text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}>
-                                <ChevronLeft size={14} />
-                            </button>
-                            <div className="flex flex-col w-56">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Replay Progress</span>
-                                    <span className={`text-[10px] font-mono font-bold ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
-                                        {currentIndex + 1} / {allData.length} Bars
-                                    </span>
-                                </div>
-                                <div
-                                    onClick={handleProgressBarClick}
-                                    className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer ${isDarkMode ? 'bg-black hover:bg-zinc-900' : 'bg-slate-200 hover:bg-slate-300'} transition-colors`}
-                                    title="Click to jump to bar"
-                                >
-                                    <div
-                                        className="h-full bg-emerald-500 transition-all duration-300 ease-out"
-                                        style={{ width: `${Math.min(100, ((currentIndex + 1) / allData.length) * 100)}%` }}
-                                    />
-                                </div>
-                            </div>
-                            <button onClick={stepForward} disabled={currentIndex >= allData.length - 1} title="Scroll Right" className={`p-1 rounded-lg transition-all ${currentIndex >= allData.length - 1 ? 'opacity-30 cursor-not-allowed' : isDarkMode ? 'hover:bg-white/5 text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}>
-                                <ChevronRight size={14} />
-                            </button>
-                        </div>
+                        <button
+                            onClick={() => {
+                                setIsAutoFollow((v: boolean) => !v);
+                                addToast({ type: 'info', title: isAutoFollow ? 'Follow Off' : 'Follow On', message: isAutoFollow ? 'Chart stays put as replay advances.' : 'Chart follows the replay cursor.' });
+                            }}
+                            title={isAutoFollow ? 'Following replay (tap to lock view)' : 'View locked (tap to follow replay)'}
+                            aria-pressed={isAutoFollow}
+                            className={`p-1.5 rounded-lg transition-all shrink-0 touch-manipulation ${isAutoFollow ? 'text-[#FF4F01]' : (isDarkMode ? 'text-zinc-600 hover:text-zinc-300' : 'text-slate-400 hover:text-slate-600')}`}
+                        >
+                            <LocateFixed size={14} />
+                        </button>
                     )}
-                    <div className={`w-px h-6 ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
-                    <button
-                        onClick={toggleFullscreenCanvas}
-                        title="Fullscreen chart (locks landscape)"
-                        aria-label="Fullscreen chart"
-                        aria-pressed={isFullscreenCanvas}
-                        className={`p-2 rounded-lg transition-all ${isFullscreenCanvas ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}
-                    >
-                        <Maximize size={18} />
-                    </button>
+                    <div className={`w-px h-5 shrink-0 ${isDarkMode ? 'bg-zinc-800' : 'bg-slate-200'}`} />
+                    {/* Timeframe Selector Pill (left of watchlist) */}
+                    <div className="relative group/tf shrink-0">
+                        <button
+                            onClick={() => setIsTFMenuOpen(!isTFMenuOpen)}
+                            className={`flex items-center gap-1 px-1.5 py-1 rounded-lg text-[10px] sm:text-xs font-bold transition-all ${
+                                isDarkMode
+                                    ? 'text-zinc-300 hover:text-white hover:bg-white/5'
+                                    : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
+                            }`}
+                        >
+                            <span>{timeframe}</span>
+                            <ChevronDown size={11} className="text-zinc-400" />
+                            {(isCtraderFetching || isFetching) && <Loader2 size={10} className="animate-spin text-[#FF4F01] shrink-0 ml-0.5" />}
+                        </button>
+                        {isTFMenuOpen && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setIsTFMenuOpen(false)} />
+                                <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-2 w-16 rounded-2xl border shadow-2xl p-1.5 z-[100] backdrop-blur-xl animate-sheet-fade origin-top ${isDarkMode ? 'bg-black/85 border-white/10' : 'bg-white border-slate-200'}`}>
+                                    {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map(tf => (
+                                        <button key={tf} onClick={() => { setTimeframe(tf); setIsTFMenuOpen(false); handleFetchActiveSourceData(undefined, tf); }} className={`w-full flex items-center justify-center gap-1 px-1 py-2 rounded-xl ${timeframe === tf ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')}`}>
+                                            <span className="text-[11px] font-bold">{tf}</span>
+                                            {timeframe === tf && <Check size={12} className="text-white shrink-0" />}
+                                        </button>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                    </div>
                     <button
                         onClick={() => setIsWatchlistOpen(!isWatchlistOpen)}
                         title="Toggle Watchlist Sidebar"
-                        className={`p-2 rounded-lg ${isWatchlistOpen ? 'bg-black text-white' : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}
+                        aria-label="Toggle watchlist sidebar"
+                        aria-pressed={isWatchlistOpen}
+                        className={`p-1.5 rounded-lg shrink-0 transition-colors touch-manipulation ${isWatchlistOpen ? 'bg-[#FF4F01] text-white' : isDarkMode ? 'hover:bg-zinc-900 text-zinc-400' : 'hover:bg-slate-100 text-slate-500'}`}
                     >
-                        <List size={20} />
+                        <List size={18} />
                     </button>
                 </div>
             </div>
@@ -2803,8 +3040,8 @@ setAllData(validData);
             <div className={`flex-1 flex relative overflow-hidden min-h-0 group ${isDarkMode ? 'bg-black' : 'bg-slate-50'}`}>
                 <div
                     ref={chartContainerRef}
-                    className="relative flex-1 w-full h-full min-w-0 outline-none"
-                    style={{ touchAction: (activeTool !== 'cursor' || isSelectBarMode) ? 'none' : undefined }}
+                    className="relative flex-1 w-full h-full min-h-0 min-w-0 outline-none"
+                    style={{ touchAction: (activeTool !== 'cursor' || isSelectBarMode) ? 'none' : 'pan-y' }}
                     onContextMenu={handleContextMenuInternal}
                     onMouseDown={onMouseDown}
                     onMouseMove={onMouseMove}
@@ -2813,7 +3050,7 @@ setAllData(validData);
                     onTouchMove={onTouchMove}
                     onTouchEnd={onTouchEnd}
                 >
-                {!showWelcome && allData.length > 0 && (
+                {isChartOpen && allData.length > 0 && (
                 <DrawingToolbarV2
                     activeTool={activeTool}
                     setActiveTool={setActiveTool}
@@ -2844,18 +3081,20 @@ setAllData(validData);
                 />
                 )}
                     <ChartErrorBoundary>
-                        {/* Armed-tool chip (TradingView): obvious draw mode + on-screen cancel */}
-                        {!showWelcome && allData.length > 0 && activeTool !== 'cursor' && (
+                        {/* Armed-tool chip (TV): obvious draw mode + on-screen cancel */}
+                        {isChartOpen && allData.length > 0 && activeTool !== 'cursor' && (
                             <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 pl-3 pr-1.5 py-1 rounded-full bg-[#2962ff] text-white shadow-lg shadow-black/40 max-w-[calc(100%-120px)]">
                                 <span className="text-[11px] font-bold whitespace-nowrap overflow-hidden text-ellipsis">
-                                    {TOOL_LABELS[activeTool] || activeTool} — {IS_COARSE_POINTER
-                                        ? (activeTool === 'horizontal' || activeTool === 'vertical' || activeTool === 'text'
+                                    {TOOL_LABELS[activeTool] || activeTool} — {isCoarsePointer ? (
+                                        activeTool === 'horizontal' || activeTool === 'vertical' || activeTool === 'text'
                                             ? 'tap to place'
-                                            : (aimPhase === 'aim-p2' ? 'tap to set point 2/2' : 'tap to set point 1/2'))
-                                        : (activeTool === 'horizontal' || activeTool === 'vertical' || activeTool === 'text' ? 'tap once' : 'tap two points')}
+                                            : (aimPhase === 'aim-p2' ? 'tap to set point 2/2' : 'tap to set point 1/2')
+                                    ) : (
+                                        <>tap {activeTool === 'horizontal' || activeTool === 'vertical' || activeTool === 'text' ? 'once' : 'two points'}</>
+                                    )}
                                 </span>
                                 <button
-                                    onClick={() => { setActiveTool('cursor'); setCurrentDrawing(null); placingOneClickRef.current = null; resetAim(); }}
+                                    onClick={() => { setActiveTool('cursor'); setCurrentDrawing(null); resetAim(); }}
                                     aria-label="Cancel drawing tool"
                                     className="w-7 h-7 grid place-items-center rounded-full bg-white/20 hover:bg-white/30 active:scale-95 touch-manipulation shrink-0"
                                 >
@@ -2863,9 +3102,8 @@ setAllData(validData);
                                 </button>
                             </div>
                         )}
-                        {/* Selection quick-actions (TradingView edit flyout) — also the
-                            entry point for the colour / width / line-style drawers. */}
-                        {!showWelcome && allData.length > 0 && selectedDrawing && activeTool === 'cursor' && !isSelectBarMode && !styleDrawer && (
+                        {/* Selection quick-actions (TV edit flyout): no long-press needed */}
+                        {isChartOpen && allData.length > 0 && selectedDrawing && activeTool === 'cursor' && !isSelectBarMode && !styleDrawer && (
                             <div
                                 data-drawing-toolbar
                                 onMouseDown={(e) => e.stopPropagation()}
@@ -2873,7 +3111,7 @@ setAllData(validData);
                                 onPointerDown={(e) => e.stopPropagation()}
                                 className={`absolute top-2 left-1/2 -translate-x-1/2 z-40 flex items-center gap-0.5 p-1 rounded-2xl border shadow-xl backdrop-blur-xl overflow-x-auto no-scrollbar ${isDarkMode ? 'bg-black/85 border-white/10' : 'bg-white/90 border-slate-200'}`}>
                                 <button
-                                    onClick={() => setStyleDrawer('color')}
+                                    onClick={() => { setStyleDrawer('color'); hapticTick(8); }}
                                     title="Line color"
                                     aria-label="Line color"
                                     className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -2883,7 +3121,7 @@ setAllData(validData);
                                 </button>
                                 {selectedDrawing.type !== 'text' && (
                                     <button
-                                        onClick={() => setStyleDrawer('width')}
+                                        onClick={() => { setStyleDrawer('width'); hapticTick(8); }}
                                         title="Line width"
                                         aria-label="Line width"
                                         className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -2894,7 +3132,7 @@ setAllData(validData);
                                 )}
                                 {selectedDrawing.type !== 'text' && (
                                     <button
-                                        onClick={() => setStyleDrawer('style')}
+                                        onClick={() => { setStyleDrawer('style'); hapticTick(8); }}
                                         title="Line style"
                                         aria-label="Line style"
                                         className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -2904,7 +3142,7 @@ setAllData(validData);
                                     </button>
                                 )}
                                 <button
-                                    onClick={() => updateDrawingProperty(selectedDrawing.id, { isLocked: !selectedDrawing.isLocked })}
+                                    onClick={() => { updateDrawingProperty(selectedDrawing.id, { isLocked: !selectedDrawing.isLocked }); hapticTick(8); }}
                                     title={selectedDrawing.isLocked ? 'Unlock' : 'Lock'}
                                     aria-label={selectedDrawing.isLocked ? 'Unlock' : 'Lock'}
                                     className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -2913,7 +3151,7 @@ setAllData(validData);
                                     <span className="text-[8px] font-bold leading-none">{selectedDrawing.isLocked ? 'Locked' : 'Lock'}</span>
                                 </button>
                                 <button
-                                    onClick={() => duplicateSelected()}
+                                    onClick={() => { duplicateSelected(); hapticTick(8); addToast({ type: 'success', title: selectedIds.length > 1 ? `${selectedIds.length} drawings copied` : 'Drawing copied', message: 'Duplicate selected — drag it into place.' }); }}
                                     title="Duplicate"
                                     aria-label="Duplicate drawing"
                                     className={`min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-300 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -2922,7 +3160,7 @@ setAllData(validData);
                                     <span className="text-[8px] font-bold leading-none">Copy</span>
                                 </button>
                                 <button
-                                    onClick={() => { const n = selectedIds.length; deleteSelected(); setStyleDrawer(null); addToast({ type: 'info', title: n > 1 ? `${n} drawings deleted` : 'Drawing deleted', message: 'Tap Undo in the toolbar to restore.' }); }}
+                                    onClick={() => { const n = selectedIds.length; deleteSelected(); setStyleDrawer(null); hapticTick(8); addToast({ type: 'info', title: n > 1 ? `${n} drawings deleted` : 'Drawing deleted', message: 'Tap Undo in the toolbar to restore.' }); }}
                                     title="Delete"
                                     aria-label="Delete drawing"
                                     className="min-w-[44px] min-h-[44px] px-2 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl text-rose-500 hover:bg-rose-500/10 active:scale-95 touch-manipulation"
@@ -2941,46 +3179,6 @@ setAllData(validData);
                                 </button>
                             </div>
                         )}
-                        {/* Aim cursor + magnet snap dot. Rendered here (not in
-                            CustomChart) because web CustomChart exposes no
-                            placementCursor/snapIndicator props. */}
-                        {aimCursor && aimPlacement && (
-                            <div className="absolute inset-0 z-[45] pointer-events-none">
-                                <div
-                                    className="absolute"
-                                    style={{
-                                        left: aimCursor.x - 13, top: aimCursor.y - 13,
-                                        width: 26, height: 26, borderRadius: 9999,
-                                        background: aimCursor.snapped ? 'rgba(16,185,129,0.25)' : 'rgba(41,98,255,0.25)',
-                                        border: `2px solid ${aimCursor.snapped ? '#10b981' : '#2962ff'}`,
-                                    }}
-                                />
-                                <div
-                                    className="absolute"
-                                    style={{
-                                        left: aimCursor.x - 4, top: aimCursor.y - 4,
-                                        width: 8, height: 8, borderRadius: 9999,
-                                        background: aimCursor.snapped ? '#10b981' : '#2962ff',
-                                        boxShadow: '0 0 6px rgba(0,0,0,0.5)',
-                                    }}
-                                />
-                                <div className="absolute" style={{ left: aimCursor.x - 30, top: aimCursor.y, width: 60, height: 1, background: `${aimCursor.snapped ? '#10b981' : '#2962ff'}80` }} />
-                                <div className="absolute" style={{ left: aimCursor.x, top: aimCursor.y - 30, width: 1, height: 60, background: `${aimCursor.snapped ? '#10b981' : '#2962ff'}80` }} />
-                            </div>
-                        )}
-                        {snapIndicator && (
-                            <div
-                                className="absolute z-[45] pointer-events-none rounded-full"
-                                style={{
-                                    left: snapIndicator.x - (IS_COARSE_POINTER ? 7 : 5),
-                                    top: snapIndicator.y - (IS_COARSE_POINTER ? 7 : 5),
-                                    width: IS_COARSE_POINTER ? 14 : 10,
-                                    height: IS_COARSE_POINTER ? 14 : 10,
-                                    background: '#f59e0b',
-                                    boxShadow: '0 0 6px rgba(0,0,0,0.5)',
-                                }}
-                            />
-                        )}
                         <CustomChart
                             data={allData.slice(0, currentIndex + 1)}
                             trades={history as any}
@@ -2990,13 +3188,23 @@ setAllData(validData);
                             timeframe={timeframe}
                             tradingView
                             isSelectBarMode={isSelectBarMode}
-                            onSelectBar={(idx) => { setCurrentIdx(idx); setIsSelectBarMode(false); }}
+                            selectBarIndex={selectBarIndex}
+                            onSelectBar={(idx) => { setCurrentIdx(idx); setIsSelectBarMode(false); setSelectBarIndex(null); }}
+                            onSelectBarMove={(idx) => setSelectBarIndex(idx)}
                             onCoordinatesChange={handleCoordinatesChange}
                             onMouseUpdate={(x, y) => setMousePos({ x, y })}
                             onViewStateChange={handleViewStateChange}
                             initialViewState={chartViewState}
-                            disablePan={activeTool !== 'cursor'}                        >
-                            <DrawingLayer drawings={visibleDrawings} currentDrawing={currentDrawing} selectedDrawingId={selectedDrawingId} hoveredDrawingId={hoveredDrawingId} mousePos={mousePos} chart={chartRef.current} series={candlestickSeriesRef.current} containerWidth={dimensions.width - PRICE_SCALE_WIDTH /* price-scale width (CustomChart PADDING_RIGHT) — overlay must stop at the plot edge */} containerHeight={dimensions.height} activeTool={activeTool} isSelectBarMode={isSelectBarMode} onMouseDownHandle={handleMouseDownHandle} onSelectDrawing={handleSelectDrawing} onHoverDrawing={setHoveredDrawingId} onDoubleClickDrawing={handleDoubleClickDrawing} onContextMenuDrawing={handleContextMenuDrawing} tick={tick} isLocked={isLocked} isDarkMode={isDarkMode} />
+                            disablePan={activeTool !== 'cursor' || isSelectBarMode}
+                            selectedIds={selectedIds}
+                            selectedDrawingId={selectedDrawingId}
+                            hoveredDrawingId={hoveredDrawingId}
+                            previewDrawing={currentDrawing}
+                            previewMouse={mousePos}
+                            snapIndicator={snapIndicator}
+                            placementCursor={aimCursor ? { x: aimCursor.x, y: aimCursor.y, snapped: aimCursor.snapped } : null}
+                        >
+                            <DrawingLayer drawings={visibleDrawings} currentDrawing={currentDrawing} selectedDrawingId={selectedDrawingId} hoveredDrawingId={hoveredDrawingId} mousePos={mousePos} chart={chartRef.current} series={candlestickSeriesRef.current} containerWidth={dimensions.width - PRICE_SCALE_WIDTH} containerHeight={dimensions.height} activeTool={activeTool} isSelectBarMode={isSelectBarMode} onMouseDownHandle={handleMouseDownHandle} onSelectDrawing={handleSelectDrawing} onHoverDrawing={setHoveredDrawingId} onDoubleClickDrawing={handleDoubleClickDrawing} selectedIds={selectedIds} tick={tick} isLocked={isLocked} isDarkMode={isDarkMode} />
                         </CustomChart>
                     </ChartErrorBoundary>
 
@@ -3026,11 +3234,11 @@ setAllData(validData);
 
                     {/* Start Screen: single guided entry point (resume / start
                         fresh / connect) replacing the old 4-card grid. */}
-                    <AnimatePresence>
+                    <AnimatePresence initial={false}>
                         {showWelcome && (
                             <motion.div
                                 key="start-screen"
-                                initial={{ opacity: 0 }}
+                                initial={{ opacity: 1 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
                                 transition={{ duration: 0.2 }}
@@ -3041,6 +3249,9 @@ setAllData(validData);
                                     defaultSymbol={symbol}
                                     defaultTimeframe={timeframe}
                                     onOpenWatchlist={() => setIsWatchlistOpen(true)}
+                                    cachedSeries={cachedSeries}
+                                    onResume={handleResumeFromCache}
+                                    onStartFresh={handleStartFresh}
                                 />
                             </motion.div>
                         )}
@@ -3094,8 +3305,11 @@ setAllData(validData);
                     />
                 </div>
 
-                {/* TradingView-style Watchlist Sidebar (matches ChartGrid) */}
-                <div className={`${isWatchlistOpen ? 'w-72 translate-x-0' : 'w-0 translate-x-full'} shrink-0 border-l flex flex-col overflow-hidden transition-all duration-300 ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-white border-slate-200'}`}>
+                {/* TradingView-style Watchlist Sidebar — fixed overlay drawer on mobile */}
+                {isWatchlistOpen && (
+                    <div className="fixed inset-0 z-[65] lg:hidden bg-black/50 backdrop-blur-[2px] animate-sheet-fade" onClick={() => setIsWatchlistOpen(false)} aria-hidden />
+                )}
+                <div className={`${isWatchlistOpen ? 'translate-x-0' : 'translate-x-full'} fixed lg:static inset-y-0 right-0 z-[70] [@media(orientation:landscape)]:z-[110] lg:z-auto w-[85vw] max-w-[320px] [@media(orientation:landscape)]:w-[70vw] [@media(orientation:landscape)]:max-w-[280px] lg:w-72 lg:max-w-none border-l flex flex-col overflow-hidden transition-transform duration-300 lg:shrink-0 shadow-[0_0_44px_rgba(0,0,0,0.55)] ${isWatchlistOpen ? 'lg:w-72' : 'lg:w-0 lg:border-l-0'} ${isDarkMode ? 'bg-black/90 backdrop-blur-2xl border-white/10' : 'bg-white border-slate-200'}`}>
                     <div className="p-4 border-b shrink-0 flex items-center justify-between">
                         <h3 className="font-bold text-sm">Watchlist</h3>
                         <button onClick={() => setIsWatchlistOpen(false)} className="opacity-50 hover:opacity-100"><X size={16} /></button>
@@ -3120,15 +3334,17 @@ setAllData(validData);
                             );
                         })}
                     </div>
+
                 </div>
             </div>
 
+            {/* Desktop / tablet replay bar — hidden on mobile (replaced by the floating replay dock below) and in fullscreen canvas */}
             {!isFullscreenCanvas && (
-            <div className={`h-16 shrink-0 border-t flex items-center px-8 justify-between relative z-20 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white'}`}>
-                    <div className="flex items-center gap-3">
+            <div className={`hidden lg:flex h-12 lg:h-14 shrink-0 border-t items-center px-3 lg:px-8 justify-between relative z-20 gap-2 overflow-x-auto no-scrollbar ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white'}`}>
+                    <div className="hidden lg:flex items-center gap-3 shrink-0">
                     </div>
-                    <div className={`absolute left-1/2 -translate-x-1/2 flex items-center gap-2 p-1.5 rounded-2xl border backdrop-blur shadow-2xl ${isDarkMode ? 'bg-black/80 border-zinc-800' : 'bg-slate-50/80 border-slate-200'}`}>
-                        <button onClick={() => setIsSelectBarMode(!isSelectBarMode)} className={`flex items-center gap-2 px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest ${isSelectBarMode ? 'bg-rose-500/20 text-rose-500 border border-rose-500/30' : (isDarkMode ? 'hover:bg-black text-zinc-400 border border-transparent' : 'hover:bg-slate-200 text-slate-500 border border-transparent')}`}><ArrowLeftToLine size={16} /> Select bar</button>
+                    <div className={`lg:absolute lg:left-1/2 lg:-translate-x-1/2 flex items-center gap-1 lg:gap-2 p-1 rounded-xl lg:rounded-2xl border backdrop-blur shadow-2xl shrink-0 ${isDarkMode ? 'bg-black/80 border-zinc-800' : 'bg-slate-50/80 border-slate-200'}`}>
+                        <button onClick={() => setIsSelectBarMode(!isSelectBarMode)} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl font-black text-[10px] uppercase tracking-widest ${isSelectBarMode ? 'bg-rose-500/20 text-rose-500 border border-rose-500/30' : (isDarkMode ? 'hover:bg-black text-zinc-400 border border-transparent' : 'hover:bg-slate-200 text-slate-500 border border-transparent')}`}><ArrowLeftToLine size={16} /> Select bar</button>
                         <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-black' : 'bg-slate-200'}`} />
                         <button onClick={handleZoomOut} disabled={allData.length === 0} title="Zoom Out" className={`p-2 rounded-xl ${allData.length === 0 ? 'opacity-30 cursor-not-allowed' : (isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500')}`}><ZoomOut size={16} /></button>
                         <span className={`text-[10px] font-mono font-bold min-w-[40px] text-center ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{zoomLevel}%</span>
@@ -3143,11 +3359,11 @@ setAllData(validData);
                             Reset
                         </button>
                         <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-black' : 'bg-slate-200'}`} />
-                        <button onClick={centerChart} disabled={allData.length === 0} title="Fit Chart" className={`flex items-center gap-2 px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest ${allData.length === 0 ? 'opacity-30 cursor-not-allowed' : (isDarkMode ? 'hover:bg-black text-zinc-400 border border-transparent' : 'hover:bg-slate-200 text-slate-500 border border-transparent')}`}><Search size={16} /></button>
+                        <button onClick={centerChart} disabled={allData.length === 0} title="Fit Chart" className={`flex items-center gap-2 px-3 py-1.5 rounded-xl font-black text-[10px] uppercase tracking-widest ${allData.length === 0 ? 'opacity-30 cursor-not-allowed' : (isDarkMode ? 'hover:bg-black text-zinc-400 border border-transparent' : 'hover:bg-slate-200 text-slate-500 border border-transparent')}`}><Search size={16} /></button>
                         <div className={`w-px h-5 mx-1 ${isDarkMode ? 'bg-black' : 'bg-slate-200'}`} />
-                        <button onClick={resetReplay} className={`p-2.5 rounded-xl ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500'}`}><RotateCcw size={18} /></button>
-                        <button onClick={() => setIsPlaying(!isPlaying)} disabled={isFetching || allData.length === 0} className={`w-10 h-10 flex items-center justify-center rounded-xl bg-[#FF4F01] text-white shadow-lg shadow-[#FF4F01]/30`}>{isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
-                        <button onClick={stepForward} disabled={isFetching || allData.length === 0} className={`p-2.5 rounded-xl ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500'}`}><StepForward size={18} /></button>
+                        <button onClick={resetReplay} className={`p-2 rounded-xl ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500'}`}><RotateCcw size={18} /></button>
+                        <button onClick={() => setIsPlaying(!isPlaying)} disabled={isFetching || allData.length === 0} className={`w-9 h-9 flex items-center justify-center rounded-xl bg-[#FF4F01] text-white shadow-lg shadow-[#FF4F01]/30`}>{isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}</button>
+                        <button onClick={stepForward} disabled={isFetching || allData.length === 0} className={`p-2 rounded-xl ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500'}`}><StepForward size={18} /></button>
                     </div>
                     <div className="flex items-center gap-4">
                         {isLocked && (
@@ -3163,7 +3379,7 @@ setAllData(validData);
                             {isSpeedMenuOpen && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setIsSpeedMenuOpen(false)} />
-                                    <div className={`absolute bottom-full right-0 mb-4 w-48 border rounded-xl shadow-2xl p-2 z-50 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>
+                                    <div className={`absolute bottom-full right-0 mb-4 w-48 rounded-xl border shadow-2xl p-2 z-50 backdrop-blur-xl animate-sheet-fade origin-bottom ${isDarkMode ? 'bg-black/85 border-white/10' : 'bg-white border-slate-200'}`}>
                                         {[{ l: '0.5x', v: 1000 }, { l: '1.0x', v: 500 }, { l: '2.5x', v: 200 }, { l: '10x', v: 50 }].map(opt => (
                                             <button key={opt.v} onClick={() => { setPlaySpeed(opt.v); setIsSpeedMenuOpen(false); }} className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold flex items-center justify-between ${playSpeed === opt.v ? 'bg-[#FF4F01]/10 text-[#FF4F01]' : (isDarkMode ? 'text-zinc-400 hover:bg-white/5' : 'text-slate-600 hover:bg-slate-50')}`}><span>{opt.l}</span>{playSpeed === opt.v && <Check size={14} />}</button>
                                         ))}
@@ -3182,19 +3398,116 @@ setAllData(validData);
                     </div>
                 </div>
             )}
-            {/* Fullscreen exit affordance — the header/footer are hidden in
-                fullscreen canvas, so this floating control is the way out. */}
-            {isFullscreenCanvas && (
-                <button
-                    onClick={toggleFullscreenCanvas}
-                    aria-label="Exit fullscreen chart"
-                    title="Exit fullscreen chart"
-                    className="fixed right-3 bottom-3 z-[120] w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-xl border border-white/10 bg-black/60 hover:bg-black/80 text-zinc-100 hover:text-white transition-all active:scale-95 touch-manipulation shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
-                >
-                    <Minimize size={18} strokeWidth={2.5} />
-                </button>
+            {/* Mobile replay dock — replaces the global MobileDock while a chart is open.
+                Same floating liquid-glass island styling as MobileNav. In fullscreen
+                canvas it floats over the chart (no reserved spacer) with the
+                fullscreen toggle riding the bottom-right corner. */}
+            {isChartOpen && (
+                <>
+                {/* In-flow spacer reserves layout space so the fixed dock below
+                    never covers the chart's date axis or vertical scale. */}
+                {!isFullscreenCanvas && (
+                <div className="lg:hidden h-[60px] [@media(orientation:landscape)]:h-[48px] shrink-0" aria-hidden />
+                )}
+                <div className={isFullscreenCanvas
+                    ? "lg:hidden fixed z-[100] pointer-events-none select-none bottom-2 left-1/2 -translate-x-1/2 w-[440px] max-w-[94vw]"
+                    : "lg:hidden fixed bottom-0 left-0 right-0 z-[100] pointer-events-none select-none safe-area-inset-bottom pb-3 [@media(orientation:landscape)]:pb-2"}>
+                    <nav
+                        className="mx-3.5 [@media(orientation:landscape)]:mx-auto [@media(orientation:landscape)]:max-w-[440px] pointer-events-auto"
+                        onPointerDown={pokeDock}
+                        onTouchStart={pokeDock}
+                    >
+                        <div className={`flex items-center justify-between px-2 py-1 rounded-[28px] bg-white/[0.08] backdrop-blur-2xl border border-white/[0.10] shadow-[0_12px_40px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.08)] transition-opacity duration-500 ${dockFaded ? 'opacity-40' : 'opacity-100'}`}>
+                            <button
+                                onClick={() => setIsSelectBarMode(!isSelectBarMode)}
+                                aria-label="Select bar"
+                                className={`flex flex-col items-center justify-center gap-1 flex-1 py-1.5 px-1 rounded-[20px] transition-all min-h-[44px] touch-manipulation ${isSelectBarMode ? 'bg-[#FF4F01] text-white shadow-[0_2px_12px_rgba(255,79,1,0.35)] font-bold' : 'text-zinc-400'}`}
+                            >
+                                <ArrowLeftToLine size={17} strokeWidth={isSelectBarMode ? 2.5 : 2} />
+                                <span className="text-[10px] tracking-tight leading-none font-medium">Bar</span>
+                            </button>
+                            <button
+                                onClick={() => { if (!dockLpFired.current) stepBack(); dockLpFired.current = false; }}
+                                onTouchStart={() => {
+                                    dockLpFired.current = false;
+                                    clearDockLp();
+                                    dockLpTimer.current = window.setTimeout(() => {
+                                        dockLpFired.current = true;
+                                        resetReplay();
+                                        hapticTick(15);
+                                        addToast({ type: 'info', title: 'Replay Restarted', message: 'Back at the first bar.' });
+                                    }, 600);
+                                }}
+                                onTouchEnd={clearDockLp}
+                                onTouchMove={clearDockLp}
+                                disabled={currentIndex <= 0}
+                                aria-label="Step back (long-press = restart)"
+                                className="flex flex-col items-center justify-center gap-1 flex-1 py-1.5 px-1 rounded-[20px] transition-all min-h-[44px] touch-manipulation text-zinc-400 disabled:opacity-40"
+                            >
+                                <StepBack size={17} strokeWidth={2} />
+                                <span className="text-[10px] tracking-tight leading-none font-medium">Back</span>
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                disabled={isFetching || allData.length === 0}
+                                aria-label={isPlaying ? 'Pause' : 'Play'}
+                                className="flex flex-col items-center justify-center gap-1 flex-1 py-1.5 px-1 rounded-[20px] transition-all min-h-[44px] touch-manipulation bg-[#FF4F01] text-white shadow-[0_2px_12px_rgba(255,79,1,0.35)] font-bold disabled:opacity-50"
+                            >
+                                {isPlaying ? <Pause size={17} strokeWidth={2.5} fill="currentColor" /> : <Play size={17} strokeWidth={2.5} fill="currentColor" />}
+                                <span className="text-[10px] tracking-tight leading-none font-bold">{isPlaying ? 'Pause' : 'Play'}</span>
+                            </button>
+                            <button
+                                onClick={stepForward}
+                                disabled={isFetching || allData.length === 0}
+                                aria-label="Step forward"
+                                className="flex flex-col items-center justify-center gap-1 flex-1 py-1.5 px-1 rounded-[20px] transition-all min-h-[44px] touch-manipulation text-zinc-400 disabled:opacity-50"
+                            >
+                                <StepForward size={17} strokeWidth={2} />
+                                <span className="text-[10px] tracking-tight leading-none font-medium">Step</span>
+                            </button>
+                            <button
+                                onClick={() => setIsSpeedSheetOpen(true)}
+                                aria-label="Replay speed"
+                                className="flex flex-col items-center justify-center gap-1 flex-1 py-1.5 px-1 rounded-[20px] transition-all min-h-[44px] touch-manipulation text-zinc-400"
+                            >
+                                <Zap size={17} strokeWidth={2} />
+                                <span className="text-[10px] tracking-tight leading-none font-medium">{playSpeed === 1000 ? '0.5x' : playSpeed === 500 ? '1.0x' : playSpeed === 200 ? '2.5x' : '10x'}</span>
+                            </button>
+                        </div>
+                    </nav>
+                </div>
+                </>
             )}
-            {/* Selection-pill style drawers: color stays open for live trying,
+            {/* Landscape corner controls — standalone bottom-right controls (Fullscreen Exit/Enter + Watchlist shortcut) */}
+            {isChartOpen && (
+                <div
+                    className="hidden [@media(orientation:landscape)]:flex fixed right-3 bottom-3 z-[120] items-center gap-2.5"
+                >
+                    <button
+                        onClick={() => setIsFullscreenCanvas(v => !v)}
+                        aria-label={isFullscreenCanvas ? 'Exit fullscreen chart' : 'Fullscreen chart'}
+                        title={isFullscreenCanvas ? 'Exit fullscreen chart' : 'Fullscreen chart'}
+                        className="w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-xl border border-white/10 bg-white/[0.08] hover:bg-white/[0.14] text-zinc-200 hover:text-white transition-all active:scale-95 touch-manipulation shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
+                    >
+                        {isFullscreenCanvas ? <Minimize size={18} strokeWidth={2.5} /> : <Maximize size={18} strokeWidth={2} />}
+                    </button>
+                    {isFullscreenCanvas && (
+                        <button
+                            onClick={() => setIsWatchlistOpen(v => !v)}
+                            aria-label="Toggle watchlist"
+                            title="Toggle watchlist"
+                            className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-xl border transition-all active:scale-95 touch-manipulation shadow-[0_4px_16px_rgba(0,0,0,0.4)] ${
+                                isWatchlistOpen
+                                    ? 'bg-[#FF4F01] border-[#FF4F01] text-white shadow-[0_2px_12px_rgba(255,79,1,0.4)]'
+                                    : 'bg-white/[0.08] border-white/10 text-zinc-200 hover:text-white hover:bg-white/[0.14]'
+                            }`}
+                        >
+                            <List size={19} strokeWidth={2.2} />
+                        </button>
+                    )}
+                </div>
+            )}
+            {/* Selection-pill style drawers: color stays open for live-trying,
                 width/style close on pick (single-tap actions). */}
             <ColorDrawer
                 open={styleDrawer === 'color'}
@@ -3221,29 +3534,48 @@ setAllData(validData);
                 value={selectedDrawing?.strokeStyle || 'solid'}
                 onPick={(strokeStyle) => { applyStyleToSelection({ strokeStyle }); setStyleDrawer(null); hapticTick(8); }}
             />
-            {contextMenu && (
-                <div className="fixed z-[500] w-48 rounded-xl border shadow-2xl overflow-hidden" style={{ left: contextMenu.x, top: contextMenu.y }}>
-                    <div className={`flex flex-col p-1 ${isDarkMode ? 'bg-black border-zinc-800' : 'bg-white border-slate-200'}`}>
-                        {contextMenu.drawing.id === 'paste-dummy' ? (
-                            <button onClick={() => { const rect = chartContainerRef.current?.getBoundingClientRect(); if (rect) handlePasteDrawing(contextMenu.x - rect.left, contextMenu.y - rect.top); setContextMenu(null); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left ${isDarkMode ? 'hover:bg-white/5 text-zinc-300' : 'hover:bg-slate-50 text-slate-600'}`}><StepForward size={14} /> Paste Drawing</button>
-                        ) : (
-                            <>
-                                {clipboard && (
-                                    <button onClick={() => { const rect = chartContainerRef.current?.getBoundingClientRect(); if (rect) handlePasteDrawing(contextMenu.x - rect.left, contextMenu.y - rect.top); setContextMenu(null); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left ${isDarkMode ? 'hover:bg-white/5 text-zinc-300' : 'hover:bg-slate-50 text-slate-600'}`}><StepForward size={14} /> Paste Here</button>
-                                )}
-                                <button onClick={() => { handleDuplicateDrawing(contextMenu.drawing); setContextMenu(null); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left ${isDarkMode ? 'hover:bg-white/5 text-zinc-300' : 'hover:bg-slate-50 text-slate-600'}`}><StepForward size={14} /> Duplicate</button>
-                                <button onClick={() => { updateDrawingProperty(contextMenu.drawing.id, { isLocked: !contextMenu.drawing.isLocked }); setContextMenu(null); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left ${isDarkMode ? 'hover:bg-white/5 text-zinc-300' : 'hover:bg-slate-50 text-slate-600'}`}>{contextMenu.drawing.isLocked ? <Unlock size={14} /> : <Lock size={14} />} {contextMenu.drawing.isLocked ? 'Unlock' : 'Lock'}</button>
-                                <div className={`h-px mx-2 my-1 ${isDarkMode ? 'bg-black' : 'bg-slate-100'}`} />
-                                <button onClick={() => { setDrawings(drawings.filter(d => d.id !== contextMenu.drawing.id)); pushToHistory(drawings.filter(d => d.id !== contextMenu.drawing.id)); setContextMenu(null); setSelectedIds([]); setStyleDrawer(null); addToast({ type: 'info', title: 'Deleted' }); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-left text-rose-500 hover:bg-rose-500/10"><Trash2 size={14} /> Remove</button>
-                            </>
-                        )}
-                    </div>
+            {/* Mobile speed picker sheet (tap Zap) — shared Drawer shell */}
+            <Drawer open={isSpeedSheetOpen} onClose={() => setIsSpeedSheetOpen(false)} title="Replay speed" isDarkMode={isDarkMode} maxHeight="max-h-[60dvh]">
+                <div className="grid grid-cols-4 gap-2">
+                    {[{ l: '0.5x', v: 1000 }, { l: '1.0x', v: 500 }, { l: '2.5x', v: 200 }, { l: '10x', v: 50 }].map(opt => (
+                        <button
+                            key={opt.v}
+                            onClick={() => { setPlaySpeed(opt.v); setIsSpeedSheetOpen(false); hapticTick(8); }}
+                            className={`min-h-[52px] rounded-2xl text-sm font-black flex items-center justify-center gap-1.5 touch-manipulation active:scale-95 transition-colors ${playSpeed === opt.v ? 'bg-[#FF4F01] text-white' : (isDarkMode ? 'bg-white/[0.06] text-zinc-200' : 'bg-slate-100 text-slate-700')}`}
+                        >
+                            {opt.l}{playSpeed === opt.v && <Check size={14} />}
+                        </button>
+                    ))}
                 </div>
-            )}
+            </Drawer>
+            {/* Mobile jump-to-bar sheet (tap the bar counter) */}
+            <Drawer open={isJumpSheetOpen} onClose={() => setIsJumpSheetOpen(false)} title="Jump to bar" subtitle={`${symbol} · ${timeframe}`} isDarkMode={isDarkMode} maxHeight="max-h-[60dvh]">
+                <div className="flex gap-2 mb-2">
+                    <input
+                        value={jumpInput}
+                        onChange={(e) => setJumpInput(e.target.value.replace(/[^0-9]/g, ''))}
+                        inputMode="numeric"
+                        placeholder={`1 – ${allData.length}`}
+                        aria-label="Bar number"
+                        className={`flex-1 min-h-[52px] px-4 rounded-2xl text-base font-black tabular-nums outline-none ${isDarkMode ? 'bg-white/[0.06] border border-white/10 text-white' : 'bg-slate-100 border border-slate-200 text-slate-900'}`}
+                        onKeyDown={(e) => { if (e.key === 'Enter') jumpToBar(parseInt(jumpInput, 10) - 1); }}
+                    />
+                    <button
+                        onClick={() => jumpToBar(parseInt(jumpInput, 10) - 1)}
+                        className="min-h-[52px] px-6 rounded-2xl bg-[#FF4F01] text-white text-sm font-black touch-manipulation active:scale-95"
+                    >
+                        Go
+                    </button>
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                    <button onClick={() => jumpToBar(0)} className={`min-h-[48px] rounded-2xl text-xs font-black touch-manipulation active:scale-95 ${isDarkMode ? 'bg-white/[0.06] text-zinc-200' : 'bg-slate-100 text-slate-700'}`}>Start</button>
+                    <button onClick={() => jumpToBar(currentIndex - 50)} className={`min-h-[48px] rounded-2xl text-xs font-black touch-manipulation active:scale-95 ${isDarkMode ? 'bg-white/[0.06] text-zinc-200' : 'bg-slate-100 text-slate-700'}`}>−50</button>
+                    <button onClick={() => jumpToBar(currentIndex + 50)} className={`min-h-[48px] rounded-2xl text-xs font-black touch-manipulation active:scale-95 ${isDarkMode ? 'bg-white/[0.06] text-zinc-200' : 'bg-slate-100 text-slate-700'}`}>+50</button>
+                    <button onClick={jumpLive} className={`min-h-[48px] rounded-2xl text-xs font-black touch-manipulation active:scale-95 ${isDarkMode ? 'bg-white/[0.06] text-zinc-200' : 'bg-slate-100 text-slate-700'}`}>Live</button>
+                </div>
+            </Drawer>
         </div>
     );
 };
 
 export default BacktestLab;
-
-
