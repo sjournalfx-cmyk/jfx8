@@ -1,5 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireUser } from '../_lib/auth.js';
+import { requireUser } from './auth.js';
 import {
   auditApiKeyCall,
   extractRawKey,
@@ -7,14 +6,14 @@ import {
   resolveSymbolId,
   suggestSymbols,
   verifyApiKey,
-} from '../_lib/apiKeys.js';
+} from './apiKeys.js';
 import {
   loadUserCtraderAccessToken,
   openCtraderSession,
   parseIsDemo,
   type WsSession,
-} from '../_lib/ctraderSession.js';
-import { resolvePortfolioContext } from '../_lib/tradingLocks.js';
+} from './ctraderSession.js';
+import { resolvePortfolioContext } from './tradingLocks.js';
 
 // Live per-user OHLC candles for agents.
 //

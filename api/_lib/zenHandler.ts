@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
-import { requireUser } from './_lib/auth.js';
-import { rateLimit } from './_lib/rateLimit.js';
-import { applyCorsHeaders } from './_lib/cors.js';
+import { requireUser } from './auth.js';
+import { rateLimit } from './rateLimit.js';
+import { applyCorsHeaders } from './cors.js';
 
 type VercelRequest = { method?: string; body?: any; headers: Record<string, string | string[] | undefined>; };
 type VercelResponse = { status: (code: number) => VercelResponse; setHeader: (n: string, v: string) => void; json: (b: any) => void; send: (b: any) => void; end: (b?: any) => void; write: (c: any) => void; flushHeaders?: () => void; };

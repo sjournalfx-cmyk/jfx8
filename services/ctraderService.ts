@@ -651,7 +651,10 @@ export function logout() {
   clearSelectedAccountId();
   try { localStorage.removeItem(SESSION_FLAG_KEY); } catch { /* blocked */ }
   // Clear the server-side refresh cookie (best-effort).
-  try { void fetch('/api/ctrader/logout', { method: 'POST' }); } catch { /* ignore */ }
+  // Shares the trade route with an `action=logout` flag: Vercel Hobby caps a
+  // deployment at 12 Serverless Functions, so a standalone
+  // api/ctrader/logout.ts pushed the build over that limit.
+  try { void fetch('/api/ctrader/trade?action=logout', { method: 'POST' }); } catch { /* ignore */ }
   appAuthDone.clear();
   appAuthPromises.clear();
   accountAuthPromises.clear();

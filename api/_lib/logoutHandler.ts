@@ -1,6 +1,5 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCorsHeaders } from '../_lib/cors.js';
-import { requireUser } from '../_lib/auth.js';
+import { applyCorsHeaders } from './cors.js';
+import { requireUser } from './auth.js';
 
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 

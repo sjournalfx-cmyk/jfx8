@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import { requireUser } from './_lib/auth.js';
 import { rateLimit } from './_lib/rateLimit.js';
 import { applyCorsHeaders } from './_lib/cors.js';
+import zenHandler from './_lib/zenHandler.js';
 
 type VercelRequest = {
   method?: string;
@@ -34,6 +35,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
+  }
+
+  // Zen proxy tier. Vercel Hobby caps a deployment at 12 Serverless Functions,
+  // so this used to be its own api/zen.ts route and the build failed with
+  // `exceeded_serverless_functions_per_deployment`. The handler now lives in
+  // api/_lib/zenHandler.ts and is reached as POST /api/nvidia { zen: true }.
+  const isZen = typeof req.body === 'object' && req.body !== null
+    && !Array.isArray(req.body) && (req.body as any).zen === true;
+  if (isZen) {
+    return zenHandler(req, res);
   }
 
   // Require an authenticated Supabase user so this paid proxy cannot be abused.

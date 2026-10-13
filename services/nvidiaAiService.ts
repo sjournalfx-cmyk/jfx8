@@ -6,10 +6,12 @@ import { cleanAssistantResponse, isInsideThinkingBlock } from "../lib/thinkingCl
 // Web is same-origin only (no native shell, no absolute backend host), so the
 // base URL stays relative exactly like the rest of the web api/* surface.
 const BASE_URL = "/api/nvidia";
-// Zen proxy route for the free-model tier. NOTE: the free -> real model remap
-// table (ZEN_FREE_REMAP) lives server-side in api/zen.ts, which is NOT ported to
-// this repo yet. Until it lands, selecting a FREE model here 404s at the edge.
-const ZEN_BASE_URL = "/api/zen";
+// Zen proxy for the free-model tier. It shares the NVIDIA route with a `zen`
+// flag rather than living at its own path: Vercel's Hobby plan caps a
+// deployment at 12 Serverless Functions, and a standalone api/zen.ts pushed the
+// build over that limit. The free -> real model remap table (ZEN_FREE_REMAP)
+// lives server-side in api/_lib/zenHandler.ts.
+const ZEN_BASE_URL = "/api/nvidia";
 const ZEN_FREE_MODELS = new Set(["big-pickle","mimo-v2.5-free","ling-3.0-flash-fin-free","nemotron-3-ultra-free","nemotron-3.5-lightning-free","muse-spark-1.3-contributor-free","muse-spark-1.2-contributor-free"]);
 export const NVIDIA_CHAT_MODEL_ID = "nvidia/nemotron-3.5-lightning-30b-a3b";
 // Bullet-proofing: automatic fallback when the primary model is deprecated,
@@ -753,6 +755,7 @@ async function chatCompletion(
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
+          ...(isZen ? { zen: true } : {}),
           model,
           messages,
           max_tokens: maxTokens,

@@ -3,6 +3,8 @@ import WebSocket from 'ws';
 import { createHash } from 'crypto';
 import { requireUser } from '../_lib/auth.js';
 import { setCtraderRefreshLease } from '../_lib/ctraderTokenLock.js';
+import logoutHandler from '../_lib/logoutHandler.js';
+import candlesHandler from '../_lib/candlesHandler.js';
 import {
   hashOrderParams,
   resolveSymbolId,
@@ -329,6 +331,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = (typeof req.body === 'object' && req.body !== null) ? req.body : {};
   const action = String(body.action || req.query.action || (req.method === 'GET' ? 'get_positions' : 'open')).toLowerCase();
+
+  // Delegated sub-routes.
+  //
+  // Vercel's Hobby plan caps a deployment at 12 Serverless Functions, so these
+  // two used to be standalone files (api/ctrader/logout, api/ctrader/candles)
+  // and the build failed with `exceeded_serverless_functions_per_deployment`.
+  // Their handlers now live in api/_lib/ (underscore = not a route) and are
+  // dispatched from here, so the public surface is unchanged:
+  //   POST /api/ctrader/trade?action=logout
+  //   GET  /api/ctrader/trade?action=candles&symbol=EURUSD&timeframe=H1
+  // Both must run BEFORE any broker session is opened — logout needs no
+  // broker at all, and candles manages its own auth and connection.
+  if (action === 'logout') {
+    return logoutHandler(req, res);
+  }
+  if (action === 'candles') {
+    return candlesHandler(req, res);
+  }
+
   const isReadAction = action === 'get_positions' || action === 'positions' || action === 'get_accounts' || action === 'accounts' || action === 'check_auth' || action === 'auth_status' || req.method === 'GET';
 
   let accessToken = '';

@@ -46,8 +46,11 @@ const JFX_CTRADER_TRADE_URL_DEV = 'http://127.0.0.1:3000/api/ctrader/trade';
 // lockstep. (The APK resolves this through apiUrl() from lib/capacitor; web has
 // no native shell to prefix, so it is derived from the URL above instead —
 // never import a static @capacitor/* specifier into this bundle.)
-const JFX_CTRADER_CANDLES_URL = JFX_CTRADER_TRADE_URL.replace(/\/trade$/, '/candles');
-const JFX_CTRADER_CANDLES_URL_DEV = JFX_CTRADER_TRADE_URL_DEV.replace(/\/trade$/, '/candles');
+// Live candles share the trade route via an `action=candles` flag: Vercel's
+// Hobby plan caps a deployment at 12 Serverless Functions, and a standalone
+// api/ctrader/candles.ts pushed the build over that limit.
+const JFX_CTRADER_CANDLES_URL = JFX_CTRADER_TRADE_URL + '?action=candles';
+const JFX_CTRADER_CANDLES_URL_DEV = JFX_CTRADER_TRADE_URL_DEV + '?action=candles';
 const DEFAULT_SCOPES: Scope[] = ['trades:read', 'trades:write'];
 const agentSkill = `---
 name: jfx-journal
@@ -203,7 +206,7 @@ Only execute trading actions when explicitly requested or confirmed by the user.
 
 ## 2b. cTrader Live Candles (OHLC)
 
-Endpoint: \`GET \${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}?symbol=EURUSD&timeframe=H1&count=500\`
+Endpoint: \`GET \${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}&symbol=EURUSD&timeframe=H1&count=500\`
 Header: \`X-API-Key: $JFX_KEY\` — requires \`trades:read\` (or \`trades:write\`).
 Reads live trendbars from the user's own broker account (their cTrader must be connected), unlike the shared backtest store.
 
@@ -212,7 +215,7 @@ Response: \`{ ok, symbol, symbolId, timeframe, digits, accountId, isDemo, count,
 
 \`\`\`bash
 curl -sS -H "X-API-Key: $JFX_KEY" \
-  "\${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}?symbol=EURUSD&timeframe=H1&count=5"
+  "\${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}&symbol=EURUSD&timeframe=H1&count=5"
 \`\`\`
 
 ## 3. Error Handling
@@ -321,7 +324,7 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
       }
       // Read-only OHLC probe — proves the key can pull live trendbars from the
       // user's own broker account. Never opens a position.
-      const candlesRes = await fetch(`${activeCandlesUrl}?symbol=EURUSD&timeframe=H1&count=5`, { headers });
+      const candlesRes = await fetch(`${activeCandlesUrl}&symbol=EURUSD&timeframe=H1&count=5`, { headers });
       const candlesBody = await candlesRes.json().catch(() => ({}));
       if (!candlesRes.ok) {
         if (candlesBody?.error === 'ctrader_not_connected') { setTestResult(`Journal OK, cTrader linked (Account #${tradeBody?.accountId || 'active'}), but the candles endpoint could not read trendbars — reconnect on Connect & Import.`); return; }
