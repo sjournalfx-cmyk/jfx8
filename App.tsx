@@ -46,14 +46,7 @@ import { resolveBridgeBackedBalance } from './lib/bridgeBalance';
 // Lazy load heavy components for performance
 const Analytics = safeLazy(() => import('./components/Analytics'));
 const AIChat = safeLazy(() => import('./components/AIChat'));
-// H-2 guard: ./components/BacktestLab does not exist in jfx8 (jfx-mobile's
-// copy needs CustomChart + lib/orientation, absent here, so a verbatim copy
-// would not build). Fallback until a web-safe entry exists.
-const BacktestLab: React.FC<any> = () => (
-  <div className="grid place-items-center p-8 text-center">
-    <p className="text-sm font-bold opacity-60">Backtest Lab is unavailable in this build.</p>
-  </div>
-);
+const BacktestLab = safeLazy(() => import('./components/BacktestLab'));
 const ChartGrid = safeLazy(() => import('./components/ChartGrid'));
 const Notes = safeLazy(() => import('./components/Notes'));
 

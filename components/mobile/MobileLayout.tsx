@@ -21,16 +21,9 @@ import QuickLogModal from '../QuickLogModal';
 import { ChecklistBuilder } from '../discipline/ChecklistBuilder';
 import { TradingLocks } from '../discipline/TradingLocks';
 import { BrandedLoader } from '../ui/BrandedLoader';
+import { safeLazy } from '../../lib/safeLazy';
 
-// H-2 guard: ../BacktestLab does not exist in jfx8 (only jfx-mobile has it,
-// and that copy depends on jfx8-missing modules CustomChart + lib/orientation,
-// so copying would break the web build further). Render a fallback until a
-// web-safe BacktestLab entry exists.
-const BacktestLab: React.FC<any> = () => (
-  <div className="flex-1 grid place-items-center p-8 text-center">
-    <p className="text-sm font-bold text-zinc-400">Backtest Lab is unavailable in this build.</p>
-  </div>
-);
+const BacktestLab = safeLazy(() => import('../BacktestLab'));
 
 interface MobileLayoutProps {
   currentView: string;
