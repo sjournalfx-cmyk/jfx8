@@ -1,4 +1,5 @@
 import { Candle } from '../types';
+import { apiUrl } from './capacitor';
 
 // Client helper for the SHARED candle store (server-harvested cTrader history
 // published to Supabase via /api/candles/harvest). Lets the Backtest Lab load
@@ -23,7 +24,7 @@ export async function fetchSharedCandles(
       timeframe: timeframe.toUpperCase(),
     });
     if (since && since > 0) params.set('since', String(since));
-    const res = await fetch(`/api/candles?${params.toString()}`);
+    const res = await fetch(apiUrl(`/api/candles?${params.toString()}`));
     if (!res.ok) return null;
     const data = await res.json();
     if (!Array.isArray(data.bars) || data.bars.length === 0) return null;
@@ -44,7 +45,7 @@ export async function fetchSharedCandles(
 export async function sharedSeriesExists(symbol: string, timeframe: string): Promise<boolean> {
   try {
     const params = new URLSearchParams({ symbol: normSymbol(symbol), timeframe: timeframe.toUpperCase() });
-    const res = await fetch(`/api/candles?${params.toString()}`);
+    const res = await fetch(apiUrl(`/api/candles?${params.toString()}`));
     return res.ok;
   } catch {
     return false;
