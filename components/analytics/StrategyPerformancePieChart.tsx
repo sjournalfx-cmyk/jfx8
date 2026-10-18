@@ -15,9 +15,6 @@ import {
 } from "../ui/Card"
 import {
   ChartContainer,
-  ChartStyle,
-  ChartTooltip,
-  ChartTooltipContent,
   type ChartConfig,
 } from "../ui/chart"
 import { Select } from "../Select"
@@ -150,45 +147,6 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
     [activeIndex]
   )
 
-  const totalPnl = React.useMemo(() => 
-    strategyData.reduce((acc, curr) => acc + curr.pnl, 0), 
-  [strategyData]);
-
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      const pnlPercentage = totalPnl > 0 ? (data.pnl / totalPnl) * 100 : 0;
-      
-      return (
-        <div className={`p-4 rounded-xl border shadow-2xl ${isDarkMode ? 'bg-[#000000] border-zinc-800 text-zinc-100' : 'bg-white border-slate-200 text-slate-900'}`}>
-          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-zinc-500/10">
-            <div className="h-3 w-3 rounded-full" style={{ backgroundColor: data.fill }} />
-            <span className="font-black text-sm uppercase tracking-tight">{data.strategy}</span>
-          </div>
-          <div className="space-y-2">
-            <div className="flex justify-between gap-10 text-[11px]">
-              <span className={`${isDarkMode ? 'text-zinc-400' : 'text-slate-500'} font-bold uppercase tracking-wider`}>Trades</span>
-              <span className="font-black">{data.trades}</span>
-            </div>
-            <div className="flex justify-between gap-10 text-[11px]">
-              <span className={`${isDarkMode ? 'text-zinc-400' : 'text-slate-500'} font-bold uppercase tracking-wider`}>Net P&L</span>
-              <span className={`font-black ${data.pnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                {data.pnl >= 0 ? '+' : ''}{currencySymbol}{data.pnl.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-            {totalPnl > 0 && data.pnl > 0 && (
-              <div className="flex justify-between gap-10 text-[11px] pt-2 border-t border-zinc-500/20">
-                <span className={`${isDarkMode ? 'text-zinc-400' : 'text-slate-500'} font-bold uppercase tracking-wider`}>Profit Share</span>
-                <span className="font-black text-indigo-500">{pnlPercentage.toFixed(1)}%</span>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
-    return null;
-  };
-
   if (strategyData.length === 0) {
     return (
       <Card className="flex h-[320px] flex-col items-center justify-center !bg-[#0a0a0a] !border-0 text-white" isDarkMode={isDarkMode}>
@@ -201,18 +159,18 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
   }
 
   return (
-    <Card data-chart={id} className="relative flex h-full min-h-[320px] flex-col !border-0 !bg-[#0a0a0a] !shadow-none text-white rounded-[20px] overflow-hidden" isDarkMode={isDarkMode}>
-      <CardHeader className="flex-row items-start space-y-0 pb-0">
-        <div className="grid gap-1">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-[15px] font-semibold tracking-tight text-left">Strategy Distribution</CardTitle>
+    <Card data-chart={id} className="relative flex h-full min-h-[320px] flex-col !border-0 !bg-[#0a0a0a] !shadow-none text-white rounded-[20px] overflow-visible" isDarkMode={isDarkMode}>
+      <CardHeader className="flex-row items-center space-y-0 pb-1 pt-1 px-4 !justify-between pr-[132px]">
+        <div className="flex flex-col gap-0.5 justify-center justify-items-start text-left">
+          <div className="flex items-center gap-1.5">
+            <CardTitle className="text-[13px] font-semibold tracking-tight text-left leading-none">Strategy Distribution</CardTitle>
             <Tooltip content="Breaks down your trade count and cumulative P/L by trading strategy tag. Click a slice or use the dropdown to focus." isDarkMode={isDarkMode} onInfoClick={onInfoClick}>
-              <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
+              <HelpCircle size={12} className="opacity-40 cursor-help hover:opacity-100" />
             </Tooltip>
           </div>
-          <CardDescription>Performance by Strategy</CardDescription>
+          <CardDescription className="text-[11px] leading-none opacity-70">Performance by Strategy</CardDescription>
         </div>
-        <div className="ml-auto w-[150px]">
+        <div className="absolute top-2 right-3 w-[118px] scale-[0.88] origin-top-right z-10">
           <Select 
             value={activeStrategy} 
             onChange={setActiveStrategy}
@@ -224,16 +182,9 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
       <CardContent className="flex flex-1 justify-center pb-0">
         <ChartContainer
           config={chartConfig}
-          className="mx-auto aspect-square w-full max-w-[230px]"
+          className="mx-auto aspect-square w-full max-w-[230px] scale-[0.75]"
         >
           <PieChart>
-            <ChartTooltip
-              cursor={false}
-              allowEscapeViewBox={{ x: true, y: true }}
-              position={{ x: 246, y: 18 }}
-              wrapperStyle={{ pointerEvents: 'none', zIndex: 30 }}
-              content={<CustomTooltip />}
-            />
             <Pie
               data={strategyData}
               dataKey="trades"
@@ -243,6 +194,7 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
               stroke={isDarkMode ? "#000000" : "#e2e8f0"}
               shape={renderPieShape}
               onClick={(_, index) => setActiveStrategy(strategyData[index].strategy)}
+              onMouseEnter={(_, index) => setActiveStrategy(strategyData[index].strategy)}
               isAnimationActive={false}
               className="cursor-pointer"
             >
@@ -251,26 +203,39 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
                   if (viewBox && "cx" in viewBox && "cy" in viewBox) {
                     const currentData = strategyData[activeIndex];
                     if (!currentData) return null;
+                    const cx = viewBox.cx;
+                    const cy = viewBox.cy || 0;
+                    const displayName = currentData.strategy.length > 10
+                      ? `${currentData.strategy.slice(0, 9)}…`
+                      : currentData.strategy;
                     return (
                       <text
-                        x={viewBox.cx}
-                        y={viewBox.cy}
+                        x={cx}
+                        y={cy}
                         textAnchor="middle"
                         dominantBaseline="middle"
                       >
                         <tspan
-                          x={viewBox.cx}
-                          y={viewBox.cy}
-                          className={`${isDarkMode ? 'fill-white' : 'fill-slate-900'} text-3xl font-bold`}
+                          x={cx}
+                          y={cy - 22}
+                          className={`${isDarkMode ? 'fill-slate-400' : 'fill-slate-500'} text-[10px] font-semibold uppercase tracking-wider`}
+                        >
+                          {displayName}
+                        </tspan>
+                        <tspan
+                          x={cx}
+                          y={cy + 4}
+                          className={`${isDarkMode ? 'fill-white' : 'fill-slate-900'} text-2xl font-bold`}
                         >
                           {currentData.trades.toLocaleString()}
                         </tspan>
                         <tspan
-                          x={viewBox.cx}
-                          y={(viewBox.cy || 0) + 24}
-                          className={`${isDarkMode ? 'fill-slate-500' : 'fill-slate-400'} text-xs uppercase tracking-wider`}
+                          x={cx}
+                          y={cy + 28}
+                          className={`${currentData.pnl >= 0 ? 'fill-emerald-500' : 'fill-rose-500'} text-[11px] font-bold`}
                         >
-                          Trades
+                          {currentData.pnl >= 0 ? '+' : '-'}
+                          {currencySymbol}{Math.abs(Math.round(currentData.pnl)).toLocaleString()}
                         </tspan>
                       </text>
                     )

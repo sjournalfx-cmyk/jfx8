@@ -14,7 +14,8 @@ interface DivergingBarChartProps {
 
 const formatPnL = (value: number, currencySymbol: string): string => {
     const sign = value > 0 ? '+' : '';
-    return `${sign}${currencySymbol}${value.toFixed(2)}`;
+    const rounded = Math.round(value);
+    return `${sign}${currencySymbol}${rounded.toLocaleString()}`;
 };
 
 export const DivergingBarChart: React.FC<DivergingBarChartProps> = ({ rows, currencySymbol }) => {

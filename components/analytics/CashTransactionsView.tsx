@@ -18,8 +18,7 @@ import {
   Sparkles,
   HelpCircle,
   Search,
-  RefreshCw,
-  CheckCircle2
+  RefreshCw
 } from 'lucide-react';
 import {
   XAxis,
@@ -464,13 +463,14 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
 
   const hasTransactions = allTransactions.length > 0;
 
-  const stats = useMemo(() => {
-    const result: Record<string, { count: number; amount: number }> = {};
-    TRANSACTION_TYPES.forEach(type => {
-      const rows = filteredTransactions.filter(t => t.type === type);
-      result[type] = { count: rows.length, amount: rows.reduce((acc, t) => acc + t.amount, 0) };
+  const flowTotals = useMemo(() => {
+    let moneyIn = 0;
+    let moneyOut = 0;
+    filteredTransactions.forEach(t => {
+      if (t.amount >= 0) moneyIn += t.amount;
+      else moneyOut += Math.abs(t.amount);
     });
-    return result;
+    return { moneyIn, moneyOut, net: moneyIn - moneyOut, count: filteredTransactions.length };
   }, [filteredTransactions]);
 
   const chartData = useMemo(() => {
@@ -539,31 +539,12 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
     return `${num < 0 ? '-' : ''}${currencySymbol}${abs.toFixed(2)}`;
   };
 
-  const SummaryCard = ({ meta, amount, count }: { meta: typeof TYPE_META[CashTransactionType]; amount: number; count: number }) => {
-    const Icon = meta.icon;
-    return (
-      <div
-        className={clsx(
-          "p-5 rounded-[24px] border-0 flex flex-col gap-4 min-h-[122px] bg-[#0a0a0a] text-white"
-        )}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className={clsx("p-2.5 rounded-xl shrink-0", isDarkMode ? "bg-black" : "bg-slate-100")}>
-            <Icon size={18} style={{ color: meta.color }} />
-          </div>
-          <div className="text-right min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest opacity-40 truncate">{count}</p>
-          </div>
-        </div>
-        <div className="space-y-1">
-          <h3 className={clsx("text-2xl font-black tracking-tight", isDarkMode ? "text-zinc-100" : "text-slate-900")}>
-            {formatLargeNumber(amount)}
-          </h3>
-          <p className="text-xs font-bold opacity-30 uppercase tracking-wider">{meta.plural}</p>
-        </div>
-      </div>
-    );
-  };
+  const FlowStat = ({ label, value, valueClass = '' }: { label: string; value: string; valueClass?: string }) => (
+    <div className="p-4 rounded-2xl border-0 bg-[#0a0a0a] text-white">
+      <p className="text-[11px] font-bold uppercase tracking-widest opacity-40">{label}</p>
+      <p className={clsx("mt-1 font-black tracking-tight leading-none", valueClass)}>{value}</p>
+    </div>
+  );
 
   const openAddModal = () => {
     setEditingTransaction(null);
@@ -578,7 +559,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
       : `${selectedTypes.length} types`;
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className="space-y-4 pb-28">
       {/* Header & Local Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
@@ -588,18 +569,15 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
               <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
             </InfoTooltip>
           </div>
-          <p className={clsx("text-xs font-semibold uppercase tracking-[0.18em]", isDarkMode ? "text-zinc-500" : "text-slate-500")}>
-            Track deposits, withdrawals, interest, fees, taxes, promotions, and transfers
-          </p>
         </div>
 
-        <div className={clsx("flex p-1 rounded-xl border w-full md:w-auto", isDarkMode ? "bg-black border-zinc-800" : "bg-slate-100 border-slate-200")}>
+        <div className="flex p-1 rounded-xl border-0 w-full md:w-auto bg-[#0a0a0a] text-white">
           {(['transactions', 'insights'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={clsx(
-                "px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest",
+                "flex-1 md:flex-none px-6 py-3 min-h-[48px] rounded-xl text-xs font-black uppercase tracking-widest transition-all active:scale-[0.98]",
                 activeSubTab === tab 
                   ? "bg-[#FF4F00] text-white shadow-xl"
                   : "opacity-40 hover:opacity-100"
@@ -612,9 +590,8 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
       </div>
 
       {/* Filter Bar */}
-      <div className="flex flex-wrap items-center gap-4 p-4 rounded-2xl border-0 bg-[#0a0a0a] text-white">
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-800/50 bg-black/20">
-          <Calendar size={14} className="opacity-40" />
+      <div className="flex flex-wrap items-center gap-3 p-3 rounded-2xl border-0 bg-[#0a0a0a] text-white">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border-0 bg-white/[0.06]">
           <span className="text-xs font-bold opacity-60">Date:</span>
           <select 
             value={timeFilter}
@@ -631,12 +608,8 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
         <div className="relative" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => setIsTypeDropdownOpen(o => !o)}
-            className={clsx(
-              "flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer",
-              isDarkMode ? "border-zinc-800/50 bg-black/20" : "border-slate-200 bg-slate-50"
-            )}
+            className="flex items-center gap-2 px-3 min-h-[44px] rounded-xl border-0 cursor-pointer bg-white/[0.06]"
           >
-            <Filter size={14} className="opacity-40" />
             <span className="text-xs font-bold opacity-60">Type:</span>
             <span className={clsx(
               "text-xs font-black",
@@ -675,8 +648,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
           )}
         </div>
 
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-800/50 bg-black/20">
-          <Search size={14} className="opacity-40" />
+        <div className="flex items-center gap-2 px-3 min-h-[44px] rounded-xl border-0 bg-white/[0.06] flex-1 min-w-[160px]">
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -696,41 +668,26 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
               onClick={() => void runCtraderSync(false)}
               disabled={ctraderSyncing}
               className={clsx(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-colors",
+                "min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border transition-colors",
                 isDarkMode ? "border-zinc-800/50 bg-black/20 hover:border-brand/50" : "border-slate-200 bg-slate-50 hover:border-brand/50",
                 ctraderSyncing && "opacity-50 cursor-not-allowed"
               )}
               title="Import deposits & withdrawals from your connected cTrader account"
             >
-              <RefreshCw size={13} className={ctraderSyncing ? "animate-spin" : ''} />
-              {ctraderSyncing ? 'Syncing...' : 'cTrader Sync'}
+              <RefreshCw size={15} className={ctraderSyncing ? "animate-spin" : ''} />
             </button>
           )}
-          <span className="text-xs font-bold opacity-40 uppercase tracking-widest">Cumulative</span>
-          <button 
-            onClick={() => setIsCumulative(!isCumulative)}
-            className={clsx(
-              "w-12 h-6 rounded-full relative transition-colors",
-              isCumulative ? "bg-brand" : "bg-zinc-700"
-            )}
-            aria-label="Toggle cumulative view"
-          >
-            <div className={clsx(
-              "absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all",
-              isCumulative ? "left-7" : "left-1"
-            )} />
-          </button>
         </div>
       </div>
 
       {showAddModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
           onMouseDown={(e) => { if (e.target === e.currentTarget) closeAddModal(); }}
         >
           <div
             className={clsx(
-              "w-[min(94vw,48rem)] max-h-[90vh] overflow-y-auto p-6 md:p-8 rounded-2xl border shadow-xl",
+              "w-full sm:w-[min(94vw,48rem)] max-h-[92vh] overflow-y-auto p-4 sm:p-6 md:p-8 rounded-t-3xl sm:rounded-2xl border shadow-xl",
               isDarkMode ? "bg-black border-zinc-800" : "bg-white border-slate-200"
             )}
             role="dialog"
@@ -854,42 +811,58 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
             key="insights"
             className="space-y-6"
           >
-            {/* Summary Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {TRANSACTION_TYPES.map(type => (
-                <SummaryCard key={type} meta={TYPE_META[type]} amount={stats[type].amount} count={stats[type].count} />
-              ))}
+            {/* Minimal summary — net first */}
+            <div className="space-y-3">
+              <FlowStat
+                label="Net flow"
+                value={formatLargeNumber(flowTotals.net)}
+                valueClass={clsx("text-[28px]", flowTotals.net >= 0 ? "text-emerald-400" : "text-rose-400")}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <FlowStat label="Money in" value={formatLargeNumber(flowTotals.moneyIn)} valueClass="text-xl text-emerald-400" />
+                <FlowStat label="Money out" value={formatLargeNumber(flowTotals.moneyOut)} valueClass="text-xl opacity-80" />
+              </div>
+              <p className="text-xs font-semibold opacity-40 px-1">
+                {flowTotals.count} transaction{flowTotals.count !== 1 ? 's' : ''} · {timeFilter}
+              </p>
             </div>
 
             {/* Chart Section */}
-            <div className={clsx(
-              "p-6 md:p-8 rounded-[32px] border-0 bg-[#0a0a0a] text-white",
-            )}>
-              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between mb-6">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xl font-black tracking-tight italic uppercase">TRANSACTION MOMENTUM</h3>
-                    <InfoTooltip content="Net capital flow over time for each selected transaction type, alongside the combined net flow." isDarkMode={isDarkMode} onInfoClick={onTransactionMomentumInfoClick}>
-                      <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
-                    </InfoTooltip>
-                  </div>
-                  <p className="text-xs opacity-40 font-bold uppercase tracking-[0.2em] mt-1">
-                    Net capital flow over time{selectedTypes.length > 0 ? ` • ${typeFilterLabel}` : ''}
-                  </p>
-                </div>
-                {ctraderSyncResult && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border self-start md:self-auto border-emerald-500/30 bg-emerald-500/10">
-                    <CheckCircle2 size={14} className="text-emerald-500" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500">
-                      {ctraderSyncResult.added} imported from cTrader
+            <div className="p-4 md:p-8 rounded-3xl border-0 bg-[#0a0a0a] text-white">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h3 className="text-sm font-black tracking-tight">Cash flow</h3>
+                  <InfoTooltip content="Net capital flow over time." isDarkMode={isDarkMode} onInfoClick={onTransactionMomentumInfoClick}>
+                    <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" />
+                  </InfoTooltip>
+                  {ctraderSyncResult && (
+                    <span className="text-[11px] font-bold text-emerald-500 whitespace-nowrap">
+                      +{ctraderSyncResult.added} synced
                     </span>
-                  </div>
-                )}
+                  )}
+                </div>
+                <div className={clsx("flex p-1 rounded-xl border", isDarkMode ? "bg-black border-zinc-800" : "bg-slate-100 border-slate-200")}>
+                  {([
+                    { label: 'Total', value: true },
+                    { label: 'Monthly', value: false },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.label}
+                      onClick={() => setIsCumulative(opt.value)}
+                      className={clsx(
+                        "px-4 py-2 min-h-[40px] rounded-lg text-[11px] font-black uppercase tracking-widest transition-all",
+                        isCumulative === opt.value ? "bg-[#FF4F00] text-white" : "opacity-40"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {hasTransactions ? (
-                <div className="h-[340px] md:h-[380px] w-full min-w-0">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={320} minHeight={340}>
+                <div className="h-[240px] md:h-[380px] w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                     <ComposedChart data={chartData}>
                       <defs>
                         <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
@@ -933,7 +906,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                           name === 'value' ? 'Net Flow' : TYPE_META[name as CashTransactionType]?.label || name
                         ]}
                       />
-                      {activeChartSeries.map(type => (
+                      {selectedTypes.length > 0 && activeChartSeries.map(type => (
                         <Area
                           key={type}
                           type="monotone"
@@ -961,7 +934,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                 </div>
               ) : (
                 <div className={clsx(
-                  "h-[340px] md:h-[380px] flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed",
+                  "h-[240px] md:h-[380px] flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed",
                   isDarkMode ? "border-zinc-800" : "border-slate-200"
                 )}>
                   <Coins size={28} className="opacity-30" />
@@ -982,21 +955,20 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-x-6 gap-y-3 mt-6 pt-5 border-t border-zinc-800/50">
+              {selectedTypes.length > 0 && (
+              <div className="flex flex-wrap gap-x-4 mt-4 pt-4 border-0">
                  <button
                    onClick={() => toggleSeriesVisibility('value')}
-                   className={clsx("flex items-center gap-2", hiddenSeries.includes('value') && "opacity-30")}
+                   className={clsx("flex items-center gap-2 min-h-[44px]", hiddenSeries.includes('value') && "opacity-30")}
                  >
                    <div className="w-2.5 h-2.5 rounded-full bg-[#8251EE]" />
                    <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Net Flow</span>
                  </button>
-                 {(selectedTypes.length > 0 ? selectedTypes : TRANSACTION_TYPES).filter(type =>
-                   selectedTypes.length > 0 || filteredTransactions.some(t => t.type === type)
-                 ).map(type => (
+                 {selectedTypes.map(type => (
                    <button
                      key={type}
                      onClick={() => toggleSeriesVisibility(type)}
-                     className={clsx("flex items-center gap-2 transition-opacity", hiddenSeries.includes(type) && "opacity-30")}
+                     className={clsx("flex items-center gap-2 min-h-[44px] transition-opacity", hiddenSeries.includes(type) && "opacity-30")}
                      title={hiddenSeries.includes(type) ? 'Show on chart' : 'Hide from chart'}
                    >
                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: TYPE_META[type].color }} />
@@ -1004,25 +976,18 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                    </button>
                  ))}
               </div>
+              )}
             </div>
           </div>
         ) : (
           <div 
             key="transactions"
-            className={clsx(
-              "rounded-[32px] border-0 overflow-hidden min-w-0 bg-[#0a0a0a] text-white",
-            )}
+            className="rounded-3xl border-0 overflow-hidden min-w-0 bg-[#0a0a0a] text-white"
           >
-            <div className={clsx(
-              "flex flex-col gap-4 p-6 border-b",
-              isDarkMode ? "border-zinc-800" : "border-slate-100"
-            )}>
+            <div className="flex flex-col gap-4 p-6 border-0">
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div className="space-y-1">
                   <h3 className="text-[15px] font-semibold tracking-tight text-left">All Transactions</h3>
-                  <p className="text-[11px] font-semibold opacity-35">
-                    Saved to your account{isCtraderLinked ? ' • deposits & withdrawals import automatically from cTrader' : ''}.
-                  </p>
                 </div>
                 <div className="md:ml-auto">
                   <button
@@ -1042,12 +1007,60 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
             </div>
             <div className="overflow-x-auto">
             {filteredTransactions.length > 0 ? (
-              <table className="w-full text-left border-collapse">
+              <>
+              {/* Mobile rows — thumb-friendly cards instead of a squeezed table */}
+              <div className="md:hidden divide-y divide-white/[0.06]">
+                {filteredTransactions.map((t) => {
+                  const meta = TYPE_META[t.type];
+                  const RowIcon = meta?.icon || Coins;
+                  const rowColor = meta?.color || '#71717a';
+                  return (
+                    <div key={t.id} className="flex items-center gap-3 px-4 py-3 active:bg-white/5 transition-colors">
+                      <div
+                        className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: `${rowColor}1A`, color: rowColor }}
+                      >
+                        <RowIcon size={18} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold truncate">{t.type}</p>
+                        <p className="text-xs opacity-50 font-mono mt-0.5 truncate">{t.date}{t.description ? ` · ${t.description}` : ''}</p>
+                      </div>
+                      <p className={clsx(
+                        "text-sm font-black shrink-0",
+                        t.amount >= 0 ? "text-emerald-500" : "text-rose-500"
+                      )}>
+                        {t.amount >= 0 ? '+' : ''}{formatLargeNumber(t.amount)}
+                      </p>
+                      <div className="flex items-center shrink-0 -mr-2">
+                        <button
+                          onClick={() => openEditModal(t)}
+                          aria-label="Edit transaction"
+                          className={clsx(
+                            "min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl",
+                            isDarkMode ? "text-zinc-400 active:text-brand" : "text-slate-500 active:text-brand"
+                          )}
+                        >
+                          <Edit3 size={15} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTransaction(t.id)}
+                          aria-label="Delete transaction"
+                          className={clsx(
+                            "min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl",
+                            isDarkMode ? "text-zinc-400 active:text-rose-500" : "text-slate-500 active:text-rose-500"
+                          )}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <table className="hidden md:table w-full text-left border-collapse">
               <thead>
-                <tr className={clsx(
-                  "border-b uppercase text-[10px] font-black tracking-[0.2em] opacity-40",
-                  isDarkMode ? "border-zinc-800" : "border-slate-100"
-                )}>
+                <tr className="border-0 uppercase text-[10px] font-black tracking-[0.2em] opacity-40">
                   <th className="px-8 py-5">Date</th>
                   <th className="px-8 py-5">Type</th>
                   <th className="px-8 py-5">Description</th>
@@ -1055,7 +1068,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                   <th className="px-8 py-5 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-white/[0.06]">
                 {filteredTransactions.map((t) => (
                   <tr key={t.id} className={clsx(
                     isDarkMode ? "hover:bg-black/50" : "hover:bg-slate-50"
@@ -1102,6 +1115,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                 ))}
               </tbody>
             </table>
+              </>
             ) : hasTransactions ? (
               <div className={clsx(
                 "px-6 py-16 text-center",
@@ -1146,27 +1160,10 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                 <p className="mt-2 text-sm leading-6 opacity-50 max-w-2xl mx-auto whitespace-normal break-normal">
                   Add one manually{isCtraderLinked ? ', or import your deposits & withdrawals from cTrader' : ''}.
                 </p>
-                <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
-                  {isCtraderLinked && (
-                    <button
-                      onClick={() => void runCtraderSync(false)}
-                      disabled={ctraderSyncing}
-                      className={clsx(
-                        "inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-[0.18em] border",
-                        isDarkMode ? "border-zinc-700 text-white hover:border-brand" : "border-slate-300 text-slate-900 hover:border-brand",
-                        ctraderSyncing && "opacity-50 cursor-not-allowed"
-                      )}
-                    >
-                      <RefreshCw size={15} className={ctraderSyncing ? "animate-spin" : ''} />
-                      {ctraderSyncing ? 'Syncing...' : 'Import from cTrader'}
-                    </button>
-                  )}
+                <div className="mt-6 flex justify-center">
                   <button
                     onClick={openAddModal}
-                    className={clsx(
-                      "inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-[0.18em]",
-                      isDarkMode ? "bg-brand text-white" : "bg-brand text-white"
-                    )}
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-[0.18em] bg-brand text-white min-h-[44px]"
                   >
                     <Plus size={15} />
                     Add Transaction
@@ -1174,8 +1171,8 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                 </div>
               </div>
             )}
-            <div className={clsx("px-6 py-4 flex justify-center border-t", isDarkMode ? "border-zinc-800/50" : "border-slate-200")}>
-              <p className="text-[11px] font-bold opacity-30 uppercase tracking-widest italic">
+            <div className="px-6 py-3 flex justify-center border-0">
+              <p className="text-[11px] font-bold opacity-30 uppercase tracking-widest">
                 Displaying {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
               </p>
             </div>

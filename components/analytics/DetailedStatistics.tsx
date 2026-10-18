@@ -24,9 +24,9 @@ export const DetailedStatistics: React.FC<DetailedStatisticsProps> = ({ stats, u
   };
 
   const StatRow = ({ label, value, isNegative = false }: { label: string, value: any, isNegative?: boolean }) => (
-    <div className={`flex justify-between items-center py-2.5 px-4 ${isDarkMode ? 'hover:bg-black/50' : 'hover:bg-slate-50'} border-b ${isDarkMode ? 'border-zinc-800' : 'border-slate-100'}`}>
-      <span className={`text-sm font-medium ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{label}</span>
-      <span className={`text-sm font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-900'} ${isNegative ? 'text-rose-500' : ''}`}>
+    <div className={`flex justify-between items-center gap-4 py-2 px-0 ${isDarkMode ? 'hover:bg-black/50' : 'hover:bg-slate-50'} border-b ${isDarkMode ? 'border-zinc-800' : 'border-slate-100'}`}>
+      <span className={`text-[12px] font-medium ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{label}</span>
+      <span className={`text-[12px] font-bold ${isDarkMode ? 'text-zinc-200' : 'text-slate-900'} ${isNegative ? 'text-rose-500' : ''}`}>
         {value}
       </span>
     </div>
@@ -64,7 +64,8 @@ export const DetailedStatistics: React.FC<DetailedStatisticsProps> = ({ stats, u
     { label: 'Breakeven days', value: stats.breakevenDays },
     { label: 'Logged Days', value: stats.totalTradingDays },
     { label: 'Max Consecutive Winning Days', value: stats.maxConsecutiveWinDays },
-    { label: 'Max Consecutive Losing Days', value: stats.maxConsecutiveLossDays },
+
+    { label: 'Max Consecutive Losing Days', value: stats.maxConsecutiveLossDays },
     { label: 'Average Daily P&L', value: formatCurrency(stats.avgDailyPnL), isNegative: stats.avgDailyPnL < 0 },
     { label: 'Average Winning Day P&L', value: formatCurrency(stats.avgWinningDay) },
     { label: 'Average Losing Day P&L', value: formatCurrency(-stats.avgLosingDay), isNegative: true },
@@ -81,10 +82,13 @@ export const DetailedStatistics: React.FC<DetailedStatisticsProps> = ({ stats, u
 
   return (
     <div className={`grid grid-cols-1 md:grid-cols-2 gap-8 w-full ${isDarkMode ? 'bg-black' : 'bg-white'} py-8 px-0 rounded-[32px] ${isDarkMode ? 'shadow-2xl' : 'shadow-xl'}`}>
-      {/* Currency badge so trader knows what denomination all values are in */}
-      <div className="col-span-full flex items-center gap-2 mb-2">
-        <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] ${isDarkMode ? 'bg-white/[0.05] text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>
-          All values in {userProfile.currency || 'USD'} ({currencySymbol})
+      {/* Currency strip stretched edge-to-edge so trader knows what denomination all values are in */}
+      <div className="col-span-full flex items-center justify-between gap-2 mb-2">
+        <span className={`text-xs font-black uppercase tracking-[0.2em] ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+          All values in
+        </span>
+        <span className={`text-xs font-black uppercase tracking-[0.2em] ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+          {userProfile.currency || 'USD'} ({currencySymbol})
         </span>
       </div>
       <div className="space-y-0.5">

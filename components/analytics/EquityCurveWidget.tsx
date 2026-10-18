@@ -20,9 +20,9 @@ export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [
     if (isLoading) {
         return (
             <div className="relative overflow-hidden rounded-2xl border-0 h-full min-h-[320px] bg-[#0a0a0a] text-white">
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-              <div className="p-5">
-                <div className="flex items-center gap-3 mb-5">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+                <div className="p-5">
+                    <div className="flex items-center gap-3 mb-5">
                         <div className="w-9 h-9 rounded-lg bg-black" />
                         <div className="space-y-2">
                             <div className="w-28 h-4 bg-black rounded" />
@@ -73,12 +73,6 @@ export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [
             setHoverIndex(index);
         }
     };
-
-    const points = equityData.map((val, i) => {
-        const x = (i / (equityData.length - 1 || 1)) * 800;
-        const y = 200 - ((val - chartMin) / chartRange) * 200;
-        return { x, y, val };
-    });
 
     const hoverY = hoverIndex !== null ? 200 - ((equityData[hoverIndex] - chartMin) / chartRange) * 200 : 0;
     const hoverX = hoverIndex !== null ? (hoverIndex / (equityData.length - 1 || 1)) * 800 : 0;
@@ -190,26 +184,6 @@ export const EquityCurveWidget: React.FC<EquityCurveWidgetProps> = ({ trades = [
                                 filter="url(#lineGlow)"
                             />
                             
-                            {points.map((p, i) => {
-                                const isWin = i === 0 ? p.val >= 0 : p.val > points[i-1]?.val;
-                                const dotColor = isWin ? '#22c55e' : '#ef4444';
-                                
-                                return (
-                                    <circle 
-                                        key={i} 
-                                        cx={p.x} 
-                                        cy={p.y} 
-                                        r={hoverIndex === i ? 5 : 3} 
-                                        fill={dotColor}
-                                        stroke={isDarkMode ? '#000000' : 'white'} 
-                                        strokeWidth="1.5"
-                                        style={{ 
-                                            filter: (hoverIndex === i) ? `drop-shadow(0 0 6px ${dotColor})` : 'none'
-                                        }}
-                                    />
-                                );
-                            })}
-
                             {hoverIndex !== null && (
                                 <>
                                     <line 

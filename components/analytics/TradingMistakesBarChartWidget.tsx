@@ -175,7 +175,7 @@ export function TradingMistakesBarChartWidget({ trades = [], isDarkMode, onInfoC
           </CardDescription>
         </div>
         <div className="ml-auto flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2 rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-rose-500">
+          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-rose-500">
             <TriangleAlert size={13} />
             {totalMistakes} total
           </div>

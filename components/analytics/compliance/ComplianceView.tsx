@@ -8,6 +8,7 @@ import { WinRateByGradeChart } from './WinRateByGradeChart';
 import { DisciplineTrendChart } from './DisciplineTrendChart';
 import { CostOfMistakesTable } from './CostOfMistakesTable';
 import { RuleLeakageList } from './RuleLeakageList';
+import { TradingMistakesBarChartWidget } from '../TradingMistakesBarChartWidget';
 
 interface ComplianceViewProps {
   trades: Trade[];
@@ -93,6 +94,9 @@ export const ComplianceView: React.FC<ComplianceViewProps> = ({
           </FeatureGate>
         </>
       )}
+
+      {/* Free (moved from the removed Advanced tab) — pairs with Cost of Mistakes above */}
+      <TradingMistakesBarChartWidget trades={trades} isDarkMode={isDarkMode} onInfoClick={onInfoClick ? () => onInfoClick('tradingMistakes') : undefined} />
     </div>
   );
 };

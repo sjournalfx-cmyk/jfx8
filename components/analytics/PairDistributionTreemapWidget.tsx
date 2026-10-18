@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Trade } from '../../types';
 import { Tooltip } from '../ui/Tooltip';
-import { HelpCircle } from 'lucide-react';
+import { Expand, HelpCircle, RotateCw, X } from 'lucide-react';
+import { useFullscreenLandscape } from '../../hooks/useFullscreenLandscape';
 
 interface BoxData {
     pair: string;
@@ -68,12 +70,17 @@ const calculateTreemap = (items: BoxData[], width: number, height: number): BoxR
 };
 
 export const PairDistributionTreemapWidget: React.FC<P> = ({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick }) => {
-    const plotRef = useRef<HTMLDivElement | null>(null);
+    const inlinePlotRef = useRef<HTMLDivElement | null>(null);
+    const overlayPlotRef = useRef<HTMLDivElement | null>(null);
     const [plotSize, setPlotSize] = useState({ width: 1000, height: 400 });
+    const { isFullscreen, showRotateHint, isPortrait, openFullscreen, closeFullscreen } = useFullscreenLandscape({
+        unavailableMessage: 'Rotate your device to see all pairs side by side.',
+    });
 
     useEffect(() => {
+        let raf = 0;
         const updateSize = () => {
-            const el = plotRef.current;
+            const el = isFullscreen ? overlayPlotRef.current : inlinePlotRef.current;
             if (!el) return;
             const rect = el.getBoundingClientRect();
             const width = Math.max(Math.floor(rect.width), 1);
@@ -81,17 +88,35 @@ export const PairDistributionTreemapWidget: React.FC<P> = ({ trades = [], isDark
             setPlotSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
         };
 
+        const remeasureAfterSettle = () => {
+            cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(() => {
+                raf = requestAnimationFrame(updateSize);
+            });
+        };
+
         updateSize();
 
-        if (typeof ResizeObserver === 'undefined') return;
-
-        const observer = new ResizeObserver(updateSize);
-        if (plotRef.current) {
-            observer.observe(plotRef.current);
+        let observer: ResizeObserver | undefined;
+        if (typeof ResizeObserver !== 'undefined') {
+            observer = new ResizeObserver(updateSize);
+            const target = isFullscreen ? overlayPlotRef.current : inlinePlotRef.current;
+            if (target) {
+                observer.observe(target);
+            }
         }
 
-        return () => observer.disconnect();
-    }, []);
+        window.addEventListener('resize', remeasureAfterSettle);
+        window.addEventListener('orientationchange', remeasureAfterSettle);
+        remeasureAfterSettle();
+
+        return () => {
+            observer?.disconnect();
+            window.removeEventListener('resize', remeasureAfterSettle);
+            window.removeEventListener('orientationchange', remeasureAfterSettle);
+            cancelAnimationFrame(raf);
+        };
+    }, [isFullscreen]);
 
     const boxes = useMemo(() => {
         if (!trades?.length) return [];
@@ -116,106 +141,162 @@ const getColor = (pnl: number) => {
     return pnl >= 0 ? `rgba(5, 150, 105, ${intensity})` : `rgba(220, 38, 38, ${intensity})`;
   };
 
+    const treemapSvg = (
+        <svg viewBox={`0 0 ${plotSize.width} ${plotSize.height}`} className="absolute inset-0 w-full h-full block" preserveAspectRatio="none">
+            {boxes.map((box, i) => (
+                <g key={i}>
+                    <rect
+                        x={box.x}
+                        y={box.y}
+                        width={box.width}
+                        height={box.height}
+                        fill={getColor(box.pnl)}
+                        stroke="#000000"
+                        strokeWidth="2"
+                        className="transition-opacity hover:opacity-80 cursor-pointer"
+                    />
+                    {box.width > 60 && box.height > 40 && (
+                        <>
+                            <text
+                                x={box.x + box.width / 2}
+                                y={box.y + box.height / 2 - 8}
+                                textAnchor="middle"
+                                fill="#ffffff"
+                                fontSize="15"
+                                fontWeight="700"
+                                style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 2px rgba(0,0,0,0.5))' }}
+                            >
+                                {box.pair}
+                            </text>
+                            <text
+                                x={box.x + box.width / 2}
+                                y={box.y + box.height / 2 + 8}
+                                textAnchor="middle"
+                                fill="#f4f4f5"
+                                fontSize="12"
+                                style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 1px rgba(0,0,0,0.5))' }}
+                            >
+                                {box.tradeCount} trades
+                            </text>
+                            <text
+                                x={box.x + box.width / 2}
+                                y={box.y + box.height / 2 + 22}
+                                textAnchor="middle"
+                                fill="#ffffff"
+                                fontSize="11"
+                                fontWeight="700"
+                                style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 1px rgba(0,0,0,0.5))' }}
+                            >
+                                {currencySymbol}{box.pnl.toFixed(2)}
+                            </text>
+                        </>
+                    )}
+                    {box.width > 40 && box.height > 25 && box.width <= 60 && (
+                        <text
+                            x={box.x + box.width / 2}
+                            y={box.y + box.height / 2}
+                            textAnchor="middle"
+                            fill="#ffffff"
+                            fontSize="12"
+                            fontWeight="700"
+                            style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 1px rgba(0,0,0,0.5))' }}
+                        >
+                            {box.pair}
+                        </text>
+                    )}
+                </g>
+            ))}
+        </svg>
+    );
+
+    const fullscreenOverlayContent = (
+        <div className="fixed inset-0 z-[600] bg-black flex flex-col p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:p-6" role="dialog" aria-modal="true" aria-label="Pair Distribution fullscreen preview">
+            <button
+                type="button"
+                onClick={closeFullscreen}
+                aria-label="Close fullscreen preview"
+                title="Close fullscreen preview"
+                className="absolute top-4 right-4 z-10 p-1 text-white/70 hover:text-white transition-colors"
+            >
+                <X size={24} />
+            </button>
+            {showRotateHint && isPortrait && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-3 py-2 rounded-full bg-white/10 text-white text-xs backdrop-blur-md pointer-events-none whitespace-nowrap">
+                    <RotateCw size={14} />
+                    <span>Rotate your device for landscape view</span>
+                </div>
+            )}
+            {boxes.length ? (
+                <div ref={overlayPlotRef} className="relative flex-1 w-full h-full min-h-0">
+                    {treemapSvg}
+                </div>
+            ) : (
+                <div className="flex-1 flex items-center justify-center text-xs text-white/40">No trade data</div>
+            )}
+        </div>
+    );
+
+    // Portal to document.body so card/scroll ancestors can't trap fixed positioning below MobileNav.
+    const fullscreenOverlay = isFullscreen && typeof document !== 'undefined'
+        ? createPortal(fullscreenOverlayContent, document.body)
+        : null;
+
+    const fullscreenButton = (
+        <button
+            type="button"
+            onClick={openFullscreen}
+            aria-label="Fullscreen preview"
+            title="Fullscreen preview"
+            className="ml-auto -mr-1 shrink-0 p-1 text-white/50 hover:text-white transition-colors"
+        >
+            <Expand size={14} />
+        </button>
+    );
+
     if (!boxes.length) {
         return (
-            <div className="p-4 sm:p-8 rounded-2xl sm:rounded-[32px] border-0 flex flex-col items-center min-h-[400px] h-full bg-[#0a0a0a] text-white overflow-hidden">
-                <div className="flex items-center gap-3 mb-4">
-                    <h3 className="text-[15px] font-semibold tracking-tight text-left">Pair Distribution</h3>
-                    <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
+            <>
+                {fullscreenOverlay}
+                <div className="p-4 sm:p-8 rounded-2xl sm:rounded-[32px] border-0 flex flex-col items-center min-h-[400px] h-full bg-[#0a0a0a] text-white overflow-hidden">
+                    <div className="flex items-center gap-3 mb-4 w-full">
+                        <h3 className="text-[15px] font-semibold tracking-tight text-left">Pair Distribution</h3>
+                        <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
+                        {fullscreenButton}
+                    </div>
+                    <div className="flex-1 flex items-center justify-center text-xs opacity-40 w-full h-full">No trade data</div>
                 </div>
-                <div className="flex-1 flex items-center justify-center text-xs opacity-40 w-full h-full">No trade data</div>
-            </div>
+            </>
         );
     }
 
     return (
-        <div className="py-4 sm:py-8 rounded-2xl sm:rounded-[32px] border-0 flex flex-col min-h-[400px] h-full bg-[#0a0a0a] text-white overflow-hidden">
-            <div className="flex items-center gap-3 mb-4 min-w-0 w-full px-4 sm:px-8">
-                <h3 className="text-[15px] font-semibold tracking-tight text-left truncate">Pair Distribution</h3>
-                <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
-            </div>
-            <div className="flex-1 flex flex-col w-full">
-                <div ref={plotRef} className="flex-1 flex items-stretch relative w-full h-full min-h-[320px]">
-                    <svg viewBox={`0 0 ${plotSize.width} ${plotSize.height}`} className="w-full h-full block" preserveAspectRatio="none">
-                        {boxes.map((box, i) => (
-                            <g key={i}>
-                                <rect
-                                    x={box.x}
-                                    y={box.y}
-                                    width={box.width}
-                                    height={box.height}
-                                    fill={getColor(box.pnl)}
-                                    stroke="#000000"
-                                    strokeWidth="2"
-                                    className="transition-opacity hover:opacity-80 cursor-pointer"
-                                />
-                                {box.width > 60 && box.height > 40 && (
-                                    <>
-                                        <text
-                                            x={box.x + box.width / 2}
-                                            y={box.y + box.height / 2 - 8}
-                                            textAnchor="middle"
-                                            fill="#ffffff"
-                                            fontSize="15"
-                                            fontWeight="700"
-                                            style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 2px rgba(0,0,0,0.5))' }}
-                                        >
-                                            {box.pair}
-                                        </text>
-                                        <text
-                                            x={box.x + box.width / 2}
-                                            y={box.y + box.height / 2 + 8}
-                                            textAnchor="middle"
-                                            fill="#f4f4f5"
-                                            fontSize="12"
-                                            style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 1px rgba(0,0,0,0.5))' }}
-                                        >
-                                            {box.tradeCount} trades
-                                        </text>
-                                        <text
-                                            x={box.x + box.width / 2}
-                                            y={box.y + box.height / 2 + 22}
-                                            textAnchor="middle"
-                                            fill="#ffffff"
-                                            fontSize="11"
-                                            fontWeight="700"
-                                            style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 1px rgba(0,0,0,0.5))' }}
-                                        >
-                                            {currencySymbol}{box.pnl.toFixed(2)}
-                                        </text>
-                                    </>
-                                )}
-                                {box.width > 40 && box.height > 25 && box.width <= 60 && (
-                                    <text
-                                        x={box.x + box.width / 2}
-                                        y={box.y + box.height / 2}
-                                        textAnchor="middle"
-                                        fill="#ffffff"
-                                        fontSize="12"
-                                        fontWeight="700"
-                                        style={{ pointerEvents: 'none', filter: 'drop-shadow(0px 1px 1px rgba(0,0,0,0.5))' }}
-                                    >
-                                        {box.pair}
-                                    </text>
-                                )}
-                            </g>
-                        ))}
-                    </svg>
+        <>
+            {fullscreenOverlay}
+            <div className="py-4 sm:py-8 rounded-2xl sm:rounded-[32px] border-0 flex flex-col min-h-[400px] h-full bg-[#0a0a0a] text-white overflow-hidden">
+                <div className="flex items-center gap-3 mb-4 min-w-0 w-full px-4 sm:px-8">
+                    <h3 className="text-[15px] font-semibold tracking-tight text-left truncate">Pair Distribution</h3>
+                    <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
+                    {fullscreenButton}
                 </div>
-                <div className="flex flex-row items-center gap-6 mt-4 pt-4 border-t border-zinc-800/50">
-                    <div className="flex items-center gap-2 text-xs">
-                        <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(5, 150, 105, 0.8)' }}></div>
-                        <span className={isDarkMode ? 'text-zinc-400' : 'text-slate-600'}>Profitable</span>
+                <div className="flex-1 flex flex-col w-full">
+                    <div ref={inlinePlotRef} className="flex-1 flex items-stretch relative w-full h-full min-h-[240px] sm:min-h-[320px] mx-0">
+                        {treemapSvg}
                     </div>
-                    <div className="flex items-center gap-2 text-xs">
-                        <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(220, 38, 38, 0.8)' }}></div>
-                        <span className={isDarkMode ? 'text-zinc-400' : 'text-slate-600'}>Loss-Making</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs">
-                        <span className={isDarkMode ? 'text-zinc-500' : 'text-slate-500'}>Box size = Total P/L</span>
+                    <div className="flex flex-row flex-wrap items-center gap-x-6 gap-y-2 mt-4 pt-4 border-0 px-4 sm:px-8">
+                        <div className="flex items-center gap-2 text-xs">
+                            <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(5, 150, 105, 0.8)' }}></div>
+                            <span className={isDarkMode ? 'text-zinc-400' : 'text-slate-600'}>Profitable</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                            <div className="w-4 h-4 rounded-sm" style={{ background: 'rgba(220, 38, 38, 0.8)' }}></div>
+                            <span className={isDarkMode ? 'text-zinc-400' : 'text-slate-600'}>Loss-Making</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                            <span className={isDarkMode ? 'text-zinc-500' : 'text-slate-500'}>Box size = Total P/L</span>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </>
     );
 };

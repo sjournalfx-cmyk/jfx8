@@ -42,8 +42,8 @@ Rules:
 - If there is not enough evidence for a claim, write that the evidence is insufficient or unavailable.
 - Do not return only the section tag or only headings without content.
 - Do not repeat [SECTION:KEY_INSIGHTS_WARNINGS] inside the body.
-- Be specific, practical, and direct.
-- Do not mention the model, provider, or internal reasoning.
+- Be specific, practical, and direct. Keep every Title to max 4 words and every detail to one short sentence (max ~15 words / 90 characters). Never write long paragraphs.
+- Never include local file paths, temp paths, clipboard image names, or image file names (for example C:\ paths, /tmp/ paths, pi-clipboard-*.png, or any .png/.jpg). Only trading insights text.
 - Return only the section content. No preamble, no code fences.
 
 SOURCE FACTS

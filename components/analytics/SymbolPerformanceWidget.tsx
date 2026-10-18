@@ -46,13 +46,13 @@ export const SymbolPerformanceWidget: React.FC<SymbolPerformanceWidgetProps> = (
             <div className="mb-3 sm:mb-4 min-w-0">
                 <h3 className="text-[15px] font-semibold tracking-tight text-left">Symbol Performance</h3>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {cards.map((card, i) => (
-                    <div key={i} className={`p-4 rounded-xl border ${isDarkMode ? 'bg-[#000000] border-zinc-700/50' : 'bg-slate-50 border-slate-200'}`}>
+                    <div key={i} className={`p-3 sm:p-4 rounded-xl border-0 min-w-0 bg-[#0a0a0a] text-white`}>
                         <div className="flex items-center justify-between mb-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wider opacity-50">{card.label}</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wider leading-tight opacity-50">{card.label}</span>
                         </div>
-                        <div className="text-xl font-black mb-1">{card.data?.symbol || '---'}</div>
+                        <div className="text-lg sm:text-xl font-black mb-1 truncate">{card.data?.symbol || '---'}</div>
                         <div className={`text-sm font-mono font-bold ${card.data && (card.label.includes('Sum') ? card.data.sum >= 0 : card.data.avg >= 0) ? 'text-emerald-500' : 'text-rose-500'}`}>
                             {card.data ? (card.label.includes('Sum') ? `${currencySymbol}${card.data.sum.toFixed(2)}` : `${currencySymbol}${card.data.avg.toFixed(2)}`) : '---'}
                         </div>

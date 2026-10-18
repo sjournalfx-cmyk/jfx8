@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { Sunrise, Sun, Sunset, Activity, Clock, TrendingUp, TrendingDown, Target, HelpCircle } from 'lucide-react';
+import { Sunrise, Sun, Sunset, Activity, Clock, TrendingUp, TrendingDown, Target, BarChart2, HelpCircle } from 'lucide-react';
 import { 
   BarChart, 
   Bar, 
@@ -81,8 +81,8 @@ const formatDuration = (minutes: number) => {
 const formatPnL = (value: number, currencySymbol: string) => {
   const sign = value >= 0 ? '+' : '-';
   return `${sign}${currencySymbol}${Math.abs(value).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
   })}`;
 };
 
@@ -145,12 +145,12 @@ export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode,
         </div>
       </div>
 
-      <div className="h-[200px] min-h-[200px] w-full mb-6">
+      <div className="h-[200px] min-h-[200px] w-[114%] -ml-[7%] mb-6">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? "#27272a" : "#e2e8f0"} />
             <XAxis dataKey="name" stroke={isDarkMode ? "#71717a" : "#94a3b8"} fontSize={10} tickLine={false} axisLine={false} />
-            <YAxis stroke={isDarkMode ? "#71717a" : "#94a3b8"} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `${currencySymbol}${Math.abs(Number(v)).toFixed(2)}`} />
+            <YAxis stroke={isDarkMode ? "#71717a" : "#94a3b8"} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `${currencySymbol}${Math.abs(Number(v)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
             <Tooltip 
               contentStyle={{ 
                 backgroundColor: isDarkMode ? '#000000' : '#fff', 
@@ -177,10 +177,7 @@ export const MarketSessionWidget: React.FC<WidgetProps> = ({ trades, isDarkMode,
 
       <div className="space-y-2">
         {data.map(s => (
-          <div key={s.name} className={clsx(
-            "p-3 rounded-2xl border flex items-center justify-between",
-            isDarkMode ? "bg-black/20 border-zinc-800/50" : "bg-slate-50 border-slate-100"
-          )}>
+          <div key={s.name} className="p-3 rounded-2xl border-0 flex items-center justify-between bg-white/[0.06]">
             <div className="flex items-center gap-3">
               {getSessionIcon(s.name)}
               <span className="text-xs font-black uppercase tracking-tight">{s.name}</span>
@@ -285,7 +282,7 @@ export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkM
         </div>
       </div>
 
-      <div className="h-[220px] min-h-[220px] w-full">
+      <div className="h-[220px] min-h-[220px] w-[114%] -ml-[7%]">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? "#27272a" : "#e2e8f0"} />
@@ -340,10 +337,7 @@ export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkM
         ].map(({ label, item, tone, icon: Icon }) => (
           <div
             key={label}
-            className={clsx(
-              "rounded-2xl border p-4",
-              isDarkMode ? "bg-black/20 border-zinc-800/50" : "bg-slate-50 border-slate-100"
-            )}
+            className="rounded-2xl border-0 p-4 bg-white/[0.06]"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -368,15 +362,13 @@ export const HourlyPerformanceWidget: React.FC<WidgetProps> = ({ trades, isDarkM
 
             <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
               <div className={clsx(
-                "rounded-xl border px-3 py-2",
-                isDarkMode ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"
+                "rounded-xl px-3 py-2 bg-white/[0.05] border-0"
               )}>
                 <p className="text-[9px] font-black uppercase tracking-widest opacity-40">Avg hold</p>
                 <p className="mt-1 font-black">{item ? formatDuration(item.avgHoldMinutes) : 'N/A'}</p>
               </div>
               <div className={clsx(
-                "rounded-xl border px-3 py-2",
-                isDarkMode ? "border-white/[0.06] bg-white/[0.03]" : "border-slate-200 bg-white"
+                "rounded-xl px-3 py-2 bg-white/[0.05] border-0"
               )}>
                 <p className="text-[9px] font-black uppercase tracking-widest opacity-40">Avg trade</p>
                 <p className="mt-1 font-black">
@@ -549,7 +541,7 @@ export const DailyActivityHeatmap: React.FC<WidgetProps> = ({ trades, isDarkMode
                 {d.pnl >= 0 ? '+' : ''}{currencySymbol}{Math.abs(d.pnl).toLocaleString()}
               </span>
             </div>
-            <div className={clsx("h-1.5 w-full rounded-full overflow-hidden", isDarkMode ? "bg-black" : "bg-slate-100")}>
+            <div className="h-1.5 w-full rounded-full overflow-hidden bg-white/10">
               <div 
                 className={clsx("h-full rounded-full", d.pnl >= 0 ? "bg-emerald-500" : "bg-rose-500")}
                 style={{ width: `${Math.min(100, (d.absPnl / maxVal) * 100)}%` }}

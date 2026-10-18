@@ -123,7 +123,7 @@ export const CurrencyStrengthMeter: React.FC<CurrencyStrengthMeterProps> = ({ is
                             <div className="w-12 flex flex-col items-center">
                                 <span className={`text-xs font-black ${hoveredCur === item.cur ? 'text-indigo-500' : ''}`}>{item.cur}</span>
                             </div>
-                            <div className={`flex-1 h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-black' : 'bg-slate-100'} ${hoveredCur === item.cur ? 'h-3' : ''}`}>
+                            <div className={`flex-1 h-2 rounded-full overflow-hidden bg-white/10 ${hoveredCur === item.cur ? 'h-3' : ''}`}>
                                 <div
                                     className={`h-full rounded-full ${item.val > 7 ? 'bg-emerald-500' :
                                         item.val > 4 ? 'bg-blue-500' :

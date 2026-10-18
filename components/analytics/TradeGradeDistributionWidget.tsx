@@ -46,7 +46,7 @@ export const TradeGradeDistributionWidget: React.FC<TradeGradeDistributionProps>
                             </div>
                             <span className="opacity-60">{d.count} Trades</span>
                         </div>
-                        <div className="h-2 w-full bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
+                        <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
                             <div
                                 className="h-full bg-amber-500"
                                 style={{ width: `${d.percentage}%` }}

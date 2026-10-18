@@ -7,14 +7,12 @@ import { PerformanceByPairWidget } from './PerformanceByPairWidget';
 import { ExecutionPerformanceTable } from './ExecutionPerformanceTable';
 import { CurrencyStrengthMeter } from './CurrencyStrengthMeter';
 import { EquityCurveWidget } from './EquityCurveWidget';
-import { LargestWinLossWidget } from './LargestWinLossWidget';
 import { MomentumStreakWidget } from './MomentumStreakWidget';
 import { SymbolPerformanceWidget } from './SymbolPerformanceWidget';
 import { DrawdownOverTimeWidget } from './DrawdownOverTimeWidget';
 import { TiltScoreWidget } from './TiltScoreWidget';
 import { PLByMindsetWidget } from './PLByMindsetWidget';
 import { StrategyPerformancePieChart } from './StrategyPerformancePieChart';
-import { OutcomeDistributionWidget } from './OutcomeDistributionWidget';
 import { DetailedStatistics } from './DetailedStatistics';
 
 interface ReportViewProps {
@@ -287,16 +285,7 @@ export const ReportView: React.FC<ReportViewProps> = ({
                     </div>
                 )}
 
-                <div className="avoid-break grid grid-cols-2 gap-8">
-                    {isVisible('outcomeDist') && (
-                        <div className="avoid-break">
-                            <h3 className="text-sm font-black uppercase tracking-widest mb-4 opacity-60">Outcome Distribution</h3>
-                            <div className="h-[300px] p-6 border-2 border-black rounded-3xl">
-                                <OutcomeDistributionWidget trades={trades} isDarkMode={false} />
-                            </div>
-                        </div>
-                    )}
-                </div>
+
 
                 {isVisible('strategyPerf') && (
                     <div className="avoid-break pt-8 border-t border-black/10">
@@ -308,6 +297,7 @@ export const ReportView: React.FC<ReportViewProps> = ({
                         </div>
                     </div>
                 )}
+
             </div>
 
             <div className="page-break" />

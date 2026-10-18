@@ -1,27 +1,12 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Trade, UserProfile, EASession, CashTransaction } from '../types';
 import {
     Info, Activity,
-    Target, LineChart, Shield, ShieldCheck, X, Printer, Gauge, Zap, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle
+    Target, LineChart, Shield, X, Printer, Zap, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle, Gauge
 } from 'lucide-react';
 import { Tooltip } from './ui/Tooltip';
 import { normalizePlan } from '../lib/constants';
 
-
-import {
-    BarChart,
-    Bar,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    ResponsiveContainer,
-    Cell,
-    RadarChart,
-    PolarGrid,
-    PolarAngleAxis,
-    PolarRadiusAxis,
-    Radar
-} from 'recharts';
 
 import { PLByMindsetWidget } from './analytics/PLByMindsetWidget';
 
@@ -67,7 +52,9 @@ type PsychologyBriefSection = {
 };
 
 const parsePsychologyBrief = (content: string): PsychologyBriefSection[] => {
-    const lines = content.split(/\r?\n/).map((line) => line.trim());
+    // Strip markdown code fences if wrapped in ```markdown ... ```
+    const cleanContent = content.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/i, '');
+    const lines = cleanContent.split(/\r?\n/).map((line) => line.trim());
     const sections: PsychologyBriefSection[] = [];
     let currentSection: PsychologyBriefSection | null = null;
 
@@ -78,24 +65,26 @@ const parsePsychologyBrief = (content: string): PsychologyBriefSection[] => {
         currentSection = null;
     };
 
-    const getTone = (label: string): PsychologyBriefTone => {
-        if (/warning|risk/i.test(label)) return 'warning';
-        if (/action/i.test(label)) return 'action';
-        return 'insight';
-    };
+    const cleanMarkdown = (s: string) => s.replace(/^\*+|\*+$/g, '').replace(/^_+|_+$/g, '').trim();
 
     for (const rawLine of lines) {
         if (!rawLine) continue;
 
         const headingMatch = rawLine.match(/^#{1,6}\s*(.+)$/);
-        const heading = (headingMatch?.[1] ?? rawLine).trim();
-        const normalizedHeading = heading.toLowerCase();
+        const headingText = (headingMatch?.[1] ?? rawLine).trim();
+        const cleanHeading = headingText.replace(/^[*_#\s\d.)]+|[*_#:\s]+$/g, '').toLowerCase();
 
-        if (normalizedHeading === 'key insights' || normalizedHeading === 'warnings' || normalizedHeading === 'immediate action') {
+        const isKeyInsights = /key\s*insight/i.test(cleanHeading);
+        const isWarnings = /warning|risk/i.test(cleanHeading);
+        const isAction = /action|step/i.test(cleanHeading);
+
+        if (isKeyInsights || isWarnings || isAction) {
             flushSection();
+            const sectionTitle = isKeyInsights ? 'Key Insights' : isWarnings ? 'Warnings' : 'Immediate Action';
+            const tone: PsychologyBriefTone = isWarnings ? 'warning' : isAction ? 'action' : 'insight';
             currentSection = {
-                title: heading,
-                tone: getTone(heading),
+                title: sectionTitle,
+                tone,
                 items: [],
             };
             continue;
@@ -105,12 +94,33 @@ const parsePsychologyBrief = (content: string): PsychologyBriefSection[] => {
             continue;
         }
 
-        const cleanedLine = rawLine.replace(/^[-*•]\s+/, '').trim();
+        const cleanedLine = stripLocalFilePaths(rawLine.replace(/^[-*•\d.)]\s*/, '').trim());
         if (!cleanedLine) continue;
+        if (isLocalFilePathText(cleanedLine)) continue;
 
-        const colonIndex = cleanedLine.indexOf(':');
-        const title = colonIndex > 0 ? cleanedLine.slice(0, colonIndex).trim() : cleanedLine;
-        const body = colonIndex > 0 ? cleanedLine.slice(colonIndex + 1).trim() : '';
+        let rawTitle = '';
+        let rawBody = '';
+
+        // Check for bold title like **Title**: detail or **Title:** detail
+        const boldMatch = cleanedLine.match(/^\*\*([^*]+)\*\*[:\s–—-]*(.*)$/);
+        if (boldMatch) {
+            rawTitle = boldMatch[1].replace(/[:\s–—-]+$/, '').trim();
+            rawBody = boldMatch[2].trim();
+        } else {
+            const separatorIndex = cleanedLine.search(/[:–—-]/);
+            if (separatorIndex > 0) {
+                rawTitle = cleanedLine.slice(0, separatorIndex).trim();
+                rawBody = cleanedLine.slice(separatorIndex + 1).trim();
+            } else {
+                rawTitle = cleanedLine;
+                rawBody = '';
+            }
+        }
+
+        if (isLocalFilePathText(rawTitle) && !rawBody) continue;
+        const title = cleanMarkdown(stripLocalFilePaths(rawTitle));
+        const body = cleanMarkdown(stripLocalFilePaths(rawBody));
+        if (!title && !body) continue;
 
         currentSection.items.push({
             title,
@@ -145,28 +155,56 @@ const psychologyCardToneClasses: Record<PsychologyBriefTone, { shell: string; st
 };
 
 
-const renderRadarAngleTick = ({ x, y, payload }: any) => {
-    const label = payload?.value;
-    const offsets: Record<string, { dx: number; dy: number }> = {
-        Confident: { dx: 0, dy: -30 },
-        Neutral: { dx: 28, dy: 0 },
-        Hesitant: { dx: 12, dy: 24 },
-        Anxious: { dx: -12, dy: 24 },
-        FOMO: { dx: -28, dy: 0 },
-    };
-    const { dx = 0, dy = 0 } = offsets[label] || {};
+const LOCAL_FILE_PATH_PATTERNS = [
+    /[A-Za-z]:[\\/][^\s)'"`\]]*/g,
+    /file:\/\/[^\s)'"`\]]+/gi,
+    /(?:\/tmp\/|\/var\/folders\/|\\Temp\\|AppData[\\/]Local[\\/]Temp[\\/])[^\s)'"`\]]*/gi,
+    /pi-clipboard-[A-Za-z0-9-]+\.(png|jpe?g|webp|gif|bmp)/gi,
+];
+
+const isLocalFilePathText = (value: string): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
     return (
-        <text
-            x={x + dx}
-            y={y + dy}
-            fill="#64748b"
-            fontSize={13}
-            textAnchor="middle"
-            dominantBaseline="middle"
-        >
-            {label}
-        </text>
+        /[A-Za-z]:[\\/]/.test(trimmed) ||
+        /pi-clipboard-/i.test(trimmed) ||
+        /AppData[\\/]Local[\\/]Temp/i.test(trimmed) ||
+        /\\Temp\\/i.test(trimmed) ||
+        /^file:\/\//i.test(trimmed) ||
+        /^[^\s]+\.(png|jpe?g|webp|gif|bmp)$/i.test(trimmed)
     );
+};
+
+const stripLocalFilePaths = (value: string): string => {
+    if (!value) return '';
+    let out = value;
+    out = out.replace(/!\[[^\]]*\]\([^)]+\)/g, '');
+    for (const pattern of LOCAL_FILE_PATH_PATTERNS) {
+        pattern.lastIndex = 0;
+        out = out.replace(pattern, '');
+    }
+    return out.replace(/[ \t]{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim();
+};
+
+const sanitizePsychologyContent = (content: string): string => {
+    if (!content) return '';
+    const lines = content.split(/\r?\n/);
+    const cleanedLines: string[] = [];
+    for (let line of lines) {
+        line = stripLocalFilePaths(line);
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (/^#{1,6}\s*(.+)$/.test(trimmed)) {
+            cleanedLines.push(trimmed);
+            continue;
+        }
+        const bulletMatch = trimmed.match(/^([-*•]\s+)(.*)$/);
+        const body = (bulletMatch?.[2] ?? trimmed).trim();
+        if (!body || /^[:\-–—\s]*$/.test(body)) continue;
+        if (isLocalFilePathText(body)) continue;
+        cleanedLines.push(bulletMatch ? `${bulletMatch[1]}${body}` : body);
+    }
+    return cleanedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 };
 
 const safePnL = (value: unknown): number => {
@@ -180,14 +218,6 @@ type BarChartPoint = {
 };
 
 const MINDSETS = ['Confident', 'Neutral', 'Hesitant', 'Anxious', 'FOMO'];
-const radarTooltipContent = (
-    <div className="space-y-0.5">
-        <div className="uppercase tracking-[0.18em] opacity-50 text-[8px]">Mindset</div>
-        <div>Average P/L</div>
-        <div>Trade count</div>
-        <div>Win rate</div>
-    </div>
-);
 
 function DonutChart({ value }: { value: number }) {
     const radius = 55;
@@ -201,7 +231,7 @@ function DonutChart({ value }: { value: number }) {
 
     return (
         <div className="relative flex w-full justify-center">
-            <svg className="h-[220px] w-[220px]" viewBox="0 0 140 140" aria-hidden="true">
+            <svg className="h-[150px] w-[150px]" viewBox="0 0 140 140" aria-hidden="true">
                 <circle
                     cx="70"
                     cy="70"
@@ -227,10 +257,10 @@ function DonutChart({ value }: { value: number }) {
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <div className="flex items-end justify-center gap-1 leading-none">
-                    <span className="text-[46px] font-bold text-[#2563eb]">{value}</span>
-                    <span className="pb-1 text-[20px] font-semibold text-[#cbd5e1]">/100</span>
+                    <span className="text-[34px] font-bold text-[#2563eb]">{value}</span>
+                    <span className="pb-1 text-[16px] font-semibold text-[#cbd5e1]">/100</span>
                 </div>
-                <div className="mt-2 text-[13px] font-semibold text-[#cbd5e1]">
+                <div className="mt-1.5 text-[12px] font-semibold text-[#cbd5e1]">
                     {value >= 90 ? 'Excellent' : value >= 75 ? 'Good' : value >= 60 ? 'Developing' : 'Needs Work'}
                 </div>
             </div>
@@ -252,9 +282,11 @@ interface AnalyticsProps {
   isRefreshingPsychologyInsights?: boolean;
   psychologyAnalyzeLimitReached?: boolean;
   isDemoMode?: boolean;
+  activeTabOverride?: 'overview' | 'trades' | 'psychology' | 'advanced' | 'comparison' | 'cash' | 'reports' | 'session' | 'compliance';
+  hideTopChrome?: boolean;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false, psychologyAnalyzeLimitReached = false, isDemoMode = false }) => {
+const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false, psychologyAnalyzeLimitReached = false, isDemoMode = false, activeTabOverride, hideTopChrome = false }) => {
     const trades = useMemo(() => {
         return sortTradesChronologically(rawTrades);
     }, [rawTrades]);
@@ -263,11 +295,18 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
 
     const [activeInfo, setActiveInfo] = useState<{ title: string, content: string } | null>(null);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-    const psychologyBriefSections = useMemo(
-        () => (dailyPsychologyInsights?.content ? parsePsychologyBrief(dailyPsychologyInsights.content) : []),
+    const sanitizedPsychologyContent = useMemo(
+        () => (dailyPsychologyInsights?.content ? sanitizePsychologyContent(dailyPsychologyInsights.content) : ''),
         [dailyPsychologyInsights]
     );
-    const [scoreToggled, setScoreToggled] = useState(false);
+    const psychologyBriefSections = useMemo(
+        () => (sanitizedPsychologyContent ? parsePsychologyBrief(sanitizedPsychologyContent) : []),
+        [sanitizedPsychologyContent]
+    );
+    const [expandedBriefItems, setExpandedBriefItems] = useState<Record<string, boolean>>({});
+    const toggleBriefItem = (key: string) => {
+        setExpandedBriefItems((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
     
     const currencySymbol = userProfile?.currencySymbol || '$';
 
@@ -399,26 +438,6 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
         }));
     }, [completedTrades]);
 
-    const radarData = useMemo(() => {
-        const avgPnLByMindset = MINDSETS.map((mindset) => {
-            const tradesWithMindset = completedTrades.filter((trade) => (trade.mindset || 'Neutral') === mindset);
-            const totalPnL = tradesWithMindset.reduce((sum, trade) => sum + safePnL(trade.pnl), 0);
-            const count = tradesWithMindset.length;
-            return count > 0 ? totalPnL / count : 0;
-        });
-
-        const max = Math.max(...avgPnLByMindset.map(Math.abs), 1);
-        const normalized = avgPnLByMindset.map((v) => Math.round((v / max) * 40));
-
-        const colors = ['#7ae2b1', '#c0c5cc', '#c0c5cc', '#c0c5cc', '#c0c5cc'];
-
-        return MINDSETS.map((name, i) => ({
-            name,
-            pl: normalized[i],
-            fill: colors[i],
-        }));
-    }, [completedTrades]);
-
     const planAdherenceChartPoints = useMemo<BarChartPoint[]>(() => {
         const buckets = [
             { label: 'Followed Plan', key: 'Followed Exactly' },
@@ -440,153 +459,109 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     const renderPsychologyLayout = () => (
         <div className="space-y-6 pb-20">
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,2.05fr)]">
-                <section className="flex min-h-[380px] flex-col rounded-[20px] border-0 bg-[#0a0a0a] text-white px-7 py-7">
+                <section className="flex h-[380px] max-h-[380px] min-h-[380px] flex-col overflow-hidden rounded-[20px] border-0 bg-[#0a0a0a] text-white px-6 py-6">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <h2 className="text-[15px] font-semibold tracking-tight text-left text-white">{scoreToggled ? 'Performance Radar' : 'Tilt Score'}</h2>
+                            <h2 className="text-[15px] font-semibold tracking-tight text-left text-white">Tilt Score</h2>
                             <Tooltip
-                                content={scoreToggled ? radarTooltipContent : 'Your discipline score based on plan adherence across all trades. Higher is better.'}
+                                content="Your discipline score based on plan adherence across all trades. Higher is better."
                                 isDarkMode={true}
-                                compact={scoreToggled}
                                 onInfoClick={() => handleOpenHelp('tiltScore')}
                             >
                                 <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
                             </Tooltip>
                         </div>
-                        <div
-                            className="inline-flex rounded-[8px] border border-[#2a2a2a] bg-[#000000] p-1 shadow-[0_1px_0_rgba(255,255,255,0.03)]"
-                            role="tablist"
-                            aria-label="Tilt score display mode"
-                        >
-                            <button
-                                type="button"
-                                onClick={() => setScoreToggled(false)}
-                                aria-pressed={!scoreToggled}
-                                className={`rounded-[6px] px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] transition-all ${
-                                    !scoreToggled
-                                        ? 'bg-[#FF4F00] text-white shadow-sm'
-                                        : 'text-[#94a3b8] hover:text-white'
-                                }`}
-                            >
-                                Score
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setScoreToggled(true)}
-                                aria-pressed={scoreToggled}
-                                className={`rounded-[6px] px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] transition-all ${
-                                    scoreToggled
-                                        ? 'bg-[#FF4F00] text-white shadow-sm'
-                                        : 'text-[#94a3b8] hover:text-white'
-                                }`}
-                            >
-                                Radar
-                            </button>
-                        </div>
                     </div>
 
-                    <div className="flex flex-1 flex-col items-center justify-center gap-6 pt-2">
-                        {scoreToggled ? (
-                            <Tooltip
-                                content={radarTooltipContent}
-                                isDarkMode={true}
-                                compact
-                            >
-                                <div className="mx-auto h-[320px] w-[320px] cursor-help">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <RadarChart cx="50%" cy="50%" outerRadius="74%" data={radarData} margin={{ top: 28, right: 28, bottom: 28, left: 28 }}>
-                                            <PolarGrid stroke="#e2e8f0" />
-                                            <PolarAngleAxis dataKey="name" tick={renderRadarAngleTick} />
-                                            <PolarRadiusAxis
-                                                angle={90}
-                                                domain={[-20, 40]}
-                                                tick={false}
-                                                axisLine={false}
-                                            />
-                                            <Radar
-                                                name="Performance"
-                                                dataKey="pl"
-                                                stroke="#4f46e5"
-                                                strokeWidth={2}
-                                                fill="#4f46e5"
-                                                fillOpacity={0.15}
-                                                isAnimationActive={false}
-                                            />
-                                        </RadarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </Tooltip>
-                        ) : (
-                            <>
-                                <DonutChart value={disciplineScore} />
-                                <p className="max-w-[280px] text-center text-[14px] leading-7 text-[#cbd5e1]">
-                                    {disciplineScore >= 90
-                                        ? 'Your rule-following is strong. Keep protecting that consistency.'
-                                        : disciplineScore >= 75
-                                            ? 'Your discipline is developing well. Focus on maintaining consistency in your trading approach.'
-                                            : disciplineScore >= 60
-                                                ? 'Your discipline is improving, but emotional execution is still leaking returns.'
-                                                : 'Your discipline is inconsistent. Tighten your process before adding size.'}
-                                </p>
-                            </>
-                        )}
+                    <div className="flex flex-1 flex-col items-center justify-center min-h-0 overflow-hidden">
+                        <div className="flex flex-col items-center justify-center gap-5">
+                            <DonutChart value={disciplineScore} />
+                            <p className="max-w-[280px] text-center text-[13px] leading-6 text-[#cbd5e1]">
+                                {disciplineScore >= 90
+                                    ? 'Your rule-following is strong. Keep protecting that consistency.'
+                                    : disciplineScore >= 75
+                                        ? 'Your discipline is developing well. Focus on maintaining consistency in your trading approach.'
+                                        : disciplineScore >= 60
+                                            ? 'Your discipline is improving, but emotional execution is still leaking returns.'
+                                            : 'Your discipline is inconsistent. Tighten your process before adding size.'}
+                            </p>
+                        </div>
                     </div>
                 </section>
 
-                <section className="flex min-h-[380px] flex-col rounded-[14px] border-0 bg-[#0a0a0a] text-white p-[18px]">
-                    <div className="mb-3.5 flex items-start justify-between gap-4">
-                        <div className="flex items-center gap-2">
-                            <h2 className="text-[15px] font-semibold tracking-tight text-left text-white">Key Insights & Warnings</h2>
-                            <Tooltip content="AI-generated breakdown of your cognitive strengths, warning patterns, and suggested improvements based on your trade psychology." isDarkMode={true} onInfoClick={() => handleOpenHelp('psychSlip')}>
-                                <HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100 text-white" />
-                            </Tooltip>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2.5">
+                <section className="flex h-[380px] max-h-[380px] min-h-[380px] flex-col overflow-hidden rounded-[14px] border-0 bg-[#0a0a0a] text-white p-[18px]">
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                                <h2 className="text-sm sm:text-[15px] font-semibold tracking-tight text-white whitespace-nowrap">Key Insights & Warnings</h2>
+                                <Tooltip content="AI-generated breakdown of your cognitive strengths, warning patterns, and suggested improvements based on your trade psychology." isDarkMode={true} onInfoClick={() => handleOpenHelp('psychSlip')}>
+                                    <HelpCircle size={13} className="opacity-40 cursor-help hover:opacity-100 text-white shrink-0" />
+                                </Tooltip>
+                            </div>
                             {dailyPsychologyInsights?.generatedAt && !isRefreshingPsychologyInsights ? (
-                                <span className="text-[10px] text-[#52525b]">
-                                    Last sync: {new Date(dailyPsychologyInsights.generatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                </span>
+                                <p className="text-[10px] text-zinc-500 mt-0.5 truncate">
+                                    Last sync: {new Date(dailyPsychologyInsights.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, {new Date(dailyPsychologyInsights.generatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                </p>
                             ) : null}
+                        </div>
+                        {sanitizedPsychologyContent || isRefreshingPsychologyInsights ? (
                             <button
                                 type="button"
                                 onClick={onRefreshPsychologyInsights}
                                 disabled={!onRefreshPsychologyInsights || isRefreshingPsychologyInsights || psychologyAnalyzeLimitReached}
                                 aria-label="Analyze psychology insights"
                                 title={psychologyAnalyzeLimitReached ? 'Daily Analyze limit reached (3/3)' : 'Analyze psychology insights'}
-                                className="group inline-flex items-center justify-center rounded-full p-1.5 text-[#93c5fd] transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                                className="group shrink-0 inline-flex items-center justify-center rounded-lg p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                                <RotateCcw size={14} className={isRefreshingPsychologyInsights ? 'animate-spin text-white' : 'transition-transform duration-200 group-hover:rotate-12'} />
+                                <RotateCcw size={13} className={isRefreshingPsychologyInsights ? 'animate-spin text-white' : 'transition-transform duration-200 group-hover:rotate-180'} />
                             </button>
-                        </div>
+                        ) : null}
                     </div>
 
-                    {dailyPsychologyInsights?.content ? (
+                    {sanitizedPsychologyContent ? (
                         psychologyBriefSections.length > 0 ? (
-                            <div className="max-h-[280px] space-y-2 overflow-y-auto pr-1">
+                            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
                                 {psychologyBriefSections.flatMap((section, sectionIndex) =>
                                     section.items.map((item, itemIndex) => {
                                         const tone = item.tone;
                                         const toneClasses = psychologyCardToneClasses[tone];
                                         const Icon = tone === 'warning' ? AlertTriangle : tone === 'action' ? CircleCheck : Lightbulb;
+                                        const itemKey = `${section.title}-${itemIndex}-${sectionIndex}`;
+                                        const isExpanded = !!expandedBriefItems[itemKey];
+                                        const isLong = (item.body?.length ?? 0) > 110;
 
                                         return (
                                             <article
-                                                key={`${section.title}-${itemIndex}-${sectionIndex}`}
-                                                className={`relative overflow-hidden rounded-[8px] border px-4 py-3.5 ${toneClasses.shell} shadow-[0_1px_0_rgba(255,255,255,0.03)]`}
+                                                key={itemKey}
+                                                className={`relative overflow-hidden rounded-[8px] border px-3 py-2.5 ${toneClasses.shell} shadow-[0_1px_0_rgba(255,255,255,0.03)]`}
                                             >
                                                 <div className={`absolute left-0 top-0 h-full w-[4px] ${toneClasses.stripe}`} />
                                                 <div className="flex items-start gap-2.5 pl-1">
                                                     <div className={`mt-0.5 shrink-0 ${toneClasses.icon}`}>
-                                                        <Icon size={16} strokeWidth={2.35} />
+                                                        <Icon size={15} strokeWidth={2.35} />
                                                     </div>
                                                     <div className="min-w-0 flex-1">
-                                                        <h3 className={`text-[14px] font-semibold leading-5 ${toneClasses.title}`}>
+                                                        <h3 className={`truncate text-[13px] font-semibold leading-5 ${toneClasses.title}`} title={item.title}>
                                                             {item.title}
                                                         </h3>
                                                         {item.body ? (
-                                                            <p className="mt-1 text-[12px] leading-5 text-white/82">
-                                                                {item.body}
-                                                            </p>
+                                                            <>
+                                                                <p
+                                                                    className={`mt-0.5 break-words text-[12px] leading-5 text-white/75 ${isExpanded ? '' : 'line-clamp-2'}`}
+                                                                    title={isExpanded ? undefined : item.body}
+                                                                >
+                                                                    {item.body}
+                                                                </p>
+                                                                {isLong ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => toggleBriefItem(itemKey)}
+                                                                        className="mt-0.5 text-[11px] font-semibold text-sky-400/90 transition-colors hover:text-sky-300"
+                                                                    >
+                                                                        {isExpanded ? 'Show less' : 'Show more'}
+                                                                    </button>
+                                                                ) : null}
+                                                            </>
                                                         ) : null}
                                                     </div>
                                                 </div>
@@ -596,16 +571,21 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                                 )}
                             </div>
                         ) : (
-                            <div className="rounded-[14px] border border-[#1f1f1f] bg-[#000000] px-5 py-5">
-                                <pre className="whitespace-pre-wrap text-[15px] leading-7 text-white">
-                                    {dailyPsychologyInsights.content}
+                            <div className="min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#1f1f1f] bg-[#000000] px-5 py-4">
+                                <pre className="h-full overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-white/85 custom-scrollbar">
+                                    {sanitizedPsychologyContent}
                                 </pre>
                             </div>
                         )
                     ) : isRefreshingPsychologyInsights ? (
                         <PsychologyAnalyzeLoader />
                     ) : (
-                        <PsychologyAnalyzeEmptyState />
+                        <PsychologyAnalyzeEmptyState
+                            onAnalyze={onRefreshPsychologyInsights}
+                            isRefreshing={isRefreshingPsychologyInsights}
+                            disabled={!onRefreshPsychologyInsights || psychologyAnalyzeLimitReached}
+                            limitReached={psychologyAnalyzeLimitReached}
+                        />
                     )}
                 </section>
             </div>
@@ -662,7 +642,21 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
         }
     };
 
-    const [activeTab, setActiveTab] = useState<'overview' | 'trades' | 'psychology' | 'advanced' | 'comparison' | 'cash' | 'reports' | 'session' | 'compliance'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'trades' | 'psychology' | 'advanced' | 'comparison' | 'cash' | 'reports' | 'session' | 'compliance'>(activeTabOverride ?? 'overview');
+    // Sync when Home top bar drives the tab externally (e.g. Overview/Trades/… at Home level)
+    useEffect(() => {
+        if (activeTabOverride && activeTabOverride !== activeTab) {
+            setActiveTab(activeTabOverride);
+        }
+    }, [activeTabOverride]);
+    // Tab content swaps inside a persistent scroll container (mobile <main>
+    // plus this view's own inner scroller) — reset both to top so a new
+    // tab never opens mid-page from the previous tab's scroll position.
+    const analyticsRootRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        analyticsRootRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+        analyticsRootRef.current?.closest('main')?.scrollTo({ top: 0, behavior: 'auto' });
+    }, [activeTab]);
     const [isHelpDrawerOpen, setIsHelpDrawerOpen] = useState(false);
     const [helpWidgetId, setHelpWidgetId] = useState<string | null>(null);
 
@@ -673,11 +667,11 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
 
     const tabDefinitions = [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+        { id: 'advanced', label: 'Advanced', icon: Gauge },
         { id: 'trades', label: 'Trade Analysis', icon: LineChart },
         { id: 'psychology', label: 'Psychology', icon: Target },
-        { id: 'compliance', label: 'Rules Compliance', icon: ShieldCheck },
+        { id: 'compliance', label: 'Rules Compliance', icon: Shield },
         { id: 'session', label: 'Session', icon: Zap },
-        { id: 'advanced', label: 'Advanced', icon: Gauge },
         { id: 'comparison', label: 'Reports', icon: Activity },
         { id: 'reports', label: 'Comparison', icon: Shield },
         { id: 'cash', label: 'Transactions', icon: Coins }
@@ -745,8 +739,9 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
             : 'bg-[#000000] text-zinc-200';
 
     return (
-        <div className={`w-full h-full flex flex-col overflow-hidden p-4 sm:p-6 lg:p-10 pb-nav font-sans ${pageBackgroundClass}`}>
-            <header className="mb-1 flex flex-col gap-4">
+        <div ref={analyticsRootRef} className={`w-full h-full overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-10 pb-nav font-sans ${pageBackgroundClass}`}>
+            {!hideTopChrome && (
+            <header className="mb-4 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-2 mb-2">
@@ -760,10 +755,12 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     </div>
                 </div>
             </header>
+            )}
+            {!hideTopChrome && (
             <nav
                 role="tablist"
                 aria-label="Analytics sections"
-                className={`shrink-0 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x gap-2 bg-[#0a0a0a]`}
+                className={`sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x snap-mandatory gap-2 border-b backdrop-blur-xl overscroll-x-contain touch-pan-x scroll-smooth ${pageIsLight ? 'bg-white/90 border-slate-200' : 'bg-black/80 border-zinc-800'}`}
             >
                 {tabDefinitions.map(tab => (
                     <button
@@ -771,17 +768,17 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         role="tab"
                         aria-selected={activeTab === tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
-                        className={`flex-1 min-w-[110px] snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 min-h-[44px] ${activeTab === tab.id
-                            ? 'bg-[#FF4F00] text-white shadow-lg'
-                            : 'text-zinc-500 hover:text-zinc-300'}`}
+                        className={`shrink-0 snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 min-h-[44px] ${activeTab === tab.id
+                            ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-[#FF4F00] text-white shadow-lg')
+                            : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
                     >
                         <tab.icon size={14} />
                         {tab.label}
                     </button>
                 ))}
             </nav>
+            )}
 
-            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar pt-3">
             {activeTab === 'overview' && renderOverviewLayout()}
             
             {activeTab === 'trades' && (
@@ -790,7 +787,21 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('symbolPerformance')} />
                     </div>
                     <div className="grid grid-cols-1 gap-4">
+                        <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('strategyPerformance')} />
+                    </div>
+                    <div className="grid grid-cols-1 gap-4">
                         <PairDistributionTreemapWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('pairDistribution')} />
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'advanced' && (
+                <div className="space-y-6 pb-20">
+                    <div className="grid grid-cols-1 gap-4">
+                        <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradingMistakes')} />
+                    </div>
+                    <div className="w-full min-h-[320px]">
+                        <RevenueMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('revenueMatrix')} />
                     </div>
                 </div>
             )}
@@ -807,27 +818,11 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 />
             )}
 
-            {activeTab === 'advanced' && (
-                <div className="space-y-6 pb-20">
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                        <div className="min-h-[280px]">
-                            <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('strategyPerformance')} />
-                        </div>
-                        <div className="min-h-[280px]">
-                            <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradingMistakes')} />
-                        </div>
-                    </div>
-                    <div className="w-full min-h-[320px]">
-                        <RevenueMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('revenueMatrix')} />
-                    </div>
-                </div>
-            )}
-
             {activeTab === 'comparison' && (
-                <div className="space-y-8 pb-20">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                            <h2 className="text-xl font-bold">Detailed Performance Report</h2>
+                <div className="space-y-8 pb-20 [zoom:0.88] origin-top">
+                    <div className="flex justify-between items-center gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <h2 className="text-sm sm:text-base font-bold whitespace-nowrap truncate">Detailed Performance Report</h2>
                             <Tooltip content="A comprehensive breakdown of all key performance metrics, trading days, and drawdowns." isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('detailedReport')}>
                                 <HelpCircle size={16} className="opacity-40 cursor-help hover:opacity-100" />
                             </Tooltip>
@@ -836,10 +831,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                             disabled
                             aria-disabled="true"
                             onClick={(e) => e.preventDefault()}
-                            className={`px-6 py-3 rounded-xl font-bold flex items-center gap-2 cursor-not-allowed opacity-50 ${isDarkMode ? 'bg-black text-white' : 'bg-black text-white'}`}
+                            className={`px-4 sm:px-6 py-3 rounded-xl font-bold flex items-center gap-2 shrink-0 cursor-not-allowed opacity-50 ${isDarkMode ? 'bg-black text-white' : 'bg-black text-white'}`}
                         >
                             <Printer size={18} />
-                            Generate PDF Report
+                            <span className="hidden min-[420px]:inline">Generate PDF Report</span>
                         </button>
                     </div>
 
@@ -886,15 +881,14 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         onDailyActivityInfoClick={() => handleOpenHelp('dailyActivity')}
                     />
 
-                    <TimeAnalysisMatrixWidget 
-                        trades={completedTrades} 
-                        isDarkMode={isDarkMode} 
-                        currencySymbol={currencySymbol} 
+                    <TimeAnalysisMatrixWidget
+                        trades={completedTrades}
+                        isDarkMode={isDarkMode}
+                        currencySymbol={currencySymbol}
                         onInfoClick={() => handleOpenHelp('timeAnalysis')}
                     />
                 </div>
             )}
-            </div>
 
             {/* Widget Details Help Drawer - rendered once at root so it appears above all content */}
             <WidgetHelpDrawer

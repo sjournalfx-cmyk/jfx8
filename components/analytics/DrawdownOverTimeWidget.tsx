@@ -34,19 +34,25 @@ export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ 
     const maxDrawdown = drawdownData.length > 0 ? Math.max(...drawdownData.map(d => d.drawdown)) : 0;
     const maxY = Math.max(maxDrawdown * 1.2, 1);
 
-    const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
-        const svg = e.currentTarget;
-        const rect = svg.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const width = rect.width;
-        
+    const indexFromClientX = (clientX: number, rect: DOMRect) => {
+        const x = clientX - rect.left;
+        const width = Math.max(rect.width, 1);
         const index = Math.min(
             drawdownData.length - 1,
             Math.max(0, Math.floor((x / width) * drawdownData.length))
         );
-        
         setHoverIndex(index);
-        setMousePos({ x: (index / (drawdownData.length - 1)) * 700, y: 0 });
+        setMousePos({ x: (drawdownData.length > 1 ? index / (drawdownData.length - 1) : 0) * 700, y: 0 });
+    };
+
+    const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+        indexFromClientX(e.clientX, e.currentTarget.getBoundingClientRect());
+    };
+
+    const handleTouchMove = (e: React.TouchEvent<SVGSVGElement>) => {
+        const touch = e.touches[0];
+        if (!touch) return;
+        indexFromClientX(touch.clientX, e.currentTarget.getBoundingClientRect());
     };
 
     const generateAreaPath = (data: any[], width: number, height: number) => {
@@ -69,7 +75,7 @@ export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ 
 
     return (
         <div className="p-4 sm:p-6 rounded-2xl sm:rounded-[24px] border-0 flex flex-col min-h-[350px] relative h-full bg-[#0a0a0a] text-white">
-            <div className="flex justify-between items-start mb-6">
+            <div className="flex justify-between items-start gap-3 mb-4 sm:mb-6">
                 <div className="flex items-center gap-2">
                     <h3 className="text-[15px] font-semibold tracking-tight text-left">Drawdown Over Time</h3>
                     <Tooltip content="Visualizes the percentage drop from your peak equity over the course of your trading history." isDarkMode={isDarkMode}>
@@ -81,31 +87,37 @@ export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ 
                     </Tooltip>
                 </div>
 
-                <div className={`text-right ${hoverIndex !== null ? 'opacity-100' : 'opacity-0'}`}>
+                <div className="text-right shrink-0">
                     <div className="text-xl font-black font-mono text-rose-500 leading-none">
-                        {hoverIndex !== null ? `-${drawdownData[hoverIndex].drawdown.toFixed(2)}%` : '-0.00%'}
+                        -{(hoverIndex !== null ? drawdownData[hoverIndex].drawdown : maxDrawdown).toFixed(2)}%
                     </div>
                     <div className="text-[10px] font-bold opacity-40 uppercase tracking-widest mt-1">
-                        {hoverIndex !== null ? `${userProfile.currencySymbol}${drawdownData[hoverIndex].balance.toLocaleString()}` : 'Balance'}
+                        {hoverIndex !== null ? `${userProfile.currencySymbol}${drawdownData[hoverIndex].balance.toLocaleString()}` : 'Max DD'}
                     </div>
                 </div>
             </div>
             {drawdownData.length < 2 ? (
                 <div className="flex-1 flex items-center justify-center opacity-30 text-sm">Insufficient data</div>
             ) : (
-                <div className="flex-1 relative">
-                    <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[10px] font-mono opacity-40">
+                <div className="flex-1 min-h-0 flex items-center sm:items-stretch">
+                  <div className="relative w-full sm:flex-1 sm:flex sm:flex-col">
+                    <div className="absolute left-0 top-0 bottom-8 w-10 sm:w-12 flex flex-col justify-between text-[10px] font-mono opacity-40">
                         <span>0%</span>
                         <span>{(maxY / 2).toFixed(2)}%</span>
                         <span>{maxY.toFixed(2)}%</span>
                     </div>
-                    <div className="ml-12 h-full pb-8">
+                    {/* Fixed height on mobile so the chart always renders full;
+                        flex-fill on larger screens. */}
+                    <div className="ml-10 sm:ml-12 h-56 sm:h-auto sm:flex-1 pb-8 touch-none select-none">
                         <svg 
                             viewBox="0 0 700 200" 
-                            className="w-full h-full overflow-visible cursor-crosshair" 
+                            className="block w-full h-full overflow-visible cursor-crosshair" 
                             preserveAspectRatio="none"
                             onMouseMove={handleMouseMove}
                             onMouseLeave={() => setHoverIndex(null)}
+                            onTouchStart={handleTouchMove}
+                            onTouchMove={handleTouchMove}
+                            onTouchEnd={() => setHoverIndex(null)}
                         >
                             <defs>
                                 <linearGradient id="drawdownGradient" x1="0" y1="0" x2="0" y2="1">
@@ -114,7 +126,7 @@ export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ 
                                 </linearGradient>
                             </defs>
                             <path d={paths.area} fill="url(#drawdownGradient)" />
-                            <path d={paths.line} fill="none" stroke="#f43f5e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d={paths.line} fill="none" stroke="#f43f5e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                             
                             {hoverIndex !== null && (
                                 <>
@@ -124,6 +136,7 @@ export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ 
                             )}
                         </svg>
                     </div>
+                  </div>
                 </div>
             )}
         </div>

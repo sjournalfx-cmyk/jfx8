@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
+import { HelpCircle } from 'lucide-react';
 import { Trade } from '../../types';
 import { calculateDisciplineScore, getDisciplineScoreLabel } from '../../lib/disciplineScore';
+import { Tooltip } from '../ui/Tooltip';
 
 interface TiltScoreWidgetProps {
     trades: Trade[];
@@ -8,7 +10,7 @@ interface TiltScoreWidgetProps {
     onInfoClick?: () => void;
 }
 
-export const TiltScoreWidget: React.FC<TiltScoreWidgetProps> = ({ trades = [], isDarkMode }) => {
+export const TiltScoreWidget: React.FC<TiltScoreWidgetProps> = ({ trades = [], isDarkMode, onInfoClick }) => {
     const scoreData = useMemo(() => {
         const score = calculateDisciplineScore(trades);
         if (score === null) {
@@ -36,63 +38,68 @@ export const TiltScoreWidget: React.FC<TiltScoreWidgetProps> = ({ trades = [], i
         return { score, label, message };
     }, [trades]);
 
-    const circumference = 2 * Math.PI * 42;
-    const dashOffset = circumference - (scoreData.score / 100) * circumference;
+    // Same 270° arc gauge as the psychology-tab tilt card (150px svg).
+    const radius = 55;
+    const circumference = 2 * Math.PI * radius;
+    const arcRatio = 0.75;
+    const arcLength = circumference * arcRatio;
+    const gapLength = circumference - arcLength;
+    const progressLength = (scoreData.score / 100) * arcLength;
+    const progressGap = circumference - progressLength;
 
     return (
-        <div className={`rounded-[18px] border p-7 ${isDarkMode ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-white shadow-sm'}`}>
-            <div className="flex items-start justify-between gap-4">
-                <div>
-                    <h2 className={`text-[28px] font-bold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-950'}`}>
-                        Trading Discipline
-                    </h2>
-                    <div className={`mt-8 text-[18px] font-bold ${isDarkMode ? 'text-white' : 'text-slate-950'}`}>
-                        Tilt Score
-                    </div>
-                </div>
-
-                <div className="mt-8 flex items-center gap-3">
-                    <span className={`text-[16px] ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>Score</span>
-                    <span className={`relative block h-8 w-14 rounded-full ${isDarkMode ? 'bg-black' : 'bg-slate-200'}`}>
-                        <span className={`absolute left-1 top-1 h-6 w-6 rounded-full ${isDarkMode ? 'bg-zinc-600' : 'bg-white shadow-sm'}`} />
-                    </span>
+        <div className={`flex min-h-[380px] flex-col rounded-[20px] border-0 px-7 py-7 ${isDarkMode ? 'bg-[#0a0a0a] text-white' : 'bg-white text-slate-950 shadow-sm'}`}>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <h2 className="text-left text-[15px] font-semibold tracking-tight">Tilt Score</h2>
+                    <Tooltip
+                        content="Your discipline score based on plan adherence across all trades. Higher is better."
+                        isDarkMode={true}
+                        onInfoClick={onInfoClick}
+                    >
+                        <HelpCircle size={14} className="cursor-help opacity-40 hover:opacity-100" />
+                    </Tooltip>
                 </div>
             </div>
 
-            <div className="mt-6 flex flex-col items-center text-center">
-                <div className="relative h-[240px] w-[240px]">
-                    <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
+            <div className="flex flex-1 flex-col items-center justify-center gap-6 pt-2">
+                <div className="relative flex w-full justify-center">
+                    <svg className="h-[150px] w-[150px]" viewBox="0 0 140 140" aria-hidden="true">
                         <circle
-                            cx="50"
-                            cy="50"
-                            r="42"
+                            cx="70"
+                            cy="70"
+                            r={radius}
+                            stroke={isDarkMode ? '#171717' : '#eef0f3'}
+                            strokeWidth="16"
                             fill="transparent"
-                            stroke={isDarkMode ? '#18181b' : '#f3f4f6'}
-                            strokeWidth="8"
+                            strokeDasharray={`${arcLength} ${gapLength}`}
+                            strokeLinecap="butt"
+                            transform="rotate(135 70 70)"
                         />
                         <circle
-                            cx="50"
-                            cy="50"
-                            r="42"
+                            cx="70"
+                            cy="70"
+                            r={radius}
+                            stroke="#2563eb"
+                            strokeWidth="16"
                             fill="transparent"
-                            stroke="#3b82f6"
-                            strokeWidth="8"
-                            strokeDasharray={circumference}
-                            strokeDashoffset={dashOffset}
+                            strokeDasharray={`${progressLength} ${progressGap}`}
                             strokeLinecap="butt"
+                            transform="rotate(135 70 70)"
                         />
                     </svg>
-
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <div className="flex items-end">
-                            <span className="text-[48px] font-bold leading-none text-[#3b82f6]">{scoreData.score}</span>
-                            <span className={`mb-1 text-[26px] font-bold leading-none ${isDarkMode ? 'text-zinc-300' : 'text-slate-600'}`}>/100</span>
+                        <div className="flex items-end justify-center gap-1 leading-none">
+                            <span className="text-[34px] font-bold text-[#2563eb]">{scoreData.score}</span>
+                            <span className={`pb-1 text-[16px] font-semibold ${isDarkMode ? 'text-[#cbd5e1]' : 'text-slate-500'}`}>/100</span>
                         </div>
-                        <span className={`mt-1 text-[20px] ${isDarkMode ? 'text-zinc-300' : 'text-slate-700'}`}>{scoreData.label}</span>
+                        <div className={`mt-1.5 text-[12px] font-semibold ${isDarkMode ? 'text-[#cbd5e1]' : 'text-slate-500'}`}>
+                            {scoreData.label}
+                        </div>
                     </div>
                 </div>
 
-                <p className={`mx-auto mt-2 max-w-[420px] text-[18px] leading-10 ${isDarkMode ? 'text-zinc-400' : 'text-slate-600'}`}>
+                <p className={`max-w-[280px] text-center text-[14px] leading-7 ${isDarkMode ? 'text-[#cbd5e1]' : 'text-slate-600'}`}>
                     {scoreData.message}
                 </p>
             </div>
