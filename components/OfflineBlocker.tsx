@@ -184,3 +184,38 @@ export const OfflineBlocker: React.FC<OfflineBlockerProps & { isChecking?: boole
     </div>
   );
 };
+
+/**
+ * Slim, non-blocking offline notice. Unlike {@link OfflineBlocker} it does not
+ * cover the app: users stay on whatever screen they were on, QuickLog keeps
+ * working, and logged trades fall into the offline queue until reconnect.
+ * Kept in this module so the existing blocker export stays intact.
+ */
+export const OfflineBanner: React.FC<{ isChecking?: boolean; onRetry?: () => void }> = ({
+  isChecking = false,
+  onRetry,
+}) => (
+  <div
+    className="pointer-events-none fixed inset-x-0 top-0 z-[2147483000] flex justify-center px-3 pt-2 sm:pt-3"
+    role="status"
+    aria-live="polite"
+  >
+    <div className="pointer-events-auto flex w-full max-w-3xl items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-amber-100 shadow-lg shadow-black/20 backdrop-blur-md sm:px-4">
+      <WifiOff className="h-4 w-4 shrink-0 text-amber-400" aria-hidden="true" />
+      <p className="min-w-0 flex-1 text-[12px] font-medium leading-snug sm:text-sm">
+        You're offline — trades you log will sync when you reconnect
+      </p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={isChecking}
+          className="inline-flex min-h-[32px] shrink-0 items-center gap-1.5 rounded-lg bg-amber-500/20 px-3 py-1.5 text-[12px] font-bold text-amber-200 transition-colors hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${isChecking ? 'animate-spin' : ''}`} aria-hidden="true" />
+          Retry
+        </button>
+      )}
+    </div>
+  </div>
+);

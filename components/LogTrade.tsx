@@ -12,6 +12,8 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Card } from './ui/Card';
 import { StarRating } from './ui/StarRating';
+import { PhasedLoader } from './ui/PhasedLoader';
+import { UsageBadge } from './ui/UsageBadge';
 import { calculateRiskReward, getSessionFromTime } from '../lib/trade-calculations';
 import { parseMTTradeCSV } from '../lib/trade-import';
 import { TradeFormStep1 } from './log-trade/TradeFormStep1';
@@ -33,12 +35,22 @@ interface LogTradeProps {
     trades: Trade[];
     isReadOnly?: boolean;
     portfolioName?: string;
+    /** Free-tier monthly usage badge (hidden when the limit is unlimited). */
+    tradesUsedThisMonth?: number;
+    maxTradesThisMonth?: number;
 }
 
 const STEPS = [
     { label: 'Market Context', description: 'Setup & conditions' },
     { label: 'Execution', description: 'Entry & risk management' },
     { label: 'Review', description: 'Outcome & psychology' },
+];
+
+/** Phases shown while a CSV file is read and parsed during import. */
+const IMPORT_PHASES = [
+    { icon: Upload, text: 'Reading your file' },
+    { icon: FileText, text: 'Parsing trades' },
+    { icon: CheckCircle2, text: 'Validating entries' },
 ];
 
 const StepIndicator = ({ current, total, isDarkMode, onSelect }: { current: number, total: number, isDarkMode: boolean, onSelect: (step: number) => void }) => (
@@ -88,9 +100,10 @@ const StepIndicator = ({ current, total, isDarkMode, onSelect }: { current: numb
     </div>
 );
 
-const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, initialTrade, onCancel, currencySymbol, userProfile, trades, isReadOnly = false, portfolioName }) => {
+const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, initialTrade, onCancel, currencySymbol, userProfile, trades, isReadOnly = false, portfolioName, tradesUsedThisMonth, maxTradesThisMonth }) => {
     const [step, setStep] = useState(1);
     const [isSaving, setIsSaving] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
     const { addToast } = useToast();
     
     const currentPlan = normalizePlan(userProfile?.plan);
@@ -249,6 +262,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
             return;
         }
         const reader = new FileReader();
+        setIsImporting(true);
         reader.onload = async (event) => {
             try {
                 const text = event.target?.result as string;
@@ -268,7 +282,9 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                     });
                 }
             } catch (err) { console.error(err); }
+            finally { setIsImporting(false); }
         };
+        reader.onerror = () => setIsImporting(false);
         reader.readAsText(file);
     };
 
@@ -476,7 +492,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                 </div>
                 <div className="hidden md:block md:w-[220px] shrink-0" aria-hidden />
                 <div className="flex-1 min-w-0 text-center px-2">
-                    <h1 className="text-[11px] sm:text-[13px] font-bold tracking-tight leading-none text-white">{initialTrade?.id ? 'Edit Trade' : 'Log New Trade'}</h1>
+                    <h1 className="text-[11px] sm:text-[13px] font-bold tracking-tight leading-none text-white">{initialTrade?.id ? 'Edit Trade' : 'Log Trade'}</h1>
                     <p className="text-[9px] text-zinc-400 font-medium font-mono leading-none mt-0.5">{initialTrade?.id ? `#${initialTrade.id.slice(0, 6)}` : `Entry #${Date.now().toString().slice(-4)}`}</p>
                 </div>
                 <div className="shrink-0 flex items-center gap-1 sm:gap-2">
@@ -500,6 +516,7 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
             <div className="flex flex-1 overflow-hidden relative">
                 <div className="flex-1 overflow-y-auto custom-scrollbar pb-4 md:pb-8">
                     <div className="max-w-4xl mx-auto px-4 md:px-8 py-2 md:py-4 pb-2">
+                        <UsageBadge used={tradesUsedThisMonth} limit={maxTradesThisMonth} isDarkMode={isDarkMode} className={initialTrade?.id ? 'hidden' : 'mb-2'} />
                         <StepIndicator current={step} total={3} isDarkMode={isDarkMode} onSelect={setStep} />
                         {step === 1 ? <TradeFormStep1 formData={formData} handleInputChange={handleInputChange} pairError={pairError} isDarkMode={isDarkMode} userProfile={userProfile} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : step === 2 ? <TradeFormStep2 formData={formData} handleInputChange={handleInputChange} isDarkMode={isDarkMode} isDesktopBridgeTrade={isDesktopBridgeTrade} /> : <TradeFormStep3 formData={formData} handleInputChange={handleInputChange} screenshots={screenshots} handleFileUpload={handleFileUpload} handleDeleteScreenshot={handleDeleteScreenshot} setPreviewImage={setPreviewImage} beforeInputRef={beforeInputRef} afterInputRef={afterInputRef} isDarkMode={isDarkMode} userProfile={userProfile} checklistTemplate={checklistTemplate} checklistChecks={formData.checklistChecks || {}} behaviorTags={formData.behaviorTags || []} onChecklistChange={handleChecklistChange} />}
                         {/* Mobile inline actions — below Entry Comment, scrolls with content so AI button + island nav don't cover it */}
@@ -539,6 +556,14 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
                                 className="max-w-full max-h-full object-contain rounded-lg"
                             />
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {isImporting && (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+                    <div className={cn("w-full max-w-sm rounded-2xl border overflow-hidden", isDarkMode ? "bg-[#000000] border-[#27272a]" : "bg-white border-slate-200")}>
+                        <PhasedLoader phases={IMPORT_PHASES} title="Importing trades" isDarkMode={isDarkMode} />
                     </div>
                 </div>
             )}

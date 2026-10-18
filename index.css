@@ -760,8 +760,15 @@ body.jfx-mobile .animate-sheet-fade { animation: sheet-fade 0.2s ease-out; }
 .jfx-skeleton { background: linear-gradient(90deg, rgba(39,39,42,0.9) 25%, rgba(63,63,70,0.6) 37%, rgba(39,39,42,0.9) 63%); background-size: 200% 100%; animation: jfx-shimmer 1.4s infinite linear; border-radius: 12px; }
 
 .safe-area-inset-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-area-inset-top { padding-top: env(safe-area-inset-top); }
 .pb-nav { padding-bottom: calc(5.25rem + env(safe-area-inset-bottom)); }
 .pb-nav-plus-fab { padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
+
+/* H-1: coarse-pointer (touch) 44pt minimum targets. Scoped to
+   pointer:coarse so the desktop mouse layout is unchanged. */
+@media (pointer: coarse) {
+  button, [role="button"], a { min-height: 44px; }
+}
 
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -773,6 +780,24 @@ body.jfx-mobile .animate-sheet-fade { animation: sheet-fade 0.2s ease-out; }
 
 .animate-sheet-up { animation: sheet-up 0.3s cubic-bezier(0.32, 0.72, 0, 1); }
 .animate-sheet-fade { animation: sheet-fade 0.2s ease-out; }
+
+/* Trade recap — subtle success pop + one-shot halo. Classes are opt-in and
+   only applied by components/TradeRecapSheet.tsx, so desktop layout is
+   untouched. Disabled entirely under prefers-reduced-motion. */
+@keyframes jfx-recap-pop {
+  0% { opacity: 0; transform: translateY(18px) scale(0.97); }
+  60% { opacity: 1; transform: translateY(0) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.jfx-recap-pop { animation: jfx-recap-pop 0.35s cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes jfx-recap-glow {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+  100% { box-shadow: 0 0 0 16px rgba(16, 185, 129, 0); }
+}
+.jfx-recap-glow { animation: jfx-recap-glow 0.9s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .jfx-recap-pop, .jfx-recap-glow { animation: none !important; }
+}
 
 
 /* ----------------------------------------------------------------------

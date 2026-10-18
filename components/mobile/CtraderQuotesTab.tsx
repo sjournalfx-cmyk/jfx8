@@ -14,6 +14,8 @@ interface CtraderQuotesTabProps {
   selectedSymbolId: number | null;
   onSelect: (symbolId: number) => void;
   onRetry?: () => void;
+  /** Navigate to the existing cTrader connect flow when the session is dead. */
+  onReconnect?: () => void;
   ctidAccountId?: string | null;
   isDemo?: boolean;
   portfolioId?: string | null;
@@ -202,12 +204,16 @@ export const CtraderQuotesTab: React.FC<CtraderQuotesTabProps> = ({
   selectedSymbolId,
   onSelect,
   onRetry,
+  onReconnect,
   ctidAccountId,
   isDemo = true,
   portfolioId,
   onAddingChange,
 }) => {
   const { addToast } = useToast();
+
+  // Auth/session failures can't be fixed by retrying the same request.
+  const showReconnect = !!onReconnect && /access[_ ]denied|not authenticated|sign in again|signed out|session[\s\S]{0,40}expired|disconnected|reconnect ctrader/i.test(error || '');
 
   // Pair whitelist for this portfolio (greyed locked rows, never hidden).
   const [whitelist, setWhitelist] = useState(() => readPortfolioLocks(portfolioId).pairWhitelist);
@@ -399,6 +405,14 @@ export const CtraderQuotesTab: React.FC<CtraderQuotesTabProps> = ({
                     Retry
                   </button>
                 )}
+                {showReconnect && (
+                  <button
+                    onClick={onReconnect}
+                    className="mt-3 ml-2 h-11 px-5 rounded-xl border border-[#FF4F01] text-[#FF4F01] text-xs font-bold active:scale-95 transition-all"
+                  >
+                    Reconnect cTrader
+                  </button>
+                )}
               </div>
             ) : browseList.length === 0 ? (
               <div className="py-10 text-center">
@@ -460,6 +474,14 @@ export const CtraderQuotesTab: React.FC<CtraderQuotesTabProps> = ({
                     className="mt-3 h-11 px-5 rounded-xl bg-[#FF4F01] text-white text-xs font-bold active:scale-95 transition-all"
                   >
                     Retry
+                  </button>
+                )}
+                {showReconnect && (
+                  <button
+                    onClick={onReconnect}
+                    className="mt-3 ml-2 h-11 px-5 rounded-xl border border-[#FF4F01] text-[#FF4F01] text-xs font-bold active:scale-95 transition-all"
+                  >
+                    Reconnect cTrader
                   </button>
                 )}
               </div>

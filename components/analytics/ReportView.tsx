@@ -308,8 +308,8 @@ export const ReportView: React.FC<ReportViewProps> = ({
                     <h3 className="text-2xl font-black uppercase tracking-tight mb-8 flex items-center gap-3">
                         <Activity size={28} strokeWidth={3} /> Detailed Execution Log
                     </h3>
-                    <div className="overflow-hidden border-2 border-black rounded-3xl">
-                        <table className="w-full text-left text-[10px]">
+                    <div className="overflow-x-auto border-2 border-black rounded-3xl">
+                        <table className="w-full min-w-[560px] text-left text-[10px]">
                             <thead className="bg-black text-white">
                                 <tr className="font-black uppercase tracking-widest">
                                     <th className="p-4">Date / Time</th>

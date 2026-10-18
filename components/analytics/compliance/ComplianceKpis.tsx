@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { ListChecks } from 'lucide-react';
 import type { Trade } from '../../../types';
+import { EmptyState } from '../../ui/Skeleton';
 import {
   averageExecutionGrade,
   disciplinePnlImpact,
@@ -80,12 +81,15 @@ export const ComplianceKpis: React.FC<ComplianceKpisProps> = ({ trades, isDarkMo
   );
 };
 
-export const ComplianceEmptyState: React.FC<{ isDarkMode: boolean }> = ({ isDarkMode }) => (
-  <div className={`rounded-[14px] border border-dashed p-8 flex flex-col items-center text-center gap-2 ${isDarkMode ? 'border-zinc-800 text-zinc-500' : 'border-slate-200 text-slate-400'}`}>
-    <span className={`w-12 h-12 rounded-xl flex items-center justify-center ${isDarkMode ? 'bg-zinc-900 text-zinc-600' : 'bg-slate-100 text-slate-400'}`}>
-      <ListChecks size={20} />
-    </span>
-    <p className="text-sm font-bold">No graded trades yet</p>
-    <p className="text-xs max-w-[300px]">Open any trade → Rules tab, tap through your checklist, and your compliance stats will appear here.</p>
+export const ComplianceEmptyState: React.FC<{ isDarkMode: boolean; onCta?: () => void }> = ({ isDarkMode, onCta }) => (
+  <div className={`rounded-[14px] border border-dashed overflow-hidden ${isDarkMode ? 'border-zinc-800' : 'border-slate-200'}`}>
+    <EmptyState
+      isDarkMode={isDarkMode}
+      type="analytics"
+      icon={<ListChecks size={40} strokeWidth={1.4} className="opacity-40" />}
+      title="No graded trades yet"
+      description="Open any trade → Rules tab, tap through your checklist, and your compliance stats will appear here."
+      action={onCta ? { label: 'Open Journal', onClick: onCta } : undefined}
+    />
   </div>
 );

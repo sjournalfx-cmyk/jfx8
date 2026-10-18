@@ -994,8 +994,7 @@ export const uploadNoteImage = async (file: File): Promise<string | null> => {
 
     const currentPlan = profile?.plan || APP_CONSTANTS.PLANS.FREE;
     if (!PLAN_FEATURES[currentPlan]?.allowImageUploads) {
-      alert('Image uploads are not available on your current plan. Please upgrade.');
-      return null;
+      throw new Error('Image uploads are not available on your current plan. Please upgrade.');
     }
 
     const fileExt = file.name.split('.').pop();

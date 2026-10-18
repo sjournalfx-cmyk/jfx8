@@ -21,9 +21,16 @@ import QuickLogModal from '../QuickLogModal';
 import { ChecklistBuilder } from '../discipline/ChecklistBuilder';
 import { TradingLocks } from '../discipline/TradingLocks';
 import { BrandedLoader } from '../ui/BrandedLoader';
-import { safeLazy } from '../../lib/safeLazy';
 
-const BacktestLab = safeLazy(() => import('../BacktestLab'));
+// H-2 guard: ../BacktestLab does not exist in jfx8 (only jfx-mobile has it,
+// and that copy depends on jfx8-missing modules CustomChart + lib/orientation,
+// so copying would break the web build further). Render a fallback until a
+// web-safe BacktestLab entry exists.
+const BacktestLab: React.FC<any> = () => (
+  <div className="flex-1 grid place-items-center p-8 text-center">
+    <p className="text-sm font-bold text-zinc-400">Backtest Lab is unavailable in this build.</p>
+  </div>
+);
 
 interface MobileLayoutProps {
   currentView: string;
@@ -73,6 +80,7 @@ interface MobileLayoutProps {
   settingsInitialTab?: 'profile' | 'account' | 'appearance' | 'billing' | 'security' | 'developer-tools' | 'help';
   portfolioBalances?: Record<string, number>;
   tradesThisMonth?: number;
+  maxTradesPerMonth?: number;
   totalNotes?: number;
   totalImages?: number;
   tradesCount?: number;
@@ -139,6 +147,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   portfolioBalances,
   settingsInitialTab = 'profile',
   tradesThisMonth = 0,
+  maxTradesPerMonth,
   totalNotes = 0,
   totalImages = 0,
   tradesCount = 0,
@@ -337,6 +346,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
                 currentBalance={currentBalance}
                 liveBalanceSource={liveBalanceSource}
                 isLiveBalance={isLiveBalance}
+                onViewChange={onViewChange}
               />
             )}
             {homeSubTab === 'analytics' && (
@@ -425,6 +435,8 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
                 userProfile={userProfile}
                 initialTrade={editingTrade ?? undefined}
                 portfolioName={activePortfolio?.name}
+                tradesUsedThisMonth={tradesThisMonth}
+                maxTradesThisMonth={maxTradesPerMonth}
                 onCancel={() => {
                   const wasEditing = !!editingTrade?.id;
                   onClearEditingTrade?.();
@@ -719,6 +731,8 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         }}
         isDarkMode={true}
         currencySymbol={userProfile?.currencySymbol || '$'}
+        tradesUsedThisMonth={tradesThisMonth}
+        maxTradesThisMonth={maxTradesPerMonth}
       />
 
     </div>

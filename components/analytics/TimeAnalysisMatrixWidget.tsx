@@ -163,6 +163,10 @@ export const TimeAnalysisMatrixWidget: React.FC<TimeAnalysisMatrixProps> = ({ tr
                       }}
                       onMouseEnter={(e) => handleMouseMove(e, day, hour)}
                       onMouseMove={(e) => handleMouseMove(e, day, hour)}
+                      onTouchStart={(e) => {
+                        const t = e.touches[0];
+                        if (t) handleMouseMove({ clientX: t.clientX, clientY: t.clientY } as React.MouseEvent, day, hour);
+                      }}
                       onMouseLeave={() => setHoveredCell(null)}
                     />
                   );

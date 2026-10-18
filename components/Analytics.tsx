@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Trade, UserProfile, EASession, CashTransaction } from '../types';
 import {
     Info, Activity,
-    Target, LineChart, Shield, X, Printer, Zap, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle, Gauge
+    Target, LineChart, Shield, X, Printer, Zap, LayoutDashboard, LayoutGrid, Coins, AlertTriangle, Lightbulb, CircleCheck, RotateCcw, HelpCircle, Gauge, MoreHorizontal
 } from 'lucide-react';
 import { Tooltip } from './ui/Tooltip';
 import { normalizePlan } from '../lib/constants';
@@ -219,6 +219,9 @@ type BarChartPoint = {
 
 const MINDSETS = ['Confident', 'Neutral', 'Hesitant', 'Anxious', 'FOMO'];
 
+// Tabs always visible on phones; everything else collapses behind "More".
+const PRIMARY_TAB_IDS = ['overview', 'trades', 'psychology', 'compliance'];
+
 function DonutChart({ value }: { value: number }) {
     const radius = 55;
     const circumference = 2 * Math.PI * radius;
@@ -286,7 +289,7 @@ interface AnalyticsProps {
   hideTopChrome?: boolean;
 }
 
-const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false, psychologyAnalyzeLimitReached = false, isDemoMode = false, activeTabOverride, hideTopChrome = false }) => {
+const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, cashTransactions = [], dailyPsychologyInsights = null, onRefreshPsychologyInsights, isRefreshingPsychologyInsights = false, psychologyAnalyzeLimitReached = false, isDemoMode = false, onViewChange, activeTabOverride, hideTopChrome = false }) => {
     const trades = useMemo(() => {
         return sortTradesChronologically(rawTrades);
     }, [rawTrades]);
@@ -635,7 +638,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 </div>
             );
             case 'equityCurve': return <EquityCurveWidget trades={completedTrades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={currencySymbol} hideCurrentValue={normalizePlan(userProfile?.plan) !== 'FREE' && completedTrades.length === 0} onInfoClick={() => handleOpenHelp('equityCurve')} />;
-            case 'drawdown': return <DrawdownOverTimeWidget trades={completedTrades} isDarkMode={isDarkMode} userProfile={userProfile} startingBalance={effectiveInitialBalance} onInfoClick={() => handleOpenHelp('drawdown')} />;
+            case 'drawdown': return <DrawdownOverTimeWidget trades={completedTrades} isDarkMode={isDarkMode} userProfile={userProfile} startingBalance={effectiveInitialBalance} onInfoClick={() => handleOpenHelp('drawdown')} onCta={() => onViewChange('log-trade')} />;
             case 'currencyStrength': return <CurrencyStrengthMeter isDarkMode={isDarkMode} trades={completedTrades} onInfoClick={() => handleOpenHelp('currencyStrength')} />;
             case 'tradeGrade': return <TradeGradeDistributionWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradeGrade')} />;
             default: return null;
@@ -659,6 +662,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
     }, [activeTab]);
     const [isHelpDrawerOpen, setIsHelpDrawerOpen] = useState(false);
     const [helpWidgetId, setHelpWidgetId] = useState<string | null>(null);
+    const [isMoreOpen, setIsMoreOpen] = useState(false);
 
     const handleOpenHelp = (id: string) => {
         setHelpWidgetId(id);
@@ -676,6 +680,9 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
         { id: 'reports', label: 'Comparison', icon: Shield },
         { id: 'cash', label: 'Transactions', icon: Coins }
     ];
+
+    const secondaryTabs = tabDefinitions.filter(tab => !PRIMARY_TAB_IDS.includes(tab.id));
+    const activeSecondaryTab = secondaryTabs.find(tab => tab.id === activeTab);
 
     const renderOverviewLayout = () => (
         <div className="space-y-6 pb-20">
@@ -762,20 +769,38 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                 aria-label="Analytics sections"
                 className={`sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-10 px-4 sm:px-6 lg:px-10 py-2 flex overflow-x-auto no-scrollbar snap-x snap-mandatory gap-2 border-b backdrop-blur-xl overscroll-x-contain touch-pan-x scroll-smooth ${pageIsLight ? 'bg-white/90 border-slate-200' : 'bg-black/80 border-zinc-800'}`}
             >
-                {tabDefinitions.map(tab => (
-                    <button
-                        key={tab.id}
-                        role="tab"
-                        aria-selected={activeTab === tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
-                        className={`shrink-0 snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 min-h-[44px] ${activeTab === tab.id
-                            ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-[#FF4F00] text-white shadow-lg')
-                            : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
-                    >
-                        <tab.icon size={14} />
-                        {tab.label}
-                    </button>
-                ))}
+                {tabDefinitions.map(tab => {
+                    const isPrimary = PRIMARY_TAB_IDS.includes(tab.id);
+                    const isActive = activeTab === tab.id;
+                    return (
+                        <button
+                            key={tab.id}
+                            role="tab"
+                            aria-selected={isActive}
+                            onClick={() => setActiveTab(tab.id as any)}
+                            className={`${isPrimary ? 'flex' : 'hidden sm:flex'} shrink-0 snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap items-center gap-2 min-h-[44px] ${isActive
+                                ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-[#FF4F00] text-white shadow-lg')
+                                : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
+                        >
+                            <tab.icon size={14} />
+                            {tab.label}
+                        </button>
+                    );
+                })}
+                <button
+                    key="more"
+                    role="tab"
+                    aria-selected={!!activeSecondaryTab}
+                    aria-haspopup="true"
+                    aria-expanded={isMoreOpen}
+                    onClick={() => setIsMoreOpen(true)}
+                    className={`sm:hidden shrink-0 snap-center justify-center px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest whitespace-nowrap flex items-center gap-2 min-h-[44px] ${activeSecondaryTab
+                        ? (pageIsLight ? 'bg-white text-black shadow-sm' : 'bg-[#FF4F00] text-white shadow-lg')
+                        : (pageIsLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-300')}`}
+                >
+                    {activeSecondaryTab ? <activeSecondaryTab.icon size={14} /> : <MoreHorizontal size={14} />}
+                    {activeSecondaryTab ? activeSecondaryTab.label : 'More'}
+                </button>
             </nav>
             )}
 
@@ -787,10 +812,10 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         <SymbolPerformanceWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('symbolPerformance')} />
                     </div>
                     <div className="grid grid-cols-1 gap-4">
-                        <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('strategyPerformance')} />
+                        <StrategyPerformancePieChart trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('strategyPerformance')} onCta={() => onViewChange('log-trade')} />
                     </div>
                     <div className="grid grid-cols-1 gap-4">
-                        <PairDistributionTreemapWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('pairDistribution')} />
+                        <PairDistributionTreemapWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('pairDistribution')} onCta={() => onViewChange('log-trade')} />
                     </div>
                 </div>
             )}
@@ -801,7 +826,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         <TradingMistakesBarChartWidget trades={completedTrades} isDarkMode={isDarkMode} onInfoClick={() => handleOpenHelp('tradingMistakes')} />
                     </div>
                     <div className="w-full min-h-[320px]">
-                        <RevenueMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('revenueMatrix')} />
+                        <RevenueMatrixWidget trades={completedTrades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} onInfoClick={() => handleOpenHelp('revenueMatrix')} onCta={() => onViewChange('log-trade')} />
                     </div>
                 </div>
             )}
@@ -815,6 +840,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                     currencySymbol={currencySymbol}
                     userProfile={userProfile}
                     onInfoClick={(id) => handleOpenHelp(id)}
+                    onCta={() => onViewChange('history')}
                 />
             )}
 
@@ -887,6 +913,51 @@ const Analytics: React.FC<AnalyticsProps> = ({ isDarkMode, trades: rawTrades = [
                         currencySymbol={currencySymbol}
                         onInfoClick={() => handleOpenHelp('timeAnalysis')}
                     />
+                </div>
+            )}
+
+            {/* Mobile "More" sheet — the secondary analytics tabs hidden from the
+                phone tab strip. Desktop renders all tabs inline, so this stays
+                sm:hidden to avoid duplicating them. */}
+            {isMoreOpen && (
+                <div className="sm:hidden">
+                    <div
+                        className="fixed inset-0 z-[140] bg-black/60 backdrop-blur-sm"
+                        onClick={() => setIsMoreOpen(false)}
+                        aria-hidden="true"
+                    />
+                    <div className="fixed bottom-0 left-0 right-0 z-[141] rounded-t-2xl border-t border-white/10 bg-[#0a0a0a] p-4 pb-[calc(16px+env(safe-area-inset-bottom))]">
+                        <div className="mb-3 flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-white">More analytics</h3>
+                            <button
+                                type="button"
+                                onClick={() => setIsMoreOpen(false)}
+                                aria-label="Close more analytics"
+                                className="flex h-11 w-11 items-center justify-center rounded-full text-zinc-400 hover:text-white active:scale-95 transition-all touch-manipulation"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            {secondaryTabs.map(tab => (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => {
+                                        setActiveTab(tab.id as any);
+                                        setIsMoreOpen(false);
+                                    }}
+                                    aria-current={activeTab === tab.id ? 'page' : undefined}
+                                    className={`min-h-[44px] flex items-center gap-2 rounded-xl border px-3 text-xs font-bold uppercase tracking-widest transition-all ${activeTab === tab.id
+                                        ? 'border-[#FF4F00] bg-[#FF4F00] text-white'
+                                        : 'border-white/10 bg-white/[0.04] text-zinc-300 hover:text-white'}`}
+                                >
+                                    <tab.icon size={16} />
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             )}
 

@@ -193,6 +193,7 @@ export const CtraderLogTradeTabs: React.FC<CtraderLogTradeTabsProps> = ({
             selectedSymbolId={symbolId}
             onSelect={(id) => setSheetId(id)}
             onRetry={reload}
+            onReconnect={onGoConnect}
             ctidAccountId={ctidAccountId}
             isDemo={isDemo}
             portfolioId={portfolioId}

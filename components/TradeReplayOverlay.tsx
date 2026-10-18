@@ -2052,7 +2052,7 @@ const TradeReplayOverlay: React.FC<TradeReplayOverlayProps> = ({
                 onClick={() => { setSelectedIds([]); setStyleDrawer(null); }}
                 title="Deselect"
                 aria-label="Deselect drawing"
-                className={`min-w-[40px] min-h-[44px] px-1 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-500 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100'}`}
+                className={`min-w-[44px] min-h-[44px] px-1 shrink-0 flex flex-col items-center justify-center gap-0.5 rounded-xl active:scale-95 touch-manipulation ${isDarkMode ? 'text-zinc-500 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100'}`}
               >
                 <X size={16} />
                 <span className="text-[8px] font-bold leading-none">Close</span>

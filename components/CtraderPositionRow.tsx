@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Pencil } from 'lucide-react';
 import { haptic } from '../lib/haptics';
+import { useToast } from './ui/Toast';
+import ConfirmationModal from './ConfirmationModal';
 
 import { calculateLivePositionProfit } from '../lib/ctraderPnl';
 
@@ -15,7 +17,15 @@ interface CtraderPositionRowProps {
   liveAsk?: number;
   onClose: (position: any) => Promise<void>;
   onSaveSltp: (position: any, stopLoss: number | undefined, takeProfit: number | undefined) => Promise<void>;
+  /** Navigate to the existing cTrader connect flow when the session is dead. */
+  onReconnect?: () => void;
 }
+
+// Auth/session failures can't be fixed by retrying the same request — the only
+// recovery is re-authorising the cTrader connection. Kept tight so a transient
+// network error ("Failed to fetch") still offers Retry.
+const isAuthError = (message: string): boolean =>
+  /access[_ ]denied|not authenticated|sign in again|signed out|session[\s\S]{0,40}expired|session could not be established|invalid[_ ]?token|expired[_ ]?token/i.test(message);
 
 const digitsForName = (symbolName: string, explicit?: number): number => {
   const d = Number(explicit);
@@ -47,6 +57,7 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
   liveAsk,
   onClose,
   onSaveSltp,
+  onReconnect,
 }) => {
   const [swipeX, setSwipeX] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -56,6 +67,8 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
 
   const [isEditing, setIsEditing] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const { addToast } = useToast();
   const digits = digitsForName(symbolName, digitsProp);
   const [slInput, setSlInput] = useState('');
   const [tpInput, setTpInput] = useState('');
@@ -92,14 +105,28 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
     setSwipeX(0);
   };
 
-  const handleClose = async () => {
+  const handleClose = () => {
     setSwipeX(0);
-    if (!window.confirm(`Close ${p.tradeSide === 'sell' ? 'Short' : 'Long'} ${Number(p.volume || 0).toFixed(2)} ${symbolName} at market?`)) return;
+    setConfirmingClose(true);
+  };
+
+  const confirmClose = async () => {
+    setConfirmingClose(false);
     setIsBusy(true);
     try {
       await onClose(p);
     } catch (e: any) {
-      window.alert(e?.message || 'Could not close position.');
+      const message = e?.message || 'Could not close position.';
+      const canReconnect = isAuthError(message) && !!onReconnect;
+      addToast({
+        type: 'error',
+        title: 'Position not closed',
+        message: canReconnect ? `${message} Reconnect cTrader to continue.` : `${message} Check your connection, then retry.`,
+        duration: 8000,
+        action: canReconnect
+          ? { label: 'Reconnect cTrader', onClick: () => { onReconnect?.(); } }
+          : { label: 'Retry', onClick: () => { void confirmClose(); } },
+      });
     } finally {
       setIsBusy(false);
     }
@@ -109,11 +136,11 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
     const sl = slInput.trim() === '' ? undefined : Number(slInput);
     const tp = tpInput.trim() === '' ? undefined : Number(tpInput);
     if (sl !== undefined && !Number.isFinite(sl)) {
-      window.alert('Stop loss must be a valid price.');
+      addToast({ type: 'error', title: 'Invalid stop loss', message: 'Stop loss must be a valid price.', duration: 5000 });
       return;
     }
     if (tp !== undefined && !Number.isFinite(tp)) {
-      window.alert('Take profit must be a valid price.');
+      addToast({ type: 'error', title: 'Invalid take profit', message: 'Take profit must be a valid price.', duration: 5000 });
       return;
     }
     setIsBusy(true);
@@ -121,7 +148,17 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
       await onSaveSltp(p, sl, tp);
       setIsEditing(false);
     } catch (e: any) {
-      window.alert(e?.message || 'Could not update SL/TP.');
+      const message = e?.message || 'Could not update SL/TP.';
+      const canReconnect = isAuthError(message) && !!onReconnect;
+      addToast({
+        type: 'error',
+        title: 'SL/TP not saved',
+        message: canReconnect ? `${message} Reconnect cTrader to continue.` : `${message} Check your connection, then retry.`,
+        duration: 8000,
+        action: canReconnect
+          ? { label: 'Reconnect cTrader', onClick: () => { onReconnect?.(); } }
+          : { label: 'Retry', onClick: () => { void handleSave(); } },
+      });
     } finally {
       setIsBusy(false);
     }
@@ -291,6 +328,16 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
           </div>
         )}
       </div>
+      <ConfirmationModal
+        isOpen={confirmingClose}
+        title="Close position?"
+        description={`Close ${p.tradeSide === 'sell' ? 'Short' : 'Long'} ${Number(p.volume || 0).toFixed(2)} ${symbolName} at market?`}
+        confirmText="Close at market"
+        variant="danger"
+        onConfirm={confirmClose}
+        onCancel={() => setConfirmingClose(false)}
+        isDarkMode={true}
+      />
     </div>
   );
 };

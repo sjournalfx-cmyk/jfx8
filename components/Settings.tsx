@@ -32,6 +32,7 @@ import { Select } from './Select';
 import { normalizeThemePreference } from '../lib/theme';
 import { getDefaultTimezone } from '../lib/timeUtils';
 import { ApiKeysPanel } from './ApiKeysPanel';
+import ConfirmationModal from './ConfirmationModal';
 
 const freeAvatars = [
   'https://api.dicebear.com/7.x/bottts/svg?seed=1&backgroundColor=f1f5f9',
@@ -179,6 +180,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveStatus] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [showRegenSyncKeyConfirm, setShowRegenSyncKeyConfirm] = useState(false);
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
   const [feedbackCategory, setFeedbackCategory] = useState('Bug Report');
@@ -254,6 +256,16 @@ const Settings: React.FC<SettingsProps> = ({
     await navigator.clipboard.writeText(formData.syncKey);
     setCopiedKey(true);
     setTimeout(() => setCopiedKey(false), 1800);
+  };
+
+  const handleRegenerateSyncKey = () => {
+    const rand = () => {
+      const bytes = new Uint8Array(4);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase().slice(0, 4);
+    };
+    setFormData({ ...formData, syncKey: `JFX-${rand()}-${rand()}` });
+    setShowRegenSyncKeyConfirm(false);
   };
 
   const handleFeedbackSubmit = async () => {
@@ -729,15 +741,7 @@ const Settings: React.FC<SettingsProps> = ({
                             {copiedKey ? <Check size={15} /> : <Copy size={15} />}
                           </button>
                           <button
-                            onClick={() => {
-                              if (!window.confirm('Regenerate the sync key? Already-paired Bridge apps must be updated with the new key (and saved) before they sync again.')) return;
-                              const rand = () => {
-                                const bytes = new Uint8Array(4);
-                                crypto.getRandomValues(bytes);
-                                return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase().slice(0, 4);
-                              };
-                              setFormData({ ...formData, syncKey: `JFX-${rand()}-${rand()}` });
-                            }}
+                            onClick={() => setShowRegenSyncKeyConfirm(true)}
                             className={`rounded-xl border px-2.5 py-2.5 transition-all ${
                               isDarkMode
                                 ? 'border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06]'
@@ -1300,6 +1304,17 @@ const Settings: React.FC<SettingsProps> = ({
           </main>
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={showRegenSyncKeyConfirm}
+        title="Regenerate sync key?"
+        description="Already-paired Bridge apps must be updated with the new key (and saved) before they sync again."
+        confirmText="Regenerate"
+        variant="warning"
+        onConfirm={handleRegenerateSyncKey}
+        onCancel={() => setShowRegenSyncKeyConfirm(false)}
+        isDarkMode={isDarkMode}
+      />
     </div>
   );
 };

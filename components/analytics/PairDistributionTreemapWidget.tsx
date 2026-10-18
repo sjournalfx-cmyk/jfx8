@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Trade } from '../../types';
 import { Tooltip } from '../ui/Tooltip';
+import { EmptyState } from '../ui/Skeleton';
 import { Expand, HelpCircle, RotateCw, X } from 'lucide-react';
 import { useFullscreenLandscape } from '../../hooks/useFullscreenLandscape';
 
@@ -19,7 +20,7 @@ interface BoxRect extends BoxData {
     height: number;
 }
 
-interface P { trades: Trade[]; isDarkMode: boolean; currencySymbol: string; onInfoClick?: () => void; }
+interface P { trades: Trade[]; isDarkMode: boolean; currencySymbol: string; onInfoClick?: () => void; onCta?: () => void; }
 
 const calculateTreemap = (items: BoxData[], width: number, height: number): BoxRect[] => {
     if (!items?.length) return [];
@@ -69,7 +70,7 @@ const calculateTreemap = (items: BoxData[], width: number, height: number): BoxR
     return rects;
 };
 
-export const PairDistributionTreemapWidget: React.FC<P> = ({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick }) => {
+export const PairDistributionTreemapWidget: React.FC<P> = ({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick, onCta }) => {
     const inlinePlotRef = useRef<HTMLDivElement | null>(null);
     const overlayPlotRef = useRef<HTMLDivElement | null>(null);
     const [plotSize, setPlotSize] = useState({ width: 1000, height: 400 });
@@ -263,7 +264,15 @@ const getColor = (pnl: number) => {
                         <Tooltip content="Portfolio composition by total P/L" isDarkMode={isDarkMode} onInfoClick={onInfoClick}><HelpCircle size={14} className="opacity-40 cursor-help hover:opacity-100" /></Tooltip>
                         {fullscreenButton}
                     </div>
-                    <div className="flex-1 flex items-center justify-center text-xs opacity-40 w-full h-full">No trade data</div>
+                    <div className="flex-1 flex flex-col justify-center min-h-0 w-full">
+                        <EmptyState
+                            isDarkMode={isDarkMode}
+                            type="analytics"
+                            title="No trade data yet"
+                            description="Log a trade to see your portfolio composition by pair."
+                            action={onCta ? { label: 'Log a Trade', onClick: onCta } : undefined}
+                        />
+                    </div>
                 </div>
             </>
         );

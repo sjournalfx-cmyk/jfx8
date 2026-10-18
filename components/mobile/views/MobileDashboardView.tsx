@@ -7,6 +7,7 @@ import SessionClock from '../../SessionClock';
 import DailyQuote from '../../DailyQuote';
 import OpenPositions from '../../OpenPositions';
 import { MobileEconomicCalendarWidget } from '../MobileEconomicCalendarWidget';
+import { AlertCircle, FileText, Activity, ChevronRight } from 'lucide-react';
 
 interface MobileDashboardViewProps {
   trades: Trade[];
@@ -26,6 +27,8 @@ interface MobileDashboardViewProps {
   // journal math, the caption says so rather than a misleading PnL/ROI line.
   liveBalanceSource?: 'bridge' | 'ctrader' | null;
   isLiveBalance?: boolean;
+  /** Navigate to another view (e.g. the trade journal from Needs attention). */
+  onViewChange?: (view: string) => void;
 }
 
 export const MobileDashboardView: React.FC<MobileDashboardViewProps> = ({
@@ -41,6 +44,7 @@ export const MobileDashboardView: React.FC<MobileDashboardViewProps> = ({
   currentBalance: currentBalanceOverride,
   liveBalanceSource = null,
   isLiveBalance = false,
+  onViewChange,
 }) => {
   const completedTrades = useMemo(() => getCompletedTrades(trades), [trades]);
   const stats = useMemo(() => calculateStats(completedTrades), [completedTrades]);
@@ -65,6 +69,31 @@ export const MobileDashboardView: React.FC<MobileDashboardViewProps> = ({
   const winRate = stats.winRate ? Number(stats.winRate).toFixed(1) : '0.0';
   const wins = completedTrades.filter(t => t.result === 'Win').length;
   const losses = completedTrades.filter(t => t.result === 'Loss').length;
+
+  // ── Needs attention (progressive nudge — card hides when nothing pending) ──
+  const openPositionsCount = eaSession?.data?.openPositions?.length || 0;
+
+  const staleNoteCount = useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const toTs = (t: Trade): number => {
+      const raw = t.closeTime || t.openTime;
+      const parsed = raw ? Date.parse(raw) : NaN;
+      if (Number.isFinite(parsed)) return parsed;
+      const dateParsed = t.date ? Date.parse(`${t.date}T12:00:00`) : NaN;
+      return Number.isFinite(dateParsed) ? dateParsed : NaN;
+    };
+    return trades.filter((t) => {
+      if (!t.date) return false;
+      const ts = toTs(t);
+      if (!Number.isFinite(ts) || ts < cutoff) return false;
+      const hasNotes = Boolean(t.notes && t.notes.trim());
+      const hasEmotions = Array.isArray(t.emotions) && t.emotions.length > 0;
+      const hasMindset = Boolean(t.mindset && t.mindset.trim());
+      return !(hasNotes || hasEmotions || hasMindset);
+    }).length;
+  }, [trades]);
+
+  const hasNeedsAttention = staleNoteCount > 0 || openPositionsCount > 0;
 
   // ── Account Balance (portfolio-aware) ──────────────────────────────
   // `trades` here are already scoped to the active portfolio by App.tsx,
@@ -123,13 +152,40 @@ export const MobileDashboardView: React.FC<MobileDashboardViewProps> = ({
 
   return (
     <div className="pb-nav px-3.5 pt-3 space-y-3.5">
-      {/* 1. Daily Motivation / Quote Widget */}
-      <DailyQuote isDarkMode={true} />
+      {/* 0. Needs attention — only rendered when something is actually pending */}
+      {hasNeedsAttention && (
+        <div className="jfx-card jfx-card-accent p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertCircle size={16} className="text-[#FF4F01]" />
+            <p className="jfx-label">Needs attention</p>
+          </div>
+          <div className="space-y-2">
+            {staleNoteCount > 0 && (
+              <button
+                type="button"
+                onClick={() => onViewChange?.('history')}
+                className="w-full flex items-center gap-3 min-h-[44px] rounded-xl bg-white/[0.03] px-3 py-2 text-left transition-colors hover:bg-white/[0.06] touch-manipulation"
+              >
+                <FileText size={16} className="text-amber-400 shrink-0" />
+                <span className="flex-1 text-[13px] font-bold text-zinc-200">
+                  {staleNoteCount} trade{staleNoteCount === 1 ? '' : 's'} from the last 7 days need notes
+                </span>
+                <ChevronRight size={16} className="text-zinc-600 shrink-0" />
+              </button>
+            )}
+            {openPositionsCount > 0 && (
+              <div className="flex items-center gap-3 min-h-[44px] rounded-xl bg-white/[0.03] px-3 py-2">
+                <Activity size={16} className="text-emerald-400 shrink-0" />
+                <span className="flex-1 text-[13px] font-bold text-zinc-200">
+                  {openPositionsCount} open position{openPositionsCount === 1 ? '' : 's'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* 2. Live Global Session Clock */}
-      <SessionClock isDarkMode={true} />
-
-      {/* 3. Stats Grid — 2x2 on mobile (matches desktop) */}
+      {/* 1. Stats Grid — 2x2 on mobile (matches desktop) */}
       <div className="grid grid-cols-2 gap-3">
         <div className="p-4 rounded-[16px] border-0 bg-[#0a0a0a] text-white">
           <p className="text-[11px] font-bold uppercase tracking-widest opacity-40 text-left">Net PnL</p>
@@ -149,6 +205,12 @@ export const MobileDashboardView: React.FC<MobileDashboardViewProps> = ({
           <p className="text-[22px] font-black jfx-value-mono text-white mt-1">{totalTrades}</p>
         </div>
       </div>
+
+      {/* 2. Daily Motivation / Quote Widget */}
+      <DailyQuote isDarkMode={true} />
+
+      {/* 3. Live Global Session Clock */}
+      <SessionClock isDarkMode={true} />
 
       {/* 4. Economic Calendar */}
       <MobileEconomicCalendarWidget />

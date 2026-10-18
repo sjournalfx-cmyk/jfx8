@@ -18,7 +18,7 @@ const SHORTCUTS: Shortcut[] = [
     { key: '2', modifiers: 'ctrl', action: 'go-journal', description: 'Go to Journal', category: 'Navigation' },
     { key: '3', modifiers: 'ctrl', action: 'go-analytics', description: 'Go to Analytics', category: 'Navigation' },
     { key: '4', modifiers: 'ctrl', action: 'go-notes', description: 'Go to Notes', category: 'Navigation' },
-    { key: 'n', modifiers: 'ctrl', action: 'new-trade', description: 'Log New Trade', category: 'Actions' },
+    { key: 'n', modifiers: 'ctrl', action: 'new-trade', description: 'Log Trade', category: 'Actions' },
     { key: 'k', modifiers: 'ctrl', action: 'search', description: 'Search (Global)', category: 'Actions' },
     { key: 's', modifiers: 'ctrl', action: 'save', description: 'Save Current Form', category: 'Actions' },
     { key: 'Escape', action: 'close-modal', description: 'Close Modal/Dialog', category: 'Actions' },

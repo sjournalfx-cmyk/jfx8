@@ -16,6 +16,7 @@ interface ComplianceViewProps {
   currencySymbol: string;
   userProfile: UserProfile | null | undefined;
   onInfoClick?: (id: string) => void;
+  onCta?: () => void;
 }
 
 /**
@@ -31,6 +32,7 @@ export const ComplianceView: React.FC<ComplianceViewProps> = ({
   currencySymbol,
   userProfile,
   onInfoClick,
+  onCta,
 }) => {
   const { activeTemplate } = useChecklistTemplates();
   const hasSnapshots = trades.some((t) => typeof t.adherenceRate === 'number');
@@ -43,7 +45,7 @@ export const ComplianceView: React.FC<ComplianceViewProps> = ({
       <ComplianceKpis trades={trades} isDarkMode={isDarkMode} currencySymbol={currencySymbol} />
 
       {!hasSnapshots ? (
-        <ComplianceEmptyState isDarkMode={isDarkMode} />
+        <ComplianceEmptyState isDarkMode={isDarkMode} onCta={onCta} />
       ) : (
         <>
           {/* PREMIUM — deep analysis */}

@@ -22,6 +22,17 @@ import { parseMTTradeCSV } from '../lib/trade-import';
 import { hasActiveSession as hasCtraderSession } from '../services/ctraderService';
 import { isNative } from '../lib/capacitor';
 import { persistentGetSync, persistentSet } from '../lib/persistentStore';
+import { useToast } from './ui/Toast';
+import ConfirmationModal from './ConfirmationModal';
+import { PhasedLoader } from './ui/PhasedLoader';
+
+/** Phases shown while the cTrader account details load after connect/sync. */
+const CTRADER_SYNC_PHASES = [
+    { icon: RefreshCw, text: 'Opening secure channel' },
+    { icon: Layers, text: 'Fetching account details' },
+    { icon: Activity, text: 'Loading positions & orders' },
+    { icon: CheckCircle2, text: 'Finalizing sync' },
+];
 
 /**
  * Instrument-aware pip-size lookup used for the live pending-trade pip readout.
@@ -1592,6 +1603,8 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     const [accounts, setAccounts] = useState<any[]>([]);
     const [errorMsg, setErrorMsg] = useState('');
     const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
+    const [confirmRemoveImported, setConfirmRemoveImported] = useState(false);
+    const { addToast } = useToast();
 
     // Prevents StrictMode from double-invoking handleFetchAccounts
     // (useRef persists across React 18's mount → unmount → remount cycle)
@@ -1956,15 +1969,18 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             .map(t => t.id);
     }, [accountDeals, trades]);
 
-    const handleRemoveImportedDeals = async () => {
+    const handleRemoveImportedDeals = () => {
         if (isBulkAdding || bulkInFlightRef.current) return;
         if (importedTradeIds.length === 0) {
             flashBulkResult('No imported trades to remove.');
             return;
         }
-        if (typeof window !== 'undefined' && !window.confirm(
-            `Remove ${importedTradeIds.length} imported trade${importedTradeIds.length === 1 ? '' : 's'} from your journal? They move to trash and can be restored within 30 days.`
-        )) return;
+        setConfirmRemoveImported(true);
+    };
+
+    const confirmRemoveImportedDeals = async () => {
+        setConfirmRemoveImported(false);
+        if (importedTradeIds.length === 0) return;
         bulkInFlightRef.current = true;
         try {
             await dataService.deleteTrades(importedTradeIds);
@@ -2400,7 +2416,13 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             const acc = accounts.find(a => a.ctidTraderAccountId === selectedAccountId);
             if (acc) await handleRefreshDetails(acc);
         } catch (e: any) {
-            alert(e.message || 'Failed to close position');
+            addToast({
+                type: 'error',
+                title: 'Position not closed',
+                message: `${e?.message || 'Failed to close position.'} Check your cTrader connection, then retry.`,
+                duration: 8000,
+                action: { label: 'Retry', onClick: () => { void handleClosePosition(posId, vol, isDemo); } },
+            });
         }
     };
 
@@ -2412,7 +2434,13 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             const acc = accounts.find(a => a.ctidTraderAccountId === selectedAccountId);
             if (acc) await handleRefreshDetails(acc);
         } catch (e: any) {
-            alert(e.message || 'Failed to cancel order');
+            addToast({
+                type: 'error',
+                title: 'Order not cancelled',
+                message: `${e?.message || 'Failed to cancel order.'} Check your cTrader connection, then retry.`,
+                duration: 8000,
+                action: { label: 'Retry', onClick: () => { void handleCancelOrder(orderId, isDemo); } },
+            });
         }
     };
 
@@ -2429,7 +2457,13 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                 ...prev
             ]);
         } catch (e: any) {
-            alert(e.message || 'Failed to subscribe to spots');
+            addToast({
+                type: 'error',
+                title: 'Subscription failed',
+                message: `${e?.message || 'Failed to subscribe to spots.'} Check your cTrader connection, then retry.`,
+                duration: 8000,
+                action: { label: 'Retry', onClick: () => { void handleSubscribeToSpots(isDemo); } },
+            });
         }
     };
 
@@ -2443,7 +2477,13 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             const res = await getExpectedMargin(selectedAccountId, Number(marginCalcSymbolId), volUnits, isDemo);
             setCalculatedMargin(Number(res.margin ?? 0) / 100);
         } catch (e: any) {
-            alert(e.message || 'Failed to calculate margin');
+            addToast({
+                type: 'error',
+                title: 'Margin calculation failed',
+                message: `${e?.message || 'Failed to calculate margin.'} Check your cTrader connection, then retry.`,
+                duration: 8000,
+                action: { label: 'Retry', onClick: () => { void handleCalculateMargin(isDemo); } },
+            });
         } finally {
             setIsCalculatingMargin(false);
         }
@@ -2667,7 +2707,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                 }));
                 void throttledRefresh();
             });
-            subscribeToSpots(selectedAccountId, ids, wsIsDemo).catch(() => {});
+            ids.forEach((id) => { subscribeToSpots(selectedAccountId, id, wsIsDemo).catch(() => {}); });
             // Prime immediately so P&L never sits stale after opening the tab.
             void throttledRefresh();
         });
@@ -2679,7 +2719,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             livePosSpotsRef.current = null;
             if (cur) {
                 import('../services/ctraderService').then((svc) => {
-                    svc.unsubscribeFromSpots(cur.accountId, cur.ids, cur.isDemo).catch(() => {});
+                    cur.ids.forEach((id) => { svc.unsubscribeFromSpots(cur.accountId, id, cur.isDemo).catch(() => {}); });
                 }).catch(() => {});
             }
         };
@@ -3321,10 +3361,13 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                             )}
 
                                             {isLoadingDetails && (
-                                                <div className="flex items-center justify-center py-8">
-                                                    <Loader2 size={20} className="animate-spin text-[#FF4F00]" />
-                                                    <span className="ml-2.5 text-xs text-zinc-400">Synchronizing with cTrader Server…</span>
-                                                </div>
+                                                <PhasedLoader
+                                                    phases={CTRADER_SYNC_PHASES}
+                                                    title="Synchronizing with cTrader"
+                                                    intervalMs={1600}
+                                                    isDarkMode={true}
+                                                    accentColor="#FF4F00"
+                                                />
                                             )}
 
                                             {detailsError && (
@@ -3501,6 +3544,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                                                         liveAsk={heldSpotTicks[String(p.symbolId)]?.ask}
                                                                                         onClose={(pos: any) => handleClosePosition(Number(pos.positionId), Number(pos.volume) || 0, !!accounts.find((a: any) => a.ctidTraderAccountId === selectedAccountId)?.isDemo)}
                                                                                         onSaveSltp={handleSavePositionSltp}
+                                                                                        onReconnect={() => { void handleConnect(); }}
                                                                                     />
                                                                                 );
                                                                             })}
@@ -3831,6 +3875,16 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                     )}
                 </div>
             </div>
+            <ConfirmationModal
+                isOpen={confirmRemoveImported}
+                title="Remove imported trades?"
+                description={`Remove ${importedTradeIds.length} imported trade${importedTradeIds.length === 1 ? '' : 's'} from your journal? They move to trash and can be restored within 30 days.`}
+                confirmText="Remove"
+                variant="danger"
+                onConfirm={confirmRemoveImportedDeals}
+                onCancel={() => setConfirmRemoveImported(false)}
+                isDarkMode={isDarkMode}
+            />
         </div>
     );
 };

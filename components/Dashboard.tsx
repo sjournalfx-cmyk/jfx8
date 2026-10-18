@@ -26,7 +26,7 @@ import { supabase } from '../lib/supabase';
 import OpenPositions from './OpenPositions';
 import { EquityCurveWidget } from './analytics/EquityCurveWidget';
 import { PerformanceBySession } from './analytics/PerformanceBySession';
-import { Skeleton } from './ui/Skeleton';
+import { Skeleton, EmptyState } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { sortTradesChronologically } from '../lib/analyticsUtils';
@@ -74,28 +74,23 @@ interface DashboardProps {
     isDemoMode?: boolean;
 }
 
-// --- MOBILE EMPTY STATE (illustrative, CTA to Log) ---
+// --- MOBILE EMPTY STATE (shared EmptyState + CTA to Log) ---
 const MobileEmptyState: React.FC<{ isDarkMode: boolean; onCta: () => void; isFreeTier?: boolean }> = ({ isDarkMode, onCta, isFreeTier }) => (
-    <div className={`flex flex-col items-center justify-center text-center py-10 px-6 rounded-2xl border border-dashed ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
-        <div className={`w-20 h-20 rounded-[20px] flex items-center justify-center mb-4 border ${isDarkMode ? 'bg-[#FF4F01]/10 border-[#FF4F01]/15 text-[#FF4F01]' : 'bg-orange-50 border-orange-100 text-[#FF4F01]'}`}>
-            <Inbox size={32} strokeWidth={1.6} />
-        </div>
-        <h3 className={`text-[16px] font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>No trades yet</h3>
-        <p className={`text-[13px] font-medium leading-relaxed max-w-[320px] mt-1.5 ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>
-            Your journal is empty. Log your first trade to unlock stats, equity curve &amp; streak insights.
-        </p>
-        <div className="flex flex-col sm:flex-row items-center gap-3 mt-6 w-full sm:w-auto">
-            <button
-                onClick={() => { try { haptic.light(); } catch {} onCta(); }}
-                className="min-h-[44px] w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FF4F01] hover:bg-[#E64601] active:scale-[0.98] text-white rounded-xl text-sm font-black shadow-[0_8px_24px_rgba(255,79,1,0.22)] transition-all touch-manipulation"
-            >
-                <Plus size={16} strokeWidth={2.5} /> Log First Trade
-            </button>
+    <div className={`rounded-2xl border border-dashed overflow-hidden ${isDarkMode ? 'bg-[#000000] border-zinc-800' : 'bg-white border-slate-200 shadow-md'}`}>
+        <EmptyState
+            isDarkMode={isDarkMode}
+            type="trades"
+            icon={<Inbox size={40} strokeWidth={1.4} className="text-[#FF4F01] opacity-90" />}
+            title="No trades yet"
+            description="Your journal is empty. Log your first trade to unlock stats, equity curve & streak insights."
+            action={{ label: 'Log First Trade', onClick: () => { try { haptic.light(); } catch {} onCta(); } }}
+        />
+        <div className="flex flex-col items-center gap-2 px-6 pb-6 -mt-2 text-center">
             {isFreeTier && (
                 <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${isDarkMode ? 'border-zinc-800 text-zinc-500 bg-zinc-900/40' : 'border-slate-200 text-slate-500 bg-slate-50'}`}>Free plan · unlimited demo preview</span>
             )}
+            <p className={`text-[11px] font-medium ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>Takes ~20 seconds — you can edit or delete any time.</p>
         </div>
-        <p className={`text-[11px] font-medium mt-3 ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>Takes ~20 seconds — you can edit or delete any time.</p>
     </div>
 );
 
@@ -388,19 +383,19 @@ const EconomicCalendarWidget = ({ isDarkMode }: { isDarkMode: boolean }) => {
                 <div className="flex items-center gap-1 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800 self-start sm:self-auto flex-wrap">
                     <button
                         onClick={() => { try { haptic.selection(); } catch {} setImpactFilter('all'); }}
-                        className={`px-2.5 py-1.5 min-h-[30px] text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'all' ? 'bg-sky-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                        className={`px-2.5 py-1.5 min-h-[44px] sm:min-h-[30px] min-w-[44px] sm:min-w-0 text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'all' ? 'bg-sky-500 text-white' : 'text-zinc-400 hover:text-white'}`}
                     >
                         ALL
                     </button>
                     <button
                         onClick={() => { try { haptic.selection(); } catch {} setImpactFilter('med-high'); }}
-                        className={`px-2.5 py-1.5 min-h-[30px] text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'med-high' ? 'bg-amber-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                        className={`px-2.5 py-1.5 min-h-[44px] sm:min-h-[30px] min-w-[44px] sm:min-w-0 text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'med-high' ? 'bg-amber-500 text-white' : 'text-zinc-400 hover:text-white'}`}
                     >
                         MED+HIGH
                     </button>
                     <button
                         onClick={() => { try { haptic.selection(); } catch {} setImpactFilter('high'); }}
-                        className={`px-2.5 py-1.5 min-h-[30px] text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'high' ? 'bg-rose-500 text-white' : 'text-zinc-400 hover:text-white'}`}
+                        className={`px-2.5 py-1.5 min-h-[44px] sm:min-h-[30px] min-w-[44px] sm:min-w-0 text-[10px] font-black rounded-lg transition-all touch-manipulation ${impactFilter === 'high' ? 'bg-rose-500 text-white' : 'text-zinc-400 hover:text-white'}`}
                     >
                         HIGH ONLY
                     </button>

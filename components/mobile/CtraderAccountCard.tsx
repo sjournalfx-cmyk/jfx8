@@ -289,6 +289,7 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
                         liveAsk={tick?.ask}
                         onClose={handleClosePosition}
                         onSaveSltp={handleSaveSltp}
+                        onReconnect={onGoConnect}
                       />
                     );
                   })}

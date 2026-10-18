@@ -656,14 +656,14 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
         <div className="h-full flex flex-col">
             <div className={`flex flex-col md:flex-row md:items-center justify-between px-4 py-2.5 gap-3 border-b shrink-0 ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-100 bg-white'}`}>
                 <div className="flex items-center gap-3 order-2 md:order-1 w-full md:w-auto justify-between md:justify-start">
-                    <div className={`flex-1 flex items-center justify-center p-0.5 rounded-lg border h-[30px] ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-slate-50 border-slate-200'}`}>
-                        <button onClick={prev} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center ${isDarkMode ? 'hover:bg-white hover:bg-opacity-10 text-zinc-400' : 'hover:bg-black hover:bg-opacity-10 text-slate-500'}`}><ChevronLeft size={12} /></button>
+                    <div className={`flex-1 flex items-center justify-center p-0.5 rounded-lg border min-h-[44px] sm:min-h-0 sm:h-[30px] ${isDarkMode ? 'bg-[#000000] border-[#27272a]' : 'bg-slate-50 border-slate-200'}`}>
+                        <button onClick={prev} aria-label="Previous period" className={`min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 touch-manipulation px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center ${isDarkMode ? 'hover:bg-white hover:bg-opacity-10 text-zinc-400' : 'hover:bg-black hover:bg-opacity-10 text-slate-500'}`}><ChevronLeft size={12} /></button>
                         <span className={`w-32 text-center font-bold text-[11px] ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{mode === 'month' ? currentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : year}</span>
-                        <button onClick={next} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center ${isDarkMode ? 'hover:bg-white hover:bg-opacity-10 text-zinc-400' : 'hover:bg-black hover:bg-opacity-10 text-slate-500'}`}><ChevronRight size={12} /></button>
+                        <button onClick={next} aria-label="Next period" className={`min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 touch-manipulation px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center justify-center ${isDarkMode ? 'hover:bg-white hover:bg-opacity-10 text-zinc-400' : 'hover:bg-black hover:bg-opacity-10 text-slate-500'}`}><ChevronRight size={12} /></button>
                     </div>
-                    <div className={`flex-1 flex rounded-lg border overflow-hidden p-0.5 gap-0.5 h-[30px] items-center justify-center ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-slate-50'}`}>
-                         <button onClick={() => setMode('month')} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'month' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Month</button>
-                         <button onClick={() => setMode('year')} className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'year' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Year</button>
+                    <div className={`flex-1 flex rounded-lg border overflow-hidden p-0.5 gap-0.5 min-h-[44px] sm:min-h-0 sm:h-[30px] items-center justify-center ${isDarkMode ? 'border-[#27272a] bg-[#000000]' : 'border-slate-200 bg-slate-50'}`}>
+                         <button onClick={() => setMode('month')} className={`min-h-[44px] sm:min-h-0 touch-manipulation px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'month' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Month</button>
+                         <button onClick={() => setMode('year')} className={`min-h-[44px] sm:min-h-0 touch-manipulation px-2.5 py-1 rounded text-[11px] font-bold transition-all ${mode === 'year' ? (isDarkMode ? 'bg-black text-white shadow' : 'bg-white text-slate-900 shadow') : 'text-zinc-500'}`}>Year</button>
                     </div>
                 </div>
                 {mode === 'month' && (
@@ -875,7 +875,7 @@ const CalendarView = ({ isDarkMode, trades, userProfile, onSelectTrade }: { isDa
                                 type="button"
                                 aria-label="Close day trades"
                                 onClick={() => setSelectedDateStr(null)}
-                                className={`w-9 h-9 min-w-[36px] rounded-full flex items-center justify-center active:scale-95 transition-all ${isDarkMode ? 'bg-white/[0.06] text-zinc-300' : 'bg-slate-100 text-slate-600'}`}
+                                className={`min-h-[44px] min-w-[44px] touch-manipulation rounded-full flex items-center justify-center active:scale-95 transition-all ${isDarkMode ? 'bg-white/[0.06] text-zinc-300' : 'bg-slate-100 text-slate-600'}`}
                             >
                                 <X size={16} />
                             </button>
@@ -938,7 +938,7 @@ const MobileTradeCard: React.FC<{ trade: Trade; onToggle: () => void; isSelected
                 <div className="absolute left-0 top-0 bottom-0 w-[76px] flex items-center justify-start pl-1">
                     <button
                         aria-label="Delete trade"
-                        onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this trade?')) { onDelete(trade.id); } }}
+                        onClick={(e) => { e.stopPropagation(); onDelete(trade.id); }}
                         className="w-[60px] h-[44px] rounded-xl bg-[#ff4f64] text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
                     >
                         <Trash2 size={20} />
@@ -980,9 +980,11 @@ const MobileTradeCard: React.FC<{ trade: Trade; onToggle: () => void; isSelected
                 <button
                     aria-label={isSelected ? 'Untick trade' : 'Tick trade'}
                     onClick={(e) => { e.stopPropagation(); touchMoved.current = true; setSwipeX(0); onSelect(); }}
-                    className={`w-[18px] h-[18px] rounded-full border flex items-center justify-center shrink-0 mr-2.5 transition-all active:scale-90 ${isSelected ? 'bg-violet-600 border-violet-600 text-white shadow-[0_2px_8px_rgba(124,58,237,0.35)]' : (isDarkMode ? 'border-zinc-700 bg-white/[0.03] text-transparent' : 'border-slate-300 bg-slate-50 text-transparent')}`}
+                    className="min-h-[44px] min-w-[44px] touch-manipulation rounded-full flex items-center justify-center shrink-0 mr-1 transition-all active:scale-90"
                 >
-                    <Check size={8} strokeWidth={4} className={isSelected ? 'opacity-100' : 'opacity-0'} />
+                    <span className={`w-[18px] h-[18px] rounded-full border flex items-center justify-center transition-all ${isSelected ? 'bg-violet-600 border-violet-600 text-white shadow-[0_2px_8px_rgba(124,58,237,0.35)]' : (isDarkMode ? 'border-zinc-700 bg-white/[0.03] text-transparent' : 'border-slate-300 bg-slate-50 text-transparent')}`}>
+                        <Check size={8} strokeWidth={4} className={isSelected ? 'opacity-100' : 'opacity-0'} />
+                    </span>
                 </button>
             )}
             <div className="min-w-0 pr-3 flex-1">

@@ -2466,7 +2466,7 @@ ${strategyProfile.whyITrade}`;
       <header className={`shrink-0 flex items-center justify-between px-3 h-[52px] border-b ${isDarkMode ? 'bg-[#000000] border-zinc-900' : 'bg-white border-slate-200'}`}>
         <div className="flex items-center gap-2 min-w-0">
           {onBackToHome && (
-            <button onClick={onBackToHome} className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'hover:bg-zinc-900 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500'}`} aria-label="Back to home">
+            <button onClick={onBackToHome} className={`min-h-[44px] min-w-[44px] touch-manipulation rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'hover:bg-zinc-900 text-zinc-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500'}`} aria-label="Back to home">
               <ArrowLeft size={18} />
             </button>
           )}
@@ -3126,7 +3126,8 @@ ${strategyProfile.whyITrade}`;
                   </h3>
                   <button 
                     onClick={() => setShowFeaturesMenu(false)}
-                    className={`p-1 rounded-lg ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500'}`}
+                    aria-label="Close features menu"
+                    className={`min-h-[44px] min-w-[44px] touch-manipulation p-1 rounded-lg flex items-center justify-center ${isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-200 text-slate-500'}`}
                   >
                     <X size={14} />
                   </button>
@@ -3399,7 +3400,7 @@ ${strategyProfile.whyITrade}`;
               <div className="flex justify-center pt-3 pb-2"><div className={`w-10 h-1 rounded-full ${isDarkMode ? 'bg-zinc-700' : 'bg-slate-200'}`} /></div>
               <div className="px-5 pb-3 flex items-center justify-between">
                 <h3 className={`text-[15px] font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Model</h3>
-                <button onClick={() => setShowModelDrawer(false)} className={`w-8 h-8 rounded-full grid place-items-center ${isDarkMode ? 'bg-zinc-800 text-zinc-400' : 'bg-slate-100 text-slate-500'}`}><X size={14} /></button>
+                <button onClick={() => setShowModelDrawer(false)} className={`min-h-[44px] min-w-[44px] touch-manipulation rounded-full grid place-items-center ${isDarkMode ? 'bg-zinc-800 text-zinc-400' : 'bg-slate-100 text-slate-500'}`} aria-label="Close model settings"><X size={14} /></button>
               </div>
               <p className={`px-5 pb-3 text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>Switch any time. Applies to next message.</p>
               <div className="px-3 pb-6 overflow-y-auto space-y-2">

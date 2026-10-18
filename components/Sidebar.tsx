@@ -128,11 +128,17 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'ai-chat', icon: <IconMessage size={18} />, label: 'AI Assistant', description: 'Get AI trading insights' },
   ];
 
-  const filteredMenuItems = menuItems.filter(item => {
-    if (item.id === 'log-trade' && !isBasicTier) return false;
+  // Section grouping for the primary nav. Ids must match `menuItems`; the
+  // log-trade gate (hidden for non-basic tiers) still applies per item.
+  const menuGroups: { label: string; ids: string[] }[] = [
+    { label: 'Trade', ids: ['dashboard', 'log-trade', 'history', 'ea-setup'] },
+    { label: 'Review', ids: ['analytics', 'notes', 'portfolios'] },
+    { label: 'Tools', ids: ['charts', 'backtest-lab', 'ai-chat'] },
+  ];
 
-    return true;
-  });
+  const filteredMenuIds = menuItems
+    .filter(item => item.id !== 'log-trade' || isBasicTier)
+    .map(item => item.id);
 
   const systemItems = [
     {
@@ -270,39 +276,53 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Main Navigation */}
       <motion.nav 
         layout="position"
-        className="flex-1 flex flex-col justify-center w-full overflow-y-visible px-[18px]"
+        className="flex-1 flex flex-col justify-center w-full overflow-y-visible px-[18px] gap-3"
       >
-        <div className="w-full">
-          <FloatingDock
-            items={filteredMenuItems.map(item => ({
-              title: item.label,
-              description: item.description,
-              icon: (
-                <div className="relative">
-                  {item.icon}
-                  {isBasicTier && item.restricted && (
-                    <div className="absolute -top-1.5 -right-1.5 bg-[#FF4F01] rounded-full p-0.5 shadow-sm">
-                      <Lock size={8} fill="white" className="text-white" />
+        {menuGroups.map(group => {
+          const groupItems = group.ids
+            .filter(id => filteredMenuIds.includes(id))
+            .map(id => menuItems.find(item => item.id === id))
+            .filter((item): item is typeof menuItems[number] => Boolean(item));
+          if (groupItems.length === 0) return null;
+          return (
+            <div key={group.label} className="w-full">
+              {isExpanded && (
+                <p className={`px-2 mb-1 text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>
+                  {group.label}
+                </p>
+              )}
+              <FloatingDock
+                items={groupItems.map(item => ({
+                  title: item.label,
+                  description: item.description,
+                  icon: (
+                    <div className="relative">
+                      {item.icon}
+                      {isBasicTier && item.restricted && (
+                        <div className="absolute -top-1.5 -right-1.5 bg-[#FF4F01] rounded-full p-0.5 shadow-sm">
+                          <Lock size={8} fill="white" className="text-white" />
+                        </div>
+                      )}
+                      {item.id === 'ea-setup' && !isBasicTier && userProfile?.syncMethod === 'EA_CONNECT' && !userProfile?.eaConnected && (
+                        <div className="absolute w-1.5 h-1.5 bg-rose-500 rounded-full border border-white dark:border-[#000000] animate-bounce -top-0.5 -right-0.5" />
+                      )}
                     </div>
-                  )}
-                  {item.id === 'ea-setup' && !isBasicTier && userProfile?.syncMethod === 'EA_CONNECT' && !userProfile?.eaConnected && (
-                    <div className="absolute w-1.5 h-1.5 bg-rose-500 rounded-full border border-white dark:border-[#000000] animate-bounce -top-0.5 -right-0.5" />
-                  )}
-                </div>
-              ),
-              onClick: () => onViewChange(item.id),
-              isActive: currentView === item.id,
-              isLocked: isBasicTier && item.restricted,
-              isDisabled: item.id === 'ea-setup' && connectionsDisabled,
-              disabledReason: item.id === 'ea-setup' && connectionsDisabled
-                ? 'Needs a cTrader or Desktop Bridge portfolio'
-                : undefined,
-              type: 'item' as const
-            }))}
-            desktopClassName="bg-transparent border-none px-0"
-            showLabels={isExpanded}
-          />
-        </div>
+                  ),
+                  onClick: () => onViewChange(item.id),
+                  isActive: currentView === item.id,
+                  isLocked: isBasicTier && item.restricted,
+                  isDisabled: item.id === 'ea-setup' && connectionsDisabled,
+                  disabledReason: item.id === 'ea-setup' && connectionsDisabled
+                    ? 'Needs a cTrader or Desktop Bridge portfolio'
+                    : undefined,
+                  type: 'item' as const
+                }))}
+                desktopClassName="bg-transparent border-none px-0"
+                showLabels={isExpanded}
+              />
+            </div>
+          );
+        })}
       </motion.nav>
 
       {/* System Actions (Bottom Fixed) */}

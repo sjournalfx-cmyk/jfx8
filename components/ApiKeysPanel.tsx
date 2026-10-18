@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Check, Copy, Download, KeyRound, Plus, RefreshCw, Terminal, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import ConfirmationModal from './ConfirmationModal';
 
 type ApiKey = { id: string; name: string; key_prefix: string; scopes: string[]; last_used_at: string | null; expires_at: string | null; created_at: string; status: 'active' | 'revoked'; revoked_at: string | null };
 type Scope = 'trades:read' | 'trades:write' | 'notes:read' | 'notes:write' | 'bridge:read' | 'me:read';
@@ -247,6 +248,7 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
   const [testKeyInput, setTestKeyInput] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [pendingRevoke, setPendingRevoke] = useState<ApiKey | null>(null);
 
   const cardClass = isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white';
   const inputClass = isDarkMode ? 'border-white/[0.1] bg-white/[0.04] text-white' : 'border-slate-200 bg-white text-slate-900';
@@ -271,8 +273,10 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
     if (error) return setError(error.message);
     setRawKey(data?.raw_key ?? null); setCreating(false); setName(''); setScopes([...DEFAULT_SCOPES]); await load();
   };
-  const revoke = async (key: ApiKey) => {
-    if (!window.confirm(`Revoke “${key.name}”? This permanently deletes the live API key and cannot be undone.`)) return;
+  const confirmRevoke = async () => {
+    const key = pendingRevoke;
+    if (!key) return;
+    setPendingRevoke(null);
     const { data, error } = await supabase.rpc('revoke_api_key', { p_key_id: key.id });
     if (error) return setError(error.message);
     if (!data) return setError('The key could not be revoked. It may already be inactive.');
@@ -360,7 +364,8 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
     window.setTimeout(() => setCopiedGuide(false), 2000);
   };
 
-  return <section className={`rounded-3xl border p-5 ${cardClass}`}>
+  return <>
+  <section className={`rounded-3xl border p-5 ${cardClass}`}>
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <div className="flex items-center gap-2"><KeyRound size={17} className="text-[#FF4F01]" /><h3 className="text-sm font-black">Personal API Keys</h3></div>
@@ -392,7 +397,7 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
           <div className="flex flex-wrap gap-1">{key.scopes.map(scope => <span key={scope} className="rounded-md bg-[#FF4F01]/10 px-1.5 py-0.5 text-[9px] font-bold text-[#FF4F01]">{scope}</span>)}</div>
           <span className="opacity-60">{formatDate(key.created_at)}</span><span className="opacity-60">{formatDate(key.last_used_at)}</span>
           <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-wide ${key.status === 'revoked' ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'}`}>{key.status}</span>
-          {key.status === 'active' ? <button onClick={() => void revoke(key)} title="Revoke key" className="rounded-lg p-2 text-rose-500 hover:bg-rose-500/10"><Trash2 size={15} /></button> : <span />}
+          {key.status === 'active' ? <button onClick={() => setPendingRevoke(key)} title="Revoke key" className="rounded-lg p-2 text-rose-500 hover:bg-rose-500/10"><Trash2 size={15} /></button> : <span />}
         </div>)}
       </div>}
     </div>
@@ -587,5 +592,16 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
         </button>
       </div>
     </div>, document.body)}
-  </section>;
+  </section>
+  <ConfirmationModal
+    isOpen={pendingRevoke !== null}
+    title="Revoke API key?"
+    description={pendingRevoke ? `Revoke “${pendingRevoke.name}”? This permanently deletes the live API key and cannot be undone.` : ''}
+    confirmText="Revoke"
+    variant="danger"
+    onConfirm={confirmRevoke}
+    onCancel={() => setPendingRevoke(null)}
+    isDarkMode={isDarkMode}
+  />
+  </>;
 }

@@ -189,6 +189,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
   // Total steps for UI display
   const totalStepsUI = 6;
 
+  const stepsLeft = Math.max(0, totalStepsUI - step);
+  const stepsLeftLabel = stepsLeft === 0
+    ? 'Final step'
+    : `${stepsLeft} quick step${stepsLeft === 1 ? '' : 's'} left`;
+
   const currentAvatars = formData.plan === 'FREE TIER (JOURNALER)' ? freeAvatars : 
                         formData.plan === 'PRO TIER (ANALYSTS)' ? proAvatars : premiumAvatars;
 
@@ -206,14 +211,17 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
         {/* Header Navigation */}
         <div className="flex items-center justify-between mb-12">
-          <div className="flex gap-1.5 items-center">
-            {[1, 2, 3, 4, 5, 6].map((s) => (
-              <div
-                key={s}
-                className={`h-2.5 rounded-full transition-all duration-300 ${s === step ? 'w-8 bg-[#FF4F01]' : s < step ? 'w-2.5 bg-[#FF4F01]/40' : 'w-2.5 bg-zinc-200 dark:bg-black'
-                  }`}
-              />
-            ))}
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-1.5 items-center">
+              {[1, 2, 3, 4, 5, 6].map((s) => (
+                <div
+                  key={s}
+                  className={`h-2.5 rounded-full transition-all duration-300 ${s === step ? 'w-8 bg-[#FF4F01]' : s < step ? 'w-2.5 bg-[#FF4F01]/40' : 'w-2.5 bg-zinc-200 dark:bg-black'
+                    }`}
+                />
+              ))}
+            </div>
+            <p className="text-[11px] font-bold uppercase tracking-widest opacity-50">{stepsLeftLabel}</p>
           </div>
           <div className="flex items-center gap-4">
             {step === 6 && (
@@ -231,7 +239,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
         <div className="flex-1 flex flex-col">
           {step === 1 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-2xl">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Welcome to JFX-JOURNAL</h1>
+              <h1 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Welcome to JFX-JOURNAL</h1>
               <p className={`text-lg mb-12 ${subTextColor}`}>Let's start with your identity and country to tailor the regional experience.</p>
 
               <div className="space-y-8">
@@ -260,7 +268,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
           {step === 2 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Trading Persona</h1>
+              <h1 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Trading Persona</h1>
               <p className={`text-lg mb-12 ${subTextColor}`}>Help us understand your trading background and style.</p>
 
               <div className="space-y-12">
@@ -342,7 +350,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
           {step === 3 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Terms of Service & Privacy Policy</h1>
+              <h1 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Terms of Service & Privacy Policy</h1>
               <p className={`text-lg mb-8 ${subTextColor}`}>Please review and accept our terms and privacy policy to continue.</p>
 
               <div className="space-y-4">
@@ -375,7 +383,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
           {step === 4 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Choose your plan</h1>
+              <h1 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Choose your plan</h1>
               <p className={`text-lg mb-12 ${subTextColor}`}>Select a plan to access professional metrics. You can always change later.</p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -473,7 +481,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
           {step === 5 && formData.plan !== 'PREMIUM (MASTERS)' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Account Configuration</h1>
+              <h1 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Account Configuration</h1>
               <p className={`text-lg mb-12 ${subTextColor}`}>Define your primary trading account details and base currency.</p>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-10">
@@ -529,7 +537,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ isDarkMode, onComplete, onExplo
 
           {step === 6 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl">
-              <h1 className="text-5xl font-bold tracking-tight mb-4">Choose Your Avatar</h1>
+              <h1 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Choose Your Avatar</h1>
               <p className={`text-lg mb-8 ${subTextColor}`}>Select a persona that represents your trading style.</p>
 
               <div className="flex items-center gap-2 mb-6">

@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Trade } from '../../types';
-import { HelpCircle, BarChart2 } from 'lucide-react';
+import { HelpCircle } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
+import { EmptyState } from '../ui/Skeleton';
 
 interface RevenueMatrixWidgetProps {
   trades?: Trade[];
   isDarkMode: boolean;
   currencySymbol?: string;
   onInfoClick?: () => void;
+  onCta?: () => void;
 }
 
 interface MatrixPeriodData {
@@ -42,7 +44,8 @@ export function RevenueMatrixWidget({
   trades = [],
   isDarkMode,
   currencySymbol = '$',
-  onInfoClick
+  onInfoClick,
+  onCta
 }: RevenueMatrixWidgetProps) {
   const [period, setPeriod] = useState<'Weekly' | 'Monthly' | 'Yearly'>('Monthly');
   const [activeMonthIndex, setActiveMonthIndex] = useState<number>(5); // Default JUN (index 5)
@@ -226,12 +229,14 @@ export function RevenueMatrixWidget({
       </div>
 
       {hasNoData ? (
-        <div className={`flex flex-col items-center justify-center py-16 px-6 rounded-2xl border border-dashed text-center ${isDarkMode ? 'border-zinc-800 bg-zinc-900/30 text-zinc-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${isDarkMode ? 'bg-zinc-900 text-zinc-500' : 'bg-slate-100 text-slate-400'}`}>
-            <BarChart2 size={22} />
-          </div>
-          <p className="text-sm font-black uppercase tracking-widest">No Data Available</p>
-          <p className="text-xs mt-1.5 max-w-[320px] leading-relaxed opacity-70">No closed trades yet. Log a trade to see your Gross Gains vs Gross Losses matrix here.</p>
+        <div className="min-h-[220px] flex flex-col justify-center">
+          <EmptyState
+            isDarkMode={isDarkMode}
+            type="analytics"
+            title="No data available"
+            description="No closed trades yet. Log a trade to see your Gross Gains vs Gross Losses matrix here."
+            action={onCta ? { label: 'Log a Trade', onClick: onCta } : undefined}
+          />
         </div>
       ) : (
         <>
@@ -270,9 +275,9 @@ export function RevenueMatrixWidget({
         </div>
       </div>
 
-      {/* Chart Matrix Container */}
-      <div className="relative flex flex-col w-full flex-1 justify-end pt-1 pb-1 overflow-visible">
-        <div className="w-full relative flex-1 flex flex-col justify-end">
+      {/* Chart Matrix Container — horizontal scroll on phone, unchanged on desktop */}
+      <div className="relative flex flex-col w-full flex-1 justify-end pt-1 pb-1 overflow-x-auto sm:overflow-visible">
+        <div className="w-full min-w-[520px] sm:min-w-0 relative flex-1 flex flex-col justify-end">
           {/* Matrix Grid Area */}
           <div className="flex w-full items-stretch flex-1">
             {/* Y-Axis Labels Column - Aligned 1:1 with the 18 blocks */}
@@ -337,6 +342,7 @@ export function RevenueMatrixWidget({
                   <div
                     key={colIdx}
                     onMouseEnter={() => setHoveredIndex(mIdx)}
+                    onTouchStart={() => setHoveredIndex(mIdx)}
                     onMouseLeave={() => setHoveredIndex(null)}
                     onClick={() => setActiveMonthIndex(mIdx)}
                     className={`relative flex flex-col justify-end items-center h-full cursor-pointer group pb-0.5 w-full transition-opacity ${
@@ -410,6 +416,7 @@ export function RevenueMatrixWidget({
                     <button
                       onClick={() => setActiveMonthIndex(mIdx)}
                       onMouseEnter={() => setHoveredIndex(mIdx)}
+                      onTouchStart={() => setHoveredIndex(mIdx)}
                       onMouseLeave={() => setHoveredIndex(null)}
                       className={`text-[10px] uppercase tracking-wider font-bold transition-colors whitespace-nowrap ${
                         isSelected

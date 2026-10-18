@@ -65,6 +65,9 @@ const TYPE_META: Record<CashTransactionType, { label: string; plural: string; co
 
 const CTRADER_MARKER = /\[CW:(\d+)\]/;
 
+// How long a deleted row stays undoable before the real delete commits.
+const UNDO_WINDOW_MS = 5000;
+
 type CashTransactionFormData = Omit<Partial<CashTransaction>, 'amount'> & {
   amount: string;
   type: CashTransactionType;
@@ -100,6 +103,9 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
   const [hiddenSeries, setHiddenSeries] = useState<string[]>([]);
   const [ctraderSyncing, setCtraderSyncing] = useState(false);
   const [ctraderSyncResult, setCtraderSyncResult] = useState<{ added: number; at: Date } | null>(null);
+  // Pending deletes: the row is hidden instantly, the real delete is delayed
+  // for an Undo window (same idea as handleDeleteTrades in App.tsx).
+  const pendingDeleteTimersRef = useRef<Map<string, number>>(new Map());
   const autoSyncAttemptedRef = useRef(false);
   const { addToast } = useToast();
 
@@ -385,24 +391,61 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
     }
   };
 
-  const handleDeleteTransaction = async (id: string) => {
-    if (deletedIds.has(id)) return; // already deleting
-    if (!confirm('Are you sure you want to delete this transaction?')) return;
-
-    // Hide instantly; dataService tombstones it so no refetch race can
-    // resurrect the row anywhere in the app.
-    setDeletedIds(prev => new Set(prev).add(id));
-
+  // Commit the actual delete. Runs only after the Undo window elapses; the
+  // row data is held locally until then, so cancelling costs nothing.
+  const commitDeleteTransaction = async (transaction: CashTransaction) => {
+    pendingDeleteTimersRef.current.delete(transaction.id);
     try {
-      await dataService.deleteCashTransaction(id);
-      if (mountedRef.current) {
-        addToast({ type: 'success', title: 'Deleted', message: 'Transaction removed.', duration: 3000 });
-      }
+      await dataService.deleteCashTransaction(transaction.id);
     } catch (error) {
       console.error('Failed to delete transaction:', error);
+      // Rollback the optimistic hide so a failed delete never looks like data loss.
       if (mountedRef.current) {
-        addToast({ type: 'warning', title: 'Sign-in Required', message: 'Please sign in again to finish deleting.', duration: 5000 });
+        setDeletedIds(prev => {
+          const next = new Set(prev);
+          next.delete(transaction.id);
+          return next;
+        });
+        addToast({ type: 'warning', title: 'Sign-in Required', message: 'Please sign in again — the transaction was restored.', duration: 5000 });
       }
+    }
+  };
+
+  const handleDeleteTransaction = (transaction: CashTransaction) => {
+    const id = transaction.id;
+    if (deletedIds.has(id) || pendingDeleteTimersRef.current.has(id)) return; // already deleting
+
+    // Hide instantly; the real delete waits so Undo can cancel it.
+    setDeletedIds(prev => new Set(prev).add(id));
+
+    const timer = window.setTimeout(() => {
+      void commitDeleteTransaction(transaction);
+    }, UNDO_WINDOW_MS);
+    pendingDeleteTimersRef.current.set(id, timer);
+
+    if (mountedRef.current) {
+      addToast({
+        type: 'info',
+        title: 'Transaction Deleted',
+        message: `${transaction.type} of ${currencySymbol}${Math.abs(Number(transaction.amount) || 0).toFixed(2)} on ${transaction.date} removed.`,
+        duration: UNDO_WINDOW_MS + 1000,
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            const pending = pendingDeleteTimersRef.current.get(id);
+            if (pending !== undefined) {
+              window.clearTimeout(pending);
+              pendingDeleteTimersRef.current.delete(id);
+            }
+            setDeletedIds(prev => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            addToast({ type: 'success', title: 'Deletion Undone', message: 'Transaction restored.', duration: 3000 });
+          },
+        },
+      });
     }
   };
 
@@ -1044,7 +1087,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                           <Edit3 size={15} />
                         </button>
                         <button
-                          onClick={() => handleDeleteTransaction(t.id)}
+                          onClick={() => handleDeleteTransaction(t)}
                           aria-label="Delete transaction"
                           className={clsx(
                             "min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl",
@@ -1101,7 +1144,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
                           <Edit3 size={14} />
                         </button>
                         <button
-                          onClick={() => handleDeleteTransaction(t.id)}
+                          onClick={() => handleDeleteTransaction(t)}
                           className={clsx(
                             "p-2 rounded-lg",
                             isDarkMode ? "hover:bg-black text-zinc-400 hover:text-rose-500" : "hover:bg-slate-100 text-slate-500 hover:text-rose-500"
@@ -1179,6 +1222,7 @@ export const CashTransactionsView: React.FC<CashTransactionsViewProps> = ({ isDa
           </div>
         </div>
       )}
+
   </div>
 );
 };

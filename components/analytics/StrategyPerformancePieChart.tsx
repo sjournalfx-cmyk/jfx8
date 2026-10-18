@@ -19,15 +19,17 @@ import {
 } from "../ui/chart"
 import { Select } from "../Select"
 import { Tooltip } from "../ui/Tooltip"
+import { EmptyState } from "../ui/Skeleton"
 
 interface StrategyEfficiencyMinimalProps {
   trades: Trade[]
   isDarkMode: boolean;
   currencySymbol: string;
   onInfoClick?: () => void;
+  onCta?: () => void;
 }
 
-export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick }: StrategyEfficiencyMinimalProps) {
+export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencySymbol = '$', onInfoClick, onCta }: StrategyEfficiencyMinimalProps) {
   const id = "strategy-performance-pie"
   
   // 1. Get all unique strategies to establish consistent colors
@@ -149,11 +151,14 @@ export function StrategyPerformancePieChart({ trades = [], isDarkMode, currencyS
 
   if (strategyData.length === 0) {
     return (
-      <Card className="flex h-[320px] flex-col items-center justify-center !bg-[#0a0a0a] !border-0 text-white" isDarkMode={isDarkMode}>
-        <CardHeader className="text-center">
-          <CardTitle>Strategy Distribution</CardTitle>
-          <CardDescription>No strategy data available. Tag your trades to see performance.</CardDescription>
-        </CardHeader>
+      <Card className="flex min-h-[320px] flex-col justify-center !bg-[#0a0a0a] !border-0 text-white" isDarkMode={isDarkMode}>
+        <EmptyState
+          isDarkMode={isDarkMode}
+          type="analytics"
+          title="No strategy data yet"
+          description="Tag your trades with a strategy to compare performance."
+          action={onCta ? { label: 'Log a Trade', onClick: onCta } : undefined}
+        />
       </Card>
     );
   }

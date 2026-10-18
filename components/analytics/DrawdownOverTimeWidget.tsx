@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { HelpCircle } from 'lucide-react';
 import { Trade, UserProfile } from '../../types';
 import { Tooltip } from '../ui/Tooltip';
+import { EmptyState } from '../ui/Skeleton';
 import { sortTradesChronologically } from '../../lib/analyticsUtils';
 
 interface DrawdownOverTimeWidgetProps {
@@ -10,9 +11,10 @@ interface DrawdownOverTimeWidgetProps {
     userProfile: UserProfile;
     startingBalance?: number;
     onInfoClick?: () => void;
+    onCta?: () => void;
 }
 
-export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ trades = [], isDarkMode, userProfile, startingBalance, onInfoClick }) => {
+export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ trades = [], isDarkMode, userProfile, startingBalance, onInfoClick, onCta }) => {
     const [hoverIndex, setHoverIndex] = useState<number | null>(null);
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
@@ -97,7 +99,15 @@ export const DrawdownOverTimeWidget: React.FC<DrawdownOverTimeWidgetProps> = ({ 
                 </div>
             </div>
             {drawdownData.length < 2 ? (
-                <div className="flex-1 flex items-center justify-center opacity-30 text-sm">Insufficient data</div>
+                <div className="flex-1 flex flex-col justify-center min-h-0">
+                    <EmptyState
+                        isDarkMode={isDarkMode}
+                        type="analytics"
+                        title="Not enough data yet"
+                        description="Log at least two trades to visualize your drawdown over time."
+                        action={onCta ? { label: 'Log a Trade', onClick: onCta } : undefined}
+                    />
+                </div>
             ) : (
                 <div className="flex-1 min-h-0 flex items-center sm:items-stretch">
                   <div className="relative w-full sm:flex-1 sm:flex sm:flex-col">

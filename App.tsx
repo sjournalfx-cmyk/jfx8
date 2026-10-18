@@ -16,6 +16,7 @@ import Settings from './components/Settings';
 import EASetup from './components/EASetup';
 import ConfirmationModal from './components/ConfirmationModal';
 import QuickLogModal from './components/QuickLogModal';
+import TradeRecapSheet from './components/TradeRecapSheet';
 import ErrorBoundary from './components/ErrorBoundary';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from './lib/constants';
 import { useLocalStorage } from './hooks/useLocalStorage';
@@ -27,11 +28,10 @@ import { usePortfolios } from './hooks/usePortfolios';
 import { useCtraderLiveBalance } from './hooks/useCtraderLiveBalance';
 import { modalResearchService } from './services/nvidiaAiService';
 import { ToastProvider, useToast } from './components/ui/Toast';
-import { OfflineBlocker, useNetworkStatus } from './components/OfflineBlocker';
+import { OfflineBanner, useNetworkStatus } from './components/OfflineBlocker';
 import { BrandedLoader } from './components/ui/BrandedLoader';
 import { MobileBlocker } from './components/ui/MobileBlocker';
 import { MobileLayout } from './components/mobile/MobileLayout';
-import { MobilePortfoliosView } from './components/mobile/MobilePortfoliosView';
 import { MOBILE_ENABLED, IS_CAPACITOR } from './lib/featureFlags';
 import { useAuth } from './hooks/useAuth';
 import { useData } from './hooks/useData';
@@ -46,7 +46,14 @@ import { resolveBridgeBackedBalance } from './lib/bridgeBalance';
 // Lazy load heavy components for performance
 const Analytics = safeLazy(() => import('./components/Analytics'));
 const AIChat = safeLazy(() => import('./components/AIChat'));
-const BacktestLab = safeLazy(() => import('./components/BacktestLab'));
+// H-2 guard: ./components/BacktestLab does not exist in jfx8 (jfx-mobile's
+// copy needs CustomChart + lib/orientation, absent here, so a verbatim copy
+// would not build). Fallback until a web-safe entry exists.
+const BacktestLab: React.FC<any> = () => (
+  <div className="grid place-items-center p-8 text-center">
+    <p className="text-sm font-bold opacity-60">Backtest Lab is unavailable in this build.</p>
+  </div>
+);
 const ChartGrid = safeLazy(() => import('./components/ChartGrid'));
 const Notes = safeLazy(() => import('./components/Notes'));
 
@@ -58,12 +65,20 @@ const AppContent: React.FC = () => {
   const { addToast } = useToast();
   const [isDemoMode, setIsDemoMode] = useLocalStorage<boolean>('jfx_demo_mode', false);
   const [showBetaSplash, setShowBetaSplash] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      // Suppress splash immediately when returning from cTrader OAuth redirect
-      if (params.has('code') || window.location.search.includes('ctrader_token')) {
-        return false;
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        // Suppress splash immediately when returning from cTrader OAuth redirect
+        if (params.has('code') || window.location.search.includes('ctrader_token')) {
+          return false;
+        }
+        // Persisted dismissal — don't re-show on every reload.
+        if (window.localStorage.getItem('jfx_beta_seen_v1')) {
+          return false;
+        }
       }
+    } catch {
+      // Storage unavailable (e.g. private mode) — fall through to showing it.
     }
     return true;
   });
@@ -534,6 +549,8 @@ const {
   // UI State
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isQuickLogOpen, setIsQuickLogOpen] = useState(false);
+  // Peak-moment recap shown after a NEW trade is saved (edits keep the toast).
+  const [recapTrade, setRecapTrade] = useState<Trade | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -560,6 +577,13 @@ const {
         const savedTrade = await dataService.updateTrade(trade);
         setTrades(prev => prev.map(t => t.id === savedTrade.id ? savedTrade : t));
         setEditingTrade(null);
+        // Edits keep the lightweight success toast (no recap sheet).
+        addToast({
+          type: 'success',
+          title: 'Trade Updated',
+          message: `${savedTrade.pair || 'Trade'} saved to your journal.`,
+          duration: 4000,
+        });
       } else {
         const sastNow = getSASTDateTime();
         const [year, month] = sastNow.date.split('-').map(Number);
@@ -571,10 +595,17 @@ const {
           const dbTradesThisMonth = await dataService.getMonthlyTradeCount(userId, year, month);
           
           if (dbTradesThisMonth >= features.maxTradesPerMonth) {
+            const resetMonth = month === 12 ? 1 : month + 1;
+            const resetYear = month === 12 ? year + 1 : year;
+            const resetLabel = new Date(Date.UTC(resetYear, resetMonth - 1, 1)).toLocaleDateString('en-US', {
+              month: 'long',
+              day: 'numeric',
+              timeZone: 'UTC',
+            });
             setConfirmModal({
               isOpen: true,
               title: 'Monthly Limit Reached',
-              description: `You have reached the limit of ${features.maxTradesPerMonth} trades per month for the ${currentPlan}. Upgrade your plan for more capacity.`,
+              description: `${dbTradesThisMonth} of ${features.maxTradesPerMonth} trades used this month, resets on ${resetLabel} (SAST). Upgrade your plan for more capacity.`,
               confirmText: 'Upgrade Plan',
               cancelText: 'Maybe Later',
               variant: 'warning',
@@ -590,13 +621,9 @@ const {
         const newTrade = await dataService.addTrade(trade);
         setTrades(prev => [newTrade, ...prev.filter(t => t.id !== newTrade.id)]);
         dataService.logActivity('ADD_TRADE', { pair: newTrade.pair, pnl: newTrade.pnl });
-        addToast({
-          type: 'success',
-          title: 'Trade Logged',
-          message: `${newTrade.pair || 'Trade'} saved to your journal.`,
-          duration: 5000,
-          action: { label: 'View', onClick: () => setCurrentView('history') },
-        });
+        // New trades get the recap sheet instead of only a toast — a peak
+        // moment to capture notes. Edits keep the toast below.
+        setRecapTrade(newTrade);
       }
       setCurrentView('history');
     } catch (error) {
@@ -1253,6 +1280,17 @@ const onLogout = async () => {
     }
   }, [isMobile, activeUserProfile]);
 
+  // §2.3A: auth-callback path reset runs as an effect (hooks live above
+  // every early return). Render below reads state only — no setState in render.
+  useEffect(() => {
+    if (isAuthCallbackPath) {
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({}, '', '/');
+      }
+      setCurrentPath('/');
+    }
+  }, [isAuthCallbackPath]);
+
   if (publicPath === '/privacy') {
     return <PrivacyPolicy />;
   }
@@ -1262,10 +1300,6 @@ const onLogout = async () => {
   }
 
   if (isAuthCallbackPath) {
-    if (typeof window !== 'undefined') {
-      window.history.replaceState({}, '', '/');
-    }
-    setCurrentPath('/');
     return <BrandedLoader />;
   }
 
@@ -1354,7 +1388,12 @@ const onLogout = async () => {
   }
 
   if (showBetaSplash) {
-    return <BetaSplash onContinue={() => setShowBetaSplash(false)} />;
+    return <BetaSplash onContinue={() => {
+      try { window.localStorage.setItem('jfx_beta_seen_v1', '1'); } catch {
+        // Storage unavailable — splash simply shows again next load.
+      }
+      setShowBetaSplash(false);
+    }} />;
   }
 
   const totalPnL = activeTrades.reduce((acc, t) => acc + getSafePnL(t.pnl), 0);
@@ -1407,6 +1446,10 @@ const onLogout = async () => {
     const [tYear, tMonth] = t.date.split('-').map(Number);
     return tMonth === month && tYear === year;
   }).length;
+
+  // Free-tier monthly limit (Infinity for paid plans) used by the usage badge
+  // near the Log Trade entry.
+  const currentPlanFeatures = PLAN_FEATURES[normalizePlan(activeUserProfile?.plan)] || PLAN_FEATURES[APP_CONSTANTS.PLANS.FREE];
 
   const totalNotes = activeNotes.filter(n => !n.isTrashed).length;
   const totalImages = activeTrades.reduce((acc, t) => {
@@ -1488,7 +1531,7 @@ const onLogout = async () => {
           onTradesDeletedBatch={handleTradesDeletedBatch}
           onBrokerTradeAdded={handleBrokerTradeAdded}
           onAddNote={handleAddNote}
-          onUpdateNote={handleUpdateNote}
+          onUpdateNote={async (note: any) => { await handleUpdateNote(note); }}
           onDeleteNote={handleDeleteNote}
           onRestoreNote={handleRestoreNote}
           onUpdateProfile={async (profile: any) => { await handleUpdateProfile(profile); return profile; }}
@@ -1518,6 +1561,7 @@ const onLogout = async () => {
           isLiveBalance={isLiveBalance}
           ctraderAccountId={ctraderAccountId}
           tradesThisMonth={tradesThisMonth}
+          maxTradesPerMonth={currentPlanFeatures.maxTradesPerMonth}
           totalNotes={totalNotes}
           totalImages={totalImages}
           tradesCount={activeTrades.length}
@@ -1609,6 +1653,8 @@ const onLogout = async () => {
                 trades={activeTrades}
                 userProfile={activeUserProfile}
                 isReadOnly={isDemoMode}
+                tradesUsedThisMonth={tradesThisMonth}
+                maxTradesThisMonth={currentPlanFeatures.maxTradesPerMonth}
               />
             )}
             {currentView === 'backtest-lab' && activeUserProfile && (
@@ -1774,6 +1820,8 @@ const onLogout = async () => {
           onSave={handleAddTrade}
           isDarkMode={isDarkMode}
           currencySymbol={activeUserProfile?.currencySymbol || '$'}
+          tradesUsedThisMonth={tradesThisMonth}
+          maxTradesThisMonth={currentPlanFeatures.maxTradesPerMonth}
         />
 
         <ConfirmationModal
@@ -1790,6 +1838,33 @@ const onLogout = async () => {
         />
       </div>
       )}
+
+      {/* Trade recap — peak-moment acknowledgement after a NEW trade saves.
+          Rendered above both the mobile shell and the desktop layout. */}
+      <TradeRecapSheet
+        isOpen={!!recapTrade}
+        trade={recapTrade}
+        trades={activeTrades}
+        currencySymbol={activeUserProfile?.currencySymbol || '$'}
+        isDarkMode={isDarkMode}
+        onAddNotes={() => {
+          const saved = recapTrade;
+          setRecapTrade(null);
+          if (saved) handleEditTrade(saved);
+        }}
+        onSetBias={() => {
+          setRecapTrade(null);
+          setCurrentView('dashboard');
+        }}
+        onDone={() => {
+          setRecapTrade(null);
+          setCurrentView('history');
+        }}
+        onClose={() => {
+          setRecapTrade(null);
+          setCurrentView('history');
+        }}
+      />
     </ErrorBoundary>
   );
 };
@@ -1801,7 +1876,7 @@ const App: React.FC = () => {
   return (
     <ToastProvider>
       {!isOnline && (
-        <OfflineBlocker
+        <OfflineBanner
           isChecking={isChecking}
           onRetry={checkConnection}
         />
