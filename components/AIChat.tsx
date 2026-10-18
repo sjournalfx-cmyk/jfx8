@@ -1,30 +1,31 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trade, UserProfile, DailyBias, EASession, Note, Goal } from '../types';
-import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary, describeAiError, CHAT_MODELS } from '../services/nvidiaAiService';
+import { modalResearchService, ModalModelType, getAssistantMode, AssistantContextSummary, describeAiError } from '../services/nvidiaAiService';
 import { browserSpeechService } from '../services/voiceInputService';
 import { calculateStats } from '../lib/statsUtils';
 import { buildAnalyticsAiSnapshot } from '../lib/analyticsAiSnapshot';
 import { normalizeAssistantMarkdown, stripAssistantWidgetMarkup } from '../lib/aiChatFormatting';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { cleanAssistantResponse, cleanThinkingTags } from '../lib/thinkingCleaner';
-import { TrendingUp, TrendingDown, Brain, Clock, Wand2, Coins, ChevronDown, X, Plus, Workflow, StickyNote, Activity, Sparkles, Target, Mic, RotateCcw, LayoutGrid, Copy, ThumbsUp, ThumbsDown, CornerDownLeft, Zap, AlertCircle, Check, Loader2, StopCircle, ArrowLeft, ArrowRight, ListChecks, BarChart3, Clock3, BrainCircuit, Timer, CircleDot, Goal as GoalIcon, Pause, Play, Settings, Telescope } from 'lucide-react';
+import { TrendingUp, TrendingDown, Brain, Clock, Coins, ChevronDown, X, Plus, Workflow, StickyNote, Activity, Sparkles, Target, Mic, RotateCcw, LayoutGrid, Copy, ThumbsUp, ThumbsDown, CornerDownLeft, Zap, AlertCircle, Check, Loader2, StopCircle, ArrowLeft, ArrowRight, ListChecks, BarChart3, Clock3, BrainCircuit, Timer, CircleDot, Goal as GoalIcon, Pause, Play, Settings, Telescope } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from './ui/Toast';
 
 // Paid data proxies (/api/fmp, /api/finnhub) require an authenticated Supabase
 // session server-side; attach the access token so logged-in users keep working.
-// Web-only path: the app is served from the same origin as the API, so relative
-// /api/* URLs resolve directly. (The APK prefixes these with the hosted backend
-// via apiUrl() — never import a static @capacitor specifier into this bundle.)
+// Native-safe: prefix relative /api/* with the hosted backend URL inside the
+// Capacitor APK (no local backend there) via apiUrl().
 const authedFetch = async (url: string): Promise<Response> => {
+  const { apiUrl } = await import('../lib/capacitor');
+  const finalUrl = url.startsWith('/') ? apiUrl(url) : url;
   try {
     const { getSessionToken } = await import('../lib/supabase');
     const token = await getSessionToken();
-    return await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+    return await fetch(finalUrl, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
   } catch {
-    return fetch(url);
+    return fetch(finalUrl);
   }
 };
 
@@ -851,29 +852,9 @@ const ChallengesStep = ({ isDarkMode, data, challengeOptions, onChange }: Challe
 );
 
 const RESEARCH_QUICK_PROMPTS: ResearchPrompt[] = [
-  { title: "Session Edge", icon: <Clock3 size={16} />, prompt: "Explain how London, New York, and overlap sessions behave differently for forex traders, including liquidity, volatility, and common traps.", color: 'text-cyan-500', desc: 'Session behavior and timing' },
-  { title: "Setup Brief", icon: <Workflow size={16} />, prompt: "Build a concise research brief for a high-probability market structure setup. Include ideal conditions, entry confirmation, invalidation, and common failure cases.", color: 'text-emerald-500', desc: 'Playbook research' },
   { title: "Risk Model", icon: <Coins size={16} />, prompt: "Compare fixed fractional risk, volatility-adjusted position sizing, and R-based execution for discretionary traders. Keep it practical.", color: 'text-amber-500', desc: 'Risk framework research' },
   { title: "Macro Lens", icon: <TrendingUp size={16} />, prompt: "Explain how a trader should research macro drivers before taking a directional trade in forex or indices, without relying on live headlines.", color: 'text-violet-500', desc: 'Top-down context building' },
 ];
-
-// Provider pill shown next to each model badge in the drawer sheet.
-// CHAT_MODELS is the shared catalogue (services/nvidiaAiService); the provider
-// labels live here so the sheet can attribute every tier the way the APK does.
-const CHAT_MODEL_PROVIDERS: Record<string, string> = {
-  'nvidia/nemotron-3-super-120b-a12b': 'NVIDIA',
-  'nvidia/nemotron-3-ultra-550b-a55b': 'NVIDIA',
-  'z-ai/glm-5.3-flash': 'Z-AI',
-  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 'NVIDIA',
-  'meta/llama-3.2-11b-vision-instruct': 'Meta',
-  'muse-spark-1.2-contributor-free': 'Zen / Meta',
-  'muse-spark-1.3-contributor-free': 'Zen / Meta',
-  'big-pickle': 'Zen',
-  'mimo-v2.5-free': 'Zen / Xiaomi',
-  'ling-3.0-flash-fin-free': 'Zen',
-  'nemotron-3-ultra-free': 'Zen / NVIDIA',
-  'nemotron-3.5-lightning-free': 'Zen / NVIDIA',
-};
 
 const FORGE_ITEMS = [
   { title: "Strategy Roadmap", icon: <Workflow size={20} />, desc: "Logic & decision trees", prompt: "Generate a visual decision tree for my current trading strategy." },
@@ -989,7 +970,6 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
       profit: p.profit,
     })),
   }), [notes, goals, eaSession]);
-
   const challengeOptions = useMemo(() => ([
     { id: 'emotions', label: 'Emotional Trading', desc: 'FOMO, revenge trading, fear of missing out', icon: <Brain size={20} /> },
     { id: 'discipline', label: 'Lack of Discipline', desc: 'Skipping trades, not following rules', icon: <ListChecks size={20} /> },
@@ -1041,7 +1021,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
   const [wizardData, setWizardData] = useState<WizardData>(() => createInitialWizardData());
   
   const [selectedModel, setSelectedModel] = useLocalStorage<ModalModelType>('jfx_ai_selected_model', 'deepseek');
-  const [selectedChatModelId, setSelectedChatModelId] = useLocalStorage<string>('jfx_ai_chat_model_id', 'muse-spark-1.3-contributor-free');
+  const [selectedChatModelId, setSelectedChatModelId] = useLocalStorage<string>('jfx_ai_chat_model_id', 'muse-spark-1.2-contributor-free');
   const [showModelDrawer, setShowModelDrawer] = useState(false);
   const [recallMemory, setRecallMemory] = useLocalStorage<boolean>('jfx_ai_recall_memory', true);
   const [dailyCredits, setDailyCredits] = useLocalStorage<DailyCreditState>('jfx_ai_daily_credits', createDailyCreditState());
@@ -1685,9 +1665,10 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const from = new Date().toISOString().split('T')[0];
         const to = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-        const calRes = await fetch(`/api/economic-calendar?from=${from}&to=${to}&tz=${encodeURIComponent(tz)}`);
-        const calPayload = await calRes.json().catch(() => ({}));
-        const events: ForexFactoryEvent[] = Array.isArray(calPayload) ? calPayload : calPayload?.data ?? calPayload?.events ?? [];
+        // Native-safe: uses hosted API on web, direct CDN fallback in APK.
+        const { fetchEconomicCalendar } = await import('../lib/economicCalendarClient');
+        const calPayload = await fetchEconomicCalendar({ from, to, tz });
+        const events: ForexFactoryEvent[] = Array.isArray(calPayload) ? calPayload as unknown as ForexFactoryEvent[] : (calPayload as any)?.data ?? (calPayload as any)?.events ?? [];
         const calendarMd = formatForexFactoryCalendarMarkdown(events);
         processResponse(calendarMd, (Date.now() + 1).toString(), { contextSummary });
       } catch (error) {
@@ -3307,35 +3288,7 @@ ${strategyProfile.whyITrade}`;
               )}
 
 
-              <div className="relative flex items-center gap-2 p-2">
-                <button
-                  onClick={() => { setShowForgeMenu(!showForgeMenu); setShowFeaturesMenu(false); }}
-                  className={`forge-btn shrink-0 p-2.5 rounded-2xl transition-colors ${
-                    showForgeMenu
-                      ? isDarkMode ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white'
-                      : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'
-                  }`}
-                  title="Quick prompts"
-                  aria-label="Open quick prompts menu"
-                  aria-expanded={showForgeMenu}
-                >
-                  <Wand2 size={18} />
-                </button>
-
-                <button
-                  onClick={() => setShowFeaturesMenu(!showFeaturesMenu)}
-                  className={`features-btn shrink-0 p-2.5 rounded-2xl transition-colors ${
-                    showFeaturesMenu
-                      ? isDarkMode ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white'
-                      : isDarkMode ? 'hover:bg-black text-zinc-400' : 'hover:bg-slate-100 text-slate-500'
-                  }`}
-                  title="Features"
-                  aria-label="Open features menu"
-                  aria-expanded={showFeaturesMenu}
-                >
-                  <Zap size={18} />
-                </button>
-
+              <div className="relative flex w-full items-center gap-2 p-2">
                 <input
                   ref={inputRef}
                   value={input}
@@ -3446,26 +3399,28 @@ ${strategyProfile.whyITrade}`;
               <div className="flex justify-center pt-3 pb-2"><div className={`w-10 h-1 rounded-full ${isDarkMode ? 'bg-zinc-700' : 'bg-slate-200'}`} /></div>
               <div className="px-5 pb-3 flex items-center justify-between">
                 <h3 className={`text-[15px] font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Model</h3>
-                <div className="flex items-center gap-2">
-                  {onOpenSettings && (
-                    <button
-                      onClick={() => { setShowModelDrawer(false); onOpenSettings(); }}
-                      className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition-colors ${isDarkMode ? 'bg-zinc-800 text-zinc-300 hover:text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900'}`}
-                    >
-                      <Settings size={12} />
-                      All settings
-                    </button>
-                  )}
-                  <button onClick={() => setShowModelDrawer(false)} className={`w-8 h-8 rounded-full grid place-items-center ${isDarkMode ? 'bg-zinc-800 text-zinc-400' : 'bg-slate-100 text-slate-500'}`} aria-label="Close model settings"><X size={14} /></button>
-                </div>
+                <button onClick={() => setShowModelDrawer(false)} className={`w-8 h-8 rounded-full grid place-items-center ${isDarkMode ? 'bg-zinc-800 text-zinc-400' : 'bg-slate-100 text-slate-500'}`}><X size={14} /></button>
               </div>
               <p className={`px-5 pb-3 text-xs ${isDarkMode ? 'text-zinc-500' : 'text-slate-500'}`}>Switch any time. Applies to next message.</p>
               <div className="px-3 pb-6 overflow-y-auto space-y-2">
-                {CHAT_MODELS.map(m => {
+                {[
+                  { id: 'nvidia/nemotron-3-super-120b-a12b', label: 'Nemotron 3.5 Super', desc: 'Balanced reasoning & speed', badge: 'FAST', provider: 'NVIDIA' },
+                  { id: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'Nemotron 3.5 Ultra', desc: 'Strongest reasoning', badge: 'POWERFUL', provider: 'NVIDIA' },
+                  { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', desc: 'Ultra-fast responses', badge: 'FLASH', provider: 'Z-AI' },
+                  { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', label: 'Nemotron 3 Nano 30B', desc: 'Fastest reasoning 30B', badge: 'FAST', provider: 'NVIDIA' },
+                  { id: 'meta/llama-3.2-11b-vision-instruct', label: 'Llama 3.2 11B Vision', desc: 'Vision + fast text', badge: 'LIGHTNING', provider: 'Meta' },
+                  { id: 'muse-spark-1.2-contributor-free', label: 'Muse Spark 1.2 Free', desc: 'Free - Meta • default', badge: 'FREE', provider: 'Zen / Meta' },
+                  { id: 'big-pickle', label: 'Big Pickle', desc: 'Free - stealth model', badge: 'FREE', provider: 'Zen' },
+                  { id: 'mimo-v2.5-free', label: 'MiMo V2.5 Free', desc: 'Free - Xiaomi', badge: 'FREE', provider: 'Zen / Xiaomi' },
+                  { id: 'ling-3.0-flash-fin-free', label: 'Ling 3.0 Flash Fin Free', desc: 'Free - finance', badge: 'FREE', provider: 'Zen' },
+                  { id: 'nemotron-3-ultra-free', label: 'Nemotron 3 Ultra Free', desc: 'Free - NVIDIA', badge: 'FREE', provider: 'Zen / NVIDIA' },
+                  { id: 'nemotron-3.5-lightning-free', label: 'Nemotron 3.5 Lightning Free', desc: 'Free - NVIDIA', badge: 'FREE', provider: 'Zen / NVIDIA' },
+                  { id: 'muse-spark-1.3-contributor-free', label: 'Muse Spark 1.3 Free', desc: 'Free - Meta', badge: 'FREE', provider: 'Zen / Meta' },
+                ].map(m => {
                   const active = selectedChatModelId === m.id;
                   return (
                     <button key={m.id} onClick={() => { setSelectedChatModelId(m.id); setShowModelDrawer(false); addToast({ type: 'info', title: 'Model Changed', message: `Model: ${m.label}` }); }} className={`w-full text-left px-4 py-3.5 rounded-2xl border flex items-center justify-between transition-all ${active ? (isDarkMode ? 'bg-white text-black border-white' : 'bg-slate-900 text-white border-slate-900') : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900')}`}>
-                      <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold flex items-center gap-2 flex-wrap">{m.label} <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold tracking-widest ${active ? 'bg-white/20' : isDarkMode ? 'bg-zinc-700 text-zinc-300' : 'bg-slate-200 text-slate-600'}`}>{m.badge}</span>{CHAT_MODEL_PROVIDERS[m.id] && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium tracking-wide ${active ? 'bg-black/10 text-black/60' : isDarkMode ? 'bg-zinc-700/60 text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>{CHAT_MODEL_PROVIDERS[m.id]}</span>}</div><div className={`text-xs mt-0.5 ${active ? 'opacity-70' : isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{m.desc}</div><div className={`text-[10px] mt-1 font-mono truncate ${active ? 'opacity-50' : 'opacity-40'}`}>{m.id}</div></div>
+                      <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold flex items-center gap-2 flex-wrap">{m.label} <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold tracking-widest ${active ? 'bg-white/20' : isDarkMode ? 'bg-zinc-700 text-zinc-300' : 'bg-slate-200 text-slate-600'}`}>{m.badge}</span><span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium tracking-wide ${active ? 'bg-black/10 text-black/60' : isDarkMode ? 'bg-zinc-700/60 text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>{(m as any).provider}</span></div><div className={`text-xs mt-0.5 ${active ? 'opacity-70' : isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>{m.desc}</div><div className={`text-[10px] mt-1 font-mono truncate ${active ? 'opacity-50' : 'opacity-40'}`}>{m.id}</div></div>
                       {active && <Check size={18} className="shrink-0 ml-3" />}
                     </button>
                   );

@@ -2,6 +2,7 @@ import { Trade, UserProfile, DailyBias, Note, Goal } from "../types";
 import { calculateStats } from "../lib/statsUtils";
 import { overallComplianceRate, topViolation, costOfViolations } from "../lib/disciplineChecklist";
 import { cleanAssistantResponse, isInsideThinkingBlock } from "../lib/thinkingCleaner";
+import { isNative } from "../lib/capacitor";
 
 // Web is same-origin only (no native shell, no absolute backend host), so the
 // base URL stays relative exactly like the rest of the web api/* surface.
@@ -734,18 +735,29 @@ async function chatCompletion(
   // Free-tier catalogue entries route through the Zen proxy instead of NVIDIA.
   const isZen = ZEN_FREE_MODELS.has(model);
   const url = isZen ? ZEN_BASE_URL : BASE_URL;
-  // Web keeps the strict budget: no native-network headroom is added here.
-  const combined = createCombinedSignal(signal, timeoutMs);
+  // Native mobile network is often slower; give it more headroom.
+  const effectiveTimeout = isNative ? Math.max(timeoutMs, 45000) : timeoutMs;
+  const effectiveFirstTokenMs = isNative
+    ? Math.max(firstTokenTimeoutMs, 25000)
+    : firstTokenTimeoutMs;
+  const combined = createCombinedSignal(signal, effectiveTimeout);
   // First-token watchdog: a connection that never yields anything stalls the
   // whole UX. Firing it trips the same timeout path below, which retries /
   // fails over to the backup model automatically.
   let gotFirstToken = false;
   const firstTokenTimer = globalThis.setTimeout(() => {
     if (!gotFirstToken) combined.abort();
-  }, Math.max(1000, firstTokenTimeoutMs));
+  }, Math.max(1000, effectiveFirstTokenMs));
   try {
     const { getSessionToken } = await import("../lib/supabase");
     const token = await getSessionToken();
+
+    // User must be signed in for the proxy call
+    if (!token) {
+      throw new AiRequestError('Not signed in. Please log in again to use the AI assistant.', "auth", {
+        modelId: model,
+      });
+    }
     let response: Response;
     try {
       response = await fetch(url, {
@@ -771,7 +783,7 @@ async function chatCompletion(
         if (signal?.aborted) {
           throw new AiRequestError("Generation aborted", "aborted", { modelId: model });
         }
-        throw new AiRequestError(`NVIDIA API timeout after ${timeoutMs}ms`, "timeout", {
+        throw new AiRequestError(`NVIDIA API timeout after ${effectiveTimeout}ms`, "timeout", {
           modelId: model,
           retryWithFallback: true,
         });
@@ -859,7 +871,7 @@ async function chatCompletion(
           if (signal?.aborted) {
             throw new AiRequestError("Generation aborted", "aborted", { modelId: model });
           }
-          throw new AiRequestError(`NVIDIA API timeout after ${timeoutMs}ms`, "timeout", {
+          throw new AiRequestError(`NVIDIA API timeout after ${effectiveTimeout}ms`, "timeout", {
             modelId: model,
             retryWithFallback: true,
           });
@@ -935,7 +947,7 @@ async function chatCompletion(
       throw error;
     }
     if (combined.signal.aborted && !signal?.aborted) {
-      throw new AiRequestError(`NVIDIA API timeout after ${timeoutMs}ms`, "timeout", {
+      throw new AiRequestError(`NVIDIA API timeout after ${effectiveTimeout}ms`, "timeout", {
         modelId: model,
         retryWithFallback: true,
       });
