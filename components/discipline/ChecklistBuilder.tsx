@@ -1,15 +1,5 @@
-import React, { useState } from 'react';
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  Check,
-  X,
-  ShieldCheck,
-  Zap,
-  ClipboardCheck,
-  HelpCircle,
-} from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Plus, Pencil, Trash2, Check, X, HelpCircle, ListChecks, ChevronDown } from 'lucide-react';
 import type { ChecklistPhase, ChecklistTemplateItem } from '../../types';
 import { CHECKLIST_PHASES } from '../../lib/disciplineChecklist';
 import { useChecklistTemplates } from '../../lib/useChecklistTemplates';
@@ -20,12 +10,6 @@ interface ChecklistBuilderProps {
   isDarkMode?: boolean;
 }
 
-const PHASE_ICONS: Record<ChecklistPhase, React.ElementType> = {
-  'pre-entry': ShieldCheck,
-  'in-trade': Zap,
-  'post-trade': ClipboardCheck,
-};
-
 const PHASE_SHORT: Record<ChecklistPhase, string> = {
   'pre-entry': 'Pre',
   'in-trade': 'In',
@@ -34,11 +18,19 @@ const PHASE_SHORT: Record<ChecklistPhase, string> = {
 
 const PHASE_ORDER: ChecklistPhase[] = ['pre-entry', 'in-trade', 'post-trade'];
 
+const PHASE_BADGE: Record<ChecklistPhase, string> = {
+  'pre-entry': 'text-emerald-400',
+  'in-trade': 'text-sky-400',
+  'post-trade': 'text-amber-400',
+};
+
+type Filter = 'all' | ChecklistPhase;
+
 /**
- * One rule row: borderless text; swipe right to edit, swipe left to delete
- * (same gesture pattern as the journal trade cards); tap text to edit.
+ * Rule card: phase badge + text + visible edit button.
+ * Tap card or pencil to expand inline editor (input + phase chips + save/delete).
  */
-const RuleRow: React.FC<{
+const RuleCard: React.FC<{
   item: ChecklistTemplateItem;
   isDarkMode: boolean;
   editing: boolean;
@@ -61,124 +53,76 @@ const RuleRow: React.FC<{
   onPhase,
   onDelete,
 }) => {
-  const [swipeX, setSwipeX] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const startX = React.useRef<number | null>(null);
-  const startY = React.useRef<number | null>(null);
-  const moved = React.useRef(false);
-
   const muted = isDarkMode ? 'text-zinc-500' : 'text-slate-400';
   const input = isDarkMode
     ? 'bg-black border-zinc-800 text-zinc-100 placeholder:text-zinc-600'
     : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400';
+  const cardBg = isDarkMode ? 'bg-[#0a0a0a]' : 'bg-white border border-slate-200';
+
+  if (editing) {
+    return (
+      <div className={`rounded-xl border-0 p-3 space-y-2.5 ${cardBg}`}>
+        <input
+          autoFocus
+          value={editText}
+          onChange={(e) => onEditText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onCommitEdit(); if (e.key === 'Escape') onCancelEdit(); }}
+          aria-label="Edit rule text"
+          className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none ${input}`}
+        />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {PHASE_ORDER.map((phase) => (
+            <button
+              key={phase}
+              onClick={() => { try { haptic.selection(); } catch {} onPhase(phase); }}
+              className={`px-2.5 py-0 rounded-lg text-[10px] font-black uppercase tracking-widest touch-manipulation ${
+                item.phase === phase ? 'bg-[#FF4F01] text-white' : `${muted} ${isDarkMode ? 'bg-white/[0.04]' : 'bg-slate-100'}`
+              }`}
+            >
+              {PHASE_SHORT[phase]}
+            </button>
+          ))}
+          <span className="flex-1" />
+          <button onClick={onCancelEdit} aria-label="Cancel edit" className={`w-9 h-4 rounded-lg flex items-center justify-center touch-manipulation ${muted}`}>
+            <X size={13} />
+          </button>
+          <button
+            onClick={() => { try { haptic.medium(); } catch {} onDelete(); }}
+            aria-label="Delete rule"
+            className="w-9 h-4 rounded-lg flex items-center justify-center text-rose-500/80 touch-manipulation"
+          >
+            <Trash2 size={13} />
+          </button>
+          <button onClick={onCommitEdit} aria-label="Save rule" className="w-9 h-4 rounded-lg bg-[#FF4F01] text-white flex items-center justify-center touch-manipulation">
+            <Check size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative overflow-hidden">
-      {(dragging || swipeX !== 0) && swipeX >= 0 && !editing && (
-        <div className="absolute left-0 top-0 bottom-0 w-[76px] flex items-center justify-start">
-          <button
-            aria-label="Edit rule"
-            onClick={(e) => { e.stopPropagation(); setSwipeX(0); onBeginEdit(); }}
-            className="w-[60px] h-[40px] rounded-xl bg-[#FF4F01] text-white flex items-center justify-center active:scale-95 transition-transform"
-          >
-            <Pencil size={15} />
-          </button>
-        </div>
-      )}
-      {(dragging || swipeX !== 0) && swipeX <= 0 && !editing && (
-        <div className="absolute right-0 top-0 bottom-0 w-[76px] flex items-center justify-end">
-          <button
-            aria-label="Delete rule"
-            onClick={(e) => { e.stopPropagation(); try { haptic.medium(); } catch {} setSwipeX(0); onDelete(); }}
-            className="w-[60px] h-[40px] rounded-xl bg-[#ff4f64] text-white flex items-center justify-center active:scale-95 transition-transform"
-          >
-            <Trash2 size={15} />
-          </button>
-        </div>
-      )}
-      <div
-        onClick={() => {
-          if (moved.current) { moved.current = false; return; }
-          if (swipeX !== 0) { setSwipeX(0); return; }
-          if (!editing) {
-            try { haptic.selection(); } catch {}
-            onBeginEdit();
-          }
-        }}
-        onTouchStart={(e) => {
-          startX.current = e.touches[0].clientX;
-          startY.current = e.touches[0].clientY;
-          moved.current = false;
-          setDragging(true);
-        }}
-        onTouchMove={(e) => {
-          if (startX.current === null || startY.current === null) return;
-          const dx = e.touches[0].clientX - startX.current;
-          const dy = e.touches[0].clientY - startY.current;
-          if (Math.abs(dx) > 10 || Math.abs(dy) > 10) moved.current = true;
-          if (Math.abs(dy) > Math.abs(dx) || editing) { setSwipeX(0); return; }
-          setSwipeX(Math.max(-76, Math.min(76, dx)));
-        }}
-        onTouchEnd={() => {
-          startX.current = null;
-          startY.current = null;
-          setDragging(false);
-          setSwipeX((v) => (v < -38 ? -76 : v > 38 ? 76 : 0));
-        }}
-        style={{ transform: `translateX(${swipeX}px)` }}
-        className={`relative z-10 flex items-center min-h-[52px] py-1.5 select-none ${dragging ? '' : 'transition-transform duration-200'} ${isDarkMode ? 'bg-[#000000]' : 'bg-white'}`}
-      >
-        {editing ? (
-          <div className="flex-1 min-w-0 space-y-2 py-1 pr-1">
-            <input
-              autoFocus
-              value={editText}
-              onChange={(e) => onEditText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') onCommitEdit(); if (e.key === 'Escape') onCancelEdit(); }}
-              onClick={(e) => e.stopPropagation()}
-              aria-label="Edit rule text"
-              className={`w-full rounded-lg border px-2.5 py-2 text-sm outline-none ${input}`}
-            />
-            <div className="flex items-center gap-1">
-              {PHASE_ORDER.map((phase) => (
-                <button
-                  key={phase}
-                  onClick={(e) => { e.stopPropagation(); try { haptic.selection(); } catch {} onPhase(phase); }}
-                  className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest touch-manipulation min-h-[34px] ${
-                    item.phase === phase ? 'bg-[#FF4F01] text-white' : muted
-                  }`}
-                >
-                  {PHASE_SHORT[phase]}
-                </button>
-              ))}
-              <span className="flex-1" />
-              <button onClick={(e) => { e.stopPropagation(); onCancelEdit(); }} aria-label="Cancel edit" className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 touch-manipulation ${muted}`}>
-                <X size={15} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); try { haptic.medium(); } catch {} onDelete(); }}
-                aria-label="Delete rule"
-                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-rose-500/80 touch-manipulation"
-              >
-                <Trash2 size={15} />
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); onCommitEdit(); }} aria-label="Save rule" className="w-9 h-9 rounded-lg bg-[#FF4F01] text-white flex items-center justify-center shrink-0 touch-manipulation">
-                <Check size={15} />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <p className={`flex-1 min-w-0 text-[13px] leading-snug ${isDarkMode ? 'text-zinc-200' : 'text-slate-800'}`}>
-            {item.text}
-          </p>
-        )}
-      </div>
+    <div
+      onClick={() => { try { haptic.selection(); } catch {} onBeginEdit(); }}
+      className={`rounded-xl border-0 p-3 flex items-center gap-3 cursor-pointer active:scale-[0.99] transition-transform ${cardBg}`}
+    >
+      <span className={`shrink-0 px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest ${PHASE_BADGE[item.phase]}`}>
+        {PHASE_SHORT[item.phase]}
+      </span>
+      <p className={`flex-1 min-w-0 text-[13px] leading-snug ${isDarkMode ? 'text-zinc-200' : 'text-slate-800'}`}>
+        {item.text}
+      </p>
+      <span aria-hidden className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${isDarkMode ? 'bg-white/[0.04] text-zinc-400' : 'bg-slate-100 text-slate-500'}`}>
+        <Pencil size={13} />
+      </span>
     </div>
   );
 };
 
 export const ChecklistBuilder: React.FC<ChecklistBuilderProps> = ({ isDarkMode = true }) => {
   const { activeTemplate, addItem, updateItem, removeItem } = useChecklistTemplates();
+  const [filter, setFilter] = useState<Filter>('all');
+  const [composerOpen, setComposerOpen] = useState(false);
   const [newText, setNewText] = useState('');
   const [newPhase, setNewPhase] = useState<ChecklistPhase>('pre-entry');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -189,15 +133,33 @@ export const ChecklistBuilder: React.FC<ChecklistBuilderProps> = ({ isDarkMode =
   const input = isDarkMode
     ? 'bg-black border-zinc-800 text-zinc-100 placeholder:text-zinc-600'
     : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400';
+  const sheetBg = isDarkMode ? 'bg-[#0a0a0a]' : 'bg-white';
 
-  const itemsByPhase = (phase: ChecklistPhase): ChecklistTemplateItem[] =>
-    activeTemplate.items.filter((i) => i.phase === phase);
+  const counts = useMemo(() => {
+    const c: Record<Filter, number> = { all: activeTemplate.items.length, 'pre-entry': 0, 'in-trade': 0, 'post-trade': 0 };
+    for (const i of activeTemplate.items) c[i.phase] += 1;
+    return c;
+  }, [activeTemplate.items]);
+
+  const visiblePhases: ChecklistPhase[] = filter === 'all' ? PHASE_ORDER : [filter];
+
+  const openComposer = () => {
+    try { haptic.light(); } catch {}
+    setNewText('');
+    setNewPhase(filter === 'all' ? 'pre-entry' : filter);
+    setComposerOpen(true);
+  };
+
+  const closeComposer = () => {
+    setComposerOpen(false);
+    setNewText('');
+  };
 
   const handleAdd = () => {
     if (!newText.trim()) return;
-    try { haptic.light(); } catch {}
+    try { haptic.medium(); } catch {}
     addItem(newText, newPhase);
-    setNewText('');
+    closeComposer();
   };
 
   const commitEdit = () => {
@@ -211,75 +173,70 @@ export const ChecklistBuilder: React.FC<ChecklistBuilderProps> = ({ isDarkMode =
     setEditText('');
   };
 
+  const filters: { id: Filter; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'pre-entry', label: 'Pre' },
+    { id: 'in-trade', label: 'In' },
+    { id: 'post-trade', label: 'Post' },
+  ];
+
   return (
     <div className="space-y-4 pb-24">
-      <p className={`text-[12px] font-medium px-1 ${muted}`}>
-        {activeTemplate.items.length === 0
-          ? 'No rules yet — add your first rule below.'
-          : `${activeTemplate.items.length} rules — swipe a rule to edit or delete.`}
-      </p>
-
-      <div className="space-y-2.5">
-        <div className="flex items-center gap-2 px-1">
-          <h3 className={`text-[11px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-300' : 'text-slate-600'}`}>
-            Add a rule
-          </h3>
-          <button
-            onClick={() => { try { haptic.selection(); } catch {} setHelpOpen(true); }}
-            aria-label="How do strategy rules work?"
-            className={`${muted} hover:text-[#FF4F01] touch-manipulation min-w-[36px] min-h-[36px] flex items-center justify-center -ml-1`}
-          >
-            <HelpCircle size={16} />
-          </button>
-        </div>
-        <input
-          value={newText}
-          onChange={(e) => setNewText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
-          placeholder="New rule…"
-          className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none min-h-[46px] ${input}`}
-        />
-        <div className="flex items-center gap-3 px-1">
-          <div className="flex-1 flex items-center gap-4">
-            {PHASE_ORDER.map((phase) => (
-              <button
-                key={phase}
-                onClick={() => { try { haptic.selection(); } catch {} setNewPhase(phase); }}
-                className={`py-2 text-[11px] font-black uppercase tracking-widest touch-manipulation min-h-[38px] transition-colors ${
-                  newPhase === phase ? 'text-[#FF4F01]' : muted
-                }`}
-              >
-                {PHASE_SHORT[phase]}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={handleAdd}
-            disabled={!newText.trim()}
-            aria-label="Add rule"
-            className="w-11 h-11 rounded-full bg-[#FF4F01] text-white flex items-center justify-center shrink-0 disabled:opacity-40 touch-manipulation active:scale-95 transition-transform"
-          >
-            <Plus size={18} />
-          </button>
-        </div>
+      {/* Phase filter pills — help is the 5th cell so the row fills edge-to-edge */}
+      <div className="grid grid-cols-5 gap-1.5">
+        {filters.map((f) => {
+          const active = filter === f.id;
+          return (
+            <button
+              key={f.id}
+              onClick={() => { try { haptic.selection(); } catch {} setFilter(f.id); }}
+              className={`py-2 rounded-lg text-[11px] font-black uppercase tracking-widest touch-manipulation transition-colors ${
+                active
+                  ? 'bg-[#FF4F01] text-white'
+                  : isDarkMode ? 'bg-white/[0.04] text-zinc-500' : 'bg-slate-100 text-slate-500'
+              }`}
+            >
+              {f.label} <span className={active ? 'text-white/70' : 'opacity-60'}>{counts[f.id]}</span>
+            </button>
+          );
+        })}
+        <button
+          onClick={() => { try { haptic.selection(); } catch {} setHelpOpen(true); }}
+          aria-label="How do strategy rules work?"
+          className={`py-2 rounded-lg flex items-center justify-center touch-manipulation ${isDarkMode ? 'bg-white/[0.04] text-zinc-500' : 'bg-slate-100 text-slate-500'} hover:text-[#FF4F01]`}
+        >
+          <HelpCircle size={16} />
+        </button>
       </div>
 
-      {CHECKLIST_PHASES.map((phase) => {
-        const Icon = PHASE_ICONS[phase.id];
-        const items = itemsByPhase(phase.id);
-        if (items.length === 0) return null;
+      {/* Empty state */}
+      {activeTemplate.items.length === 0 && (
+        <div className={`rounded-xl border-0 p-6 flex flex-col items-center text-center gap-3 ${isDarkMode ? 'bg-[#0a0a0a]' : 'bg-white border border-slate-200'}`}>
+          <span className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isDarkMode ? 'bg-white/[0.04] text-zinc-500' : 'bg-slate-100 text-slate-400'}`}>
+            <ListChecks size={22} />
+          </span>
+          <p className={`text-[13px] font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>No rules yet</p>
+          <p className={`text-[11px] leading-relaxed ${muted}`}>Build your pre-entry, in-trade and post-trade checklist to grade every trade on execution.</p>
+        </div>
+      )}
+
+      {/* Phase-grouped rule cards */}
+      {visiblePhases.map((phaseId) => {
+        const phaseMeta = CHECKLIST_PHASES.find((p) => p.id === phaseId)!;
+        const items = activeTemplate.items.filter((i) => i.phase === phaseId);
+        if (!items.length) return null;
         return (
-          <section key={phase.id}>
-            <div className="flex items-center gap-1.5 px-1 py-1">
-              <Icon size={12} className={muted} />
+          <section key={phaseId} className="space-y-1.5">
+            <div className="flex items-baseline gap-2 px-1">
               <h3 className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
-                {phase.label}
+                {phaseMeta.label}
               </h3>
               <span className={`text-[10px] font-bold ${isDarkMode ? 'text-zinc-600' : 'text-slate-400'}`}>{items.length}</span>
+              <span className={`text-[10px] ${isDarkMode ? 'text-zinc-700' : 'text-slate-400'}`}>· {phaseMeta.hint}</span>
             </div>
-            <div className={`divide-y ${isDarkMode ? 'divide-zinc-800/70' : 'divide-slate-100'}`}>
+            <div className="space-y-1.5">
               {items.map((item) => (
-                <RuleRow
+                <RuleCard
                   key={item.id}
                   item={item}
                   isDarkMode={isDarkMode}
@@ -297,6 +254,66 @@ export const ChecklistBuilder: React.FC<ChecklistBuilderProps> = ({ isDarkMode =
           </section>
         );
       })}
+
+      {/* Prominent add button */}
+      <button
+        onClick={openComposer}
+        aria-label="New rule"
+        className={`w-full rounded-xl py-3.5 flex items-center justify-center gap-2 text-[13px] font-black uppercase tracking-widest touch-manipulation active:scale-[0.99] transition-transform ${
+          isDarkMode ? 'bg-[#FF4F01] text-white' : 'bg-[#FF4F01] text-white'
+        }`}
+      >
+        <Plus size={16} strokeWidth={2.5} /> New Rule
+      </button>
+
+      {/* Bottom-sheet composer */}
+      {composerOpen && (
+        <div className="fixed inset-0 z-50 flex items-end" role="dialog" aria-modal="true" aria-label="New rule">
+          <button aria-label="Close" onClick={closeComposer} className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className={`relative w-full rounded-t-2xl border-0 p-4 pb-6 space-y-4 animate-in slide-in-from-bottom duration-200 ${sheetBg} shadow-2xl`}>
+            <div className="flex items-center justify-between">
+              <h2 className={`text-[13px] font-black uppercase tracking-widest ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>New Rule</h2>
+              <button onClick={closeComposer} aria-label="Close composer" className={`w-8 h-8 rounded-lg flex items-center justify-center ${muted}`}>
+                <X size={16} />
+              </button>
+            </div>
+            <input
+              autoFocus
+              value={newText}
+              onChange={(e) => setNewText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
+              placeholder="New rule…"
+              className={`w-full rounded-xl border px-3.5 py-3 text-sm outline-none min-h-[48px] ${input}`}
+            />
+            <div className="space-y-2">
+              <p className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Phase</p>
+              <div className="flex gap-1.5">
+                {PHASE_ORDER.map((phase) => (
+                  <button
+                    key={phase}
+                    onClick={() => { try { haptic.selection(); } catch {} setNewPhase(phase); }}
+                    className={`flex-1 py-2.5 rounded-lg text-[11px] font-black uppercase tracking-widest touch-manipulation ${
+                      newPhase === phase
+                        ? 'bg-[#FF4F01] text-white'
+                        : isDarkMode ? 'bg-white/[0.04] text-zinc-500' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {PHASE_SHORT[phase]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={handleAdd}
+              disabled={!newText.trim()}
+              aria-label="Add rule"
+              className="w-full rounded-xl py-3.5 bg-[#FF4F01] text-white text-[13px] font-black uppercase tracking-widest touch-manipulation disabled:opacity-40 active:scale-[0.99] transition-transform"
+            >
+              Add Rule
+            </button>
+          </div>
+        </div>
+      )}
 
       <WidgetHelpDrawer
         isOpen={helpOpen}
