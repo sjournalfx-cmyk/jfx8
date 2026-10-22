@@ -1289,3 +1289,22 @@ body.jfx-mobile .glass-panel {
   background: #000000;
   background-color: #000000;
 }
+
+/* Generative UI (OpenUI) cards in the AI chat — light theme.
+   The component library is styled dark-first; these overrides keep the cards
+   readable when the desktop chat runs in light mode. Dark mode is unchanged. */
+.ai-markdown-light .jfx-genui .bg-\[\#0a0a0a\] { background-color: #ffffff; }
+.ai-markdown-light .jfx-genui .border-white\/10,
+.ai-markdown-light .jfx-genui .border-white\/20,
+.ai-markdown-light .jfx-genui .border-white\/\[0\.06\] { border-color: #e2e8f0; }
+.ai-markdown-light .jfx-genui .text-white,
+.ai-markdown-light .jfx-genui .text-zinc-200 { color: #0f172a; }
+.ai-markdown-light .jfx-genui .text-zinc-300 { color: #334155; }
+.ai-markdown-light .jfx-genui .text-zinc-400 { color: #475569; }
+.ai-markdown-light .jfx-genui .text-zinc-500,
+.ai-markdown-light .jfx-genui .text-zinc-600 { color: #64748b; }
+.ai-markdown-light .jfx-genui .bg-white\/10,
+.ai-markdown-light .jfx-genui .bg-white\/\[0\.06\],
+.ai-markdown-light .jfx-genui .bg-white\/\[0\.08\] { background-color: #f1f5f9; }
+.ai-markdown-light .jfx-genui .text-emerald-400 { color: #059669; }
+.ai-markdown-light .jfx-genui .text-rose-400 { color: #e11d48; }
