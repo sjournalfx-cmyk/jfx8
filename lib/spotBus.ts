@@ -32,11 +32,25 @@ let globalDetach: (() => void) | null = null;
 function defaultBackend(): Promise<SpotBackend> {
   if (!backendPromise) {
     backendPromise = import('../services/ctraderService').then((svc) => ({
-      subscribe: (a, ids, d) => svc.subscribeToSpots(a, ids, d),
-      unsubscribe: (a, ids, d) => svc.unsubscribeFromSpots(a, ids, d),
+      // The web ctraderService takes ONE symbolId per call (the mobile build
+      // takes an array). Passing the array straight through put an array into
+      // the subscription Set, so web live prices never matched a symbol.
+      subscribe: async (a, ids, d) => {
+        for (const id of ids) await svc.subscribeToSpots(a, id, d);
+      },
+      unsubscribe: async (a, ids, d) => {
+        for (const id of ids) await svc.unsubscribeFromSpots(a, id, d);
+      },
       addListener: (fn) => svc.addCtraderListener(fn),
       spotEvent: svc.PT.SPOT_EVENT,
-      isCantRoute: (e) => svc.isCantRouteRequestError(e),
+      // isCantRouteRequestError only exists in the mobile service; calling it
+      // here threw a TypeError inside the catch and skipped the env fallback.
+      isCantRoute: (e) => {
+        const fn = (svc as { isCantRouteRequestError?: (err: unknown) => boolean }).isCantRouteRequestError;
+        return typeof fn === 'function'
+          ? fn(e)
+          : String((e as any)?.message || e).includes('CANT_ROUTE_REQUEST');
+      },
     }));
   }
   return backendPromise;

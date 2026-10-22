@@ -15,6 +15,11 @@ import {
 } from './ctraderSession.js';
 import { resolvePortfolioContext } from './tradingLocks.js';
 
+// Type-only: these handlers referenced Vercel types that were never declared,
+// which failed `npm run lint` (tsc). No runtime change.
+type VercelRequest = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+type VercelResponse = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
 // Live per-user OHLC candles for agents.
 //
 // GET /api/ctrader/candles?symbol=EURUSD&timeframe=H1&count=500&from=&to=&ctidTraderAccountId=&isDemo=

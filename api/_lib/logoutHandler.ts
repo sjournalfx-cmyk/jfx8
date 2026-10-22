@@ -1,6 +1,11 @@
 import { applyCorsHeaders } from './cors.js';
 import { requireUser } from './auth.js';
 
+// Type-only: these handlers referenced Vercel types that were never declared,
+// which failed `npm run lint` (tsc). No runtime change.
+type VercelRequest = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+type VercelResponse = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
 
 /**

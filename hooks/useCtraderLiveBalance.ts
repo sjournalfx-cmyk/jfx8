@@ -77,7 +77,8 @@ export const useCtraderLiveBalance = (
       const svc = await import('../services/ctraderService');
       // Respect an explicit disconnect — never silently re-mint a session.
       try {
-        if (svc.hasLoggedOut && svc.hasLoggedOut()) return;
+        const hasLoggedOut = (svc as { hasLoggedOut?: () => boolean }).hasLoggedOut;
+        if (typeof hasLoggedOut === 'function' && hasLoggedOut()) return;
         if (!svc.hasActiveSession || !svc.hasActiveSession()) {
           // No OAuth session in this browser: cached value (if any) stands.
           return;
