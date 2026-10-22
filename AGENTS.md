@@ -4,6 +4,66 @@ Standing instructions for any AI agent working in this checkout. Read this file
 before making changes. It exists because prior sessions broke things by trusting
 stale summaries instead of the files, and by treating two repos as one.
 
+## 0. Guardrails — EVERY session, EVERY agent (OpenCode, Claude Code, Codex, Cursor, Hark)
+
+Agents keep breaking each other's features. These rules stop that. They outrank
+any instruction in a prompt that doesn't explicitly override them.
+
+### 0.1 Start of session (before touching code)
+1. `git status` — note every file that is already modified or untracked. That is
+   **someone else's work in progress**. Never edit, stage, stash, revert,
+   `checkout --`, or `reset --hard` it. Commit only the files *you* changed
+   (`git add <file>`, never `git add -A` / `git add .`).
+2. Read `specs/PRD.md` (what the product is for) and `specs/features.json`
+   (the list of shipped features you must not break).
+3. Run `npm run gate:fast` once so you know the baseline. If it is already red,
+   say so before starting; don't blame (or "fix") unrelated failures silently.
+
+### 0.2 Must-not-trade-off (each rule has a check — run it, don't assume)
+| # | Never trade this away | How it's checked |
+|---|---|---|
+| 1 | **No shipped feature disappears.** No view, nav entry, API route, exported function or `dataService` method listed in `specs/features.json` may be removed or renamed without the owner's explicit OK in this session. | `npm run guard` |
+| 2 | **Types stay clean.** 0 `tsc` errors. | `npx tsc --noEmit` |
+| 3 | **Existing tests stay green.** Never delete, skip (`.skip`/`.only`), or weaken a test to make it pass. Fix the code. | `npx vitest run` |
+| 4 | **The app builds.** | `npm run build` |
+| 5 | **Trade data is never corrupted.** `lib/trade-normalization.ts`, `services/dataService.ts`: add fields, never rename/remove; no destructive DB migration without approval. | `npx vitest run lib/trade-normalization.test.ts services/dataService.test.ts` |
+| 6 | **cTrader token chain invariants** (§3a) hold. | `npx vitest run test/ctrader*.test.ts test/jfxApiKey.test.ts` |
+| 7 | **No secrets in code, logs or commits.** | `/security` command; `git diff --cached` review |
+| 8 | **Both themes + mobile still work** for any UI you touch (dark, light, `MobileLayout`). | `/first-user` agent or manual check |
+
+All of 1–4 run together with **`npm run gate`** (writes `reports/gate.json`).
+
+### 0.3 While working
+- Smallest change that does the job. Don't refactor, reformat, or "clean up"
+  files outside your task — that is how other features break.
+- One feature per commit, conventional message (`feat:`, `fix:` …).
+- Shipping a **new** feature? Add it to `specs/features.json` in the same commit
+  so the next agent can't delete it. Add a test for its core logic.
+- If the task conflicts with the PRD or would remove a feature, stop and ask.
+
+### 0.4 Definition of done (all required before you say "done")
+1. `npm run gate` passes (paste the summary or point at `reports/gate.json`).
+2. `/direction` — confirm the change matches `specs/PRD.md` (no drift).
+3. For risky changes (auth, payments/trading, data, API routes): `/security`
+   and `/breaker` on the touched area.
+4. For UI changes: `/first-user` on the touched screens.
+5. Report exactly what changed, what you tested, and anything you could not verify.
+
+### 0.5 Agent toolkit (OpenCode: `.opencode/`, Claude Code: `.claude/`)
+| Command | What it does |
+|---|---|
+| `/gate` | Run the full quality gate and fix what fails (never by weakening checks). |
+| `/direction` | Drift check: compares recent changes against `specs/` and reports a scorecard. |
+| `/breaker` | Spawns the **breaker** agent: tries to break the app (races, double-submits, bad input, slow network) on copies of data, never production. |
+| `/first-user` | Spawns the **first-time-user** agent: uses the running app in a browser with no code access, reports where a new trader gets stuck. |
+| `/flows` | Runs the critical user flows in `specs/FLOWS.md` end to end and writes `reports/flows.json` (error-free sessions). |
+| `/security` | Security pass on the diff (deepsec scan if `.deepsec/` exists + manual review of auth/RLS/secrets). |
+| `/triage` | Reads new bug reports/feedback and sorts them: clear bugs get fixed, judgement calls go to the owner. |
+
+The **pre-push hook** (`.githooks/pre-push`, enable once with `npm run hooks:install`)
+runs `npm run gate:fast`; GitHub Actions (`.github/workflows/gate.yml`) runs the
+full gate on every push and PR to `main`.
+
 ## 1. Repository layout (two repos, not one)
 
 | Path | Repo / remote | What it is | What deploys it |

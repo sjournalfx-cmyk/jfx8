@@ -54,3 +54,7 @@ GEMINI.md
 __pycache__/
 *.pyc
 scripts/.cache_calendar.json
+
+# Agent reports (gate, flows, breaker, direction)
+reports/
+.scratch/

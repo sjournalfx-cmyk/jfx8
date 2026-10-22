@@ -10,7 +10,12 @@
     "test": "node scripts/with-esbuild.cjs vitest",
     "lint": "tsc --noEmit",
     "supabase:migrate": "supabase db diff --local > supabase/migrations/$(date +%Y%m%d%H%M%S)_migration.sql && supabase db push",
-    "supabase:reset": "supabase db reset"
+    "supabase:reset": "supabase db reset",
+    "test:run": "node scripts/with-esbuild.cjs vitest run",
+    "guard": "node scripts/with-esbuild.cjs vitest run test/featureGuard.test.ts",
+    "gate:fast": "node scripts/gate.mjs --fast",
+    "gate": "node scripts/gate.mjs",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@dnd-kit/core": "6.0.8",

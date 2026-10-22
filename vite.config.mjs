@@ -1469,7 +1469,7 @@ export default defineConfig(({ mode }) => {
       // up its suites and failing them against this repo's jsdom setup, so a
       // green `npx vitest run` here was never actually green. Scope this repo
       // to its own sources.
-      exclude: ['**/node_modules/**', '**/dist/**', 'jfx-mobile/**'],
+      exclude: ['**/node_modules/**', '**/dist/**', 'jfx-mobile/**', '.deepsec/**', '.scratch/**'],
     },
     build: {
       rollupOptions: {

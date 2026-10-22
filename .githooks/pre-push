@@ -1,0 +1,5 @@
+#!/bin/sh
+# Blocks a push if the fast quality gate fails (feature guard, types, api syntax, tests).
+# Enable once per clone: npm run hooks:install   |  Emergency bypass (owner only): git push --no-verify
+echo "pre-push: running npm run gate:fast ..."
+npm run --silent gate:fast || { echo "pre-push: GATE FAILED. Fix it before pushing (see AGENTS.md §0)."; exit 1; }

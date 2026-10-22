@@ -1,0 +1,149 @@
+{
+  "_about": "The feature contract. Every entry here is a shipped feature. test/featureGuard.test.ts fails if any of them disappears. Removing or renaming an entry needs the owner's explicit OK in the same session; adding is always fine (add new features here when you ship them).",
+  "views": [
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "component": "components/Dashboard.tsx"
+    },
+    {
+      "id": "ea-setup",
+      "label": "Connect & Import",
+      "component": "components/EASetup.tsx"
+    },
+    {
+      "id": "log-trade",
+      "label": "Log Trade",
+      "component": "components/LogTrade.tsx"
+    },
+    {
+      "id": "history",
+      "label": "Journal / History",
+      "component": "components/Journal.tsx"
+    },
+    {
+      "id": "analytics",
+      "label": "Analytics",
+      "component": "components/Analytics.tsx"
+    },
+    {
+      "id": "notes",
+      "label": "Notebook",
+      "component": "components/Notes.tsx"
+    },
+    {
+      "id": "portfolios",
+      "label": "Portfolios",
+      "component": "components/PortfolioSwitcher.tsx"
+    },
+    {
+      "id": "charts",
+      "label": "Market Grid",
+      "component": "components/ChartGrid.tsx"
+    },
+    {
+      "id": "backtest-lab",
+      "label": "Backtest Lab",
+      "component": "components/BacktestLab.tsx"
+    },
+    {
+      "id": "ai-chat",
+      "label": "AI Assistant",
+      "component": "components/AIChat.tsx"
+    },
+    {
+      "id": "settings",
+      "label": "Settings",
+      "component": "components/Settings.tsx"
+    }
+  ],
+  "files": [
+    "components/Auth.tsx",
+    "components/AuthCallback.tsx",
+    "components/LandingPage.tsx",
+    "components/Onboarding.tsx",
+    "components/QuickLogModal.tsx",
+    "components/OpenPositions.tsx",
+    "components/TradeReplayOverlay.tsx",
+    "components/Rules.tsx",
+    "components/Playbook.tsx",
+    "components/ApiKeysPanel.tsx",
+    "components/discipline/ChecklistBuilder.tsx",
+    "components/discipline/TradingLocks.tsx",
+    "components/analytics/EquityCurveWidget.tsx",
+    "components/analytics/DetailedStatistics.tsx",
+    "components/analytics/RobustnessLab.tsx",
+    "components/analytics/ReportView.tsx",
+    "components/log-trade/TradeFormStep1.tsx",
+    "components/log-trade/TradeFormStep2.tsx",
+    "components/log-trade/TradeFormStep3.tsx",
+    "components/mobile/MobileLayout.tsx",
+    "lib/openui/library.tsx","lib/openui/GenerativeMessage.tsx",
+    "api/candles/index.ts",
+    "api/candles/harvest.ts",
+    "api/ctrader/accounts.ts",
+    "api/ctrader/callback.ts",
+    "api/ctrader/exchange.ts",
+    "api/ctrader/refresh.ts",
+    "api/ctrader/trade.ts",
+    "api/economic-calendar.ts",
+    "api/finnhub/[[route]].ts",
+    "api/fmp/[[route]].ts",
+    "api/nvidia.ts",
+    "api/transcribe.ts"
+  ],
+  "exports": {
+    "services/dataService.ts": [
+      "dataService",
+      "mapTradeFromDB",
+      "fetchPortfolios",
+      "insertPortfolio",
+      "patchPortfolio",
+      "deletePortfolioRow"
+    ],
+    "lib/trade-normalization.ts": [
+      "normalizeTrade",
+      "getSafePnL",
+      "detectAssetType"
+    ],
+    "lib/trade-calculations.ts": [
+      "calculatePnL",
+      "calculateRiskReward",
+      "getPipSize",
+      "getSessionFromTime"
+    ],
+    "lib/tradingLocks.ts": [
+      "evaluateLocks",
+      "readPortfolioLocks",
+      "writePortfolioLocks",
+      "requestUnlock"
+    ],
+    "lib/candleStore.ts": [
+      "loadSeries",
+      "saveSeries",
+      "mergeBars"
+    ]
+  },
+  "dataServiceMethods": [
+    "getTrades",
+    "addTrade",
+    "batchAddTrades",
+    "updateTrade",
+    "deleteTrades",
+    "restoreTrades",
+    "getNotes",
+    "addNote",
+    "updateNote",
+    "deleteNote",
+    "getGoals",
+    "addGoal",
+    "updateGoal",
+    "deleteGoal",
+    "updateProfile",
+    "saveBacktestSession",
+    "getBacktestSessions",
+    "getCashTransactions",
+    "addCashTransaction",
+    "savePortfolioLocks"
+  ]
+}
