@@ -14,7 +14,6 @@ import Notes from './notebook/Notes';
 import LogTrade from '../LogTrade';
 import { CtraderLogTradeTabs } from './CtraderLogTradeTabs';
 import EASetup from '../EASetup';
-import AIChat from '../AIChat';
 import Settings from '../Settings';
 import { ChevronLeft } from 'lucide-react';
 import QuickLogModal from '../QuickLogModal';
@@ -24,6 +23,10 @@ import { BrandedLoader } from '../ui/BrandedLoader';
 import { safeLazy } from '../../lib/safeLazy';
 
 const BacktestLab = safeLazy(() => import('../BacktestLab'));
+// Code-split: the AI chat (and its markdown + generative-UI deps) loads only
+// when the user opens it, instead of riding in the main bundle. App.tsx
+// already lazy-loads it; this static import was defeating that split.
+const AIChat = safeLazy(() => import('../AIChat'));
 
 interface MobileLayoutProps {
   currentView: string;
@@ -619,6 +622,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         {/* AI STRATEGY COPILOT VIEW — full-bleed, no bottom nav, zoomed-out minimal */}
         {currentView === 'ai-chat' && (
           <div className="h-full w-full max-w-full min-w-0 overflow-hidden flex flex-col [zoom:0.92] sm:[zoom:1] origin-top">
+            <Suspense fallback={<BrandedLoader />}>
             <AIChat
               isDarkMode={true}
               trades={filteredTrades}
@@ -640,6 +644,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
                 onViewChange(target);
               }}
             />
+            </Suspense>
           </div>
         )}
       </main>
