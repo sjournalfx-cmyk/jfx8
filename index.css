@@ -667,6 +667,16 @@ canvas, svg {
 
 /* Mobile native feel — safe-area + tap — 44pt minimum */
 body.jfx-mobile .safe-area-inset-bottom { padding-bottom: env(safe-area-inset-bottom); }
+/* Mobile web: size the app to the *visible* viewport (100dvh excludes the
+   browser's address/tool bars; 100vh does not and clips the page bottom), and
+   never let the document itself scroll — only <main> scrolls. That keeps fixed
+   headers (e.g. the AI chat Research/Mentor bar) pinned on screen. */
+.jfx-app-shell { height: 100vh; height: 100dvh; }
+html:has(body.jfx-mobile), body.jfx-mobile { height: 100%; overflow: hidden; overscroll-behavior: none; }
+body.jfx-mobile #root { height: 100%; }
+/* Backtest Lab's slide-in panels are position:fixed full-height; stop them at
+   the top of the floating nav so their last rows stay reachable. */
+body.jfx-mobile .jfx-lab-shell .fixed.inset-y-0 { bottom: var(--jfx-nav-h, 0px); }
 body.jfx-mobile .pb-nav { padding-bottom: calc(5.25rem + env(safe-area-inset-bottom)); }
 body.jfx-mobile .pb-nav-plus-fab { padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
 /* Analytics fullscreen takeover — lock bg scroll + force-hide the floating

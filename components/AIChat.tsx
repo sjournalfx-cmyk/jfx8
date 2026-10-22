@@ -801,6 +801,23 @@ interface ChallengesStepProps {
   onChange: (update: Partial<Pick<WizardData, 'challenges'>>) => void;
 }
 
+/**
+ * Scroll ONLY the chat's own message list to the end.
+ * Never use element.scrollIntoView() here: it also scrolls every ancestor —
+ * including overflow-hidden ones and the page itself — which pushed the
+ * header (Research / Mentor toggles) off the top of the screen on mobile web.
+ */
+export function scrollMessagesToEnd(end: HTMLElement | null, behavior: ScrollBehavior = 'smooth') {
+  if (!end) return;
+  let el: HTMLElement | null = end.parentElement;
+  while (el) {
+    const oy = window.getComputedStyle(el).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) break;
+    el = el.parentElement;
+  }
+  if (el) el.scrollTo({ top: el.scrollHeight, behavior });
+}
+
 interface ResearchPrompt {
   title: string;
   icon: React.ReactNode;
@@ -1566,7 +1583,7 @@ const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], use
     if (!stickToBottomRef.current) return;
 
     const timer = window.setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: isGenerating || isTranscribing ? 'auto' : 'smooth' });
+      scrollMessagesToEnd(messagesEndRef.current, isGenerating || isTranscribing ? 'auto' : 'smooth');
     }, 50);
 
     return () => window.clearTimeout(timer);
@@ -3105,7 +3122,7 @@ ${strategyProfile.whyITrade}`;
                 initial={{ opacity: 0, scale: 0.9, y: 12 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 12 }}
-                onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => scrollMessagesToEnd(messagesEndRef.current, 'smooth')}
                 className={`flex items-center justify-center w-9 h-9 rounded-full shadow-lg transition-all active:scale-95 border backdrop-blur-sm opacity-50 hover:opacity-90 ${
                   isDarkMode
                     ? 'bg-black/45 text-zinc-300 hover:bg-black/70 border-zinc-700/60'

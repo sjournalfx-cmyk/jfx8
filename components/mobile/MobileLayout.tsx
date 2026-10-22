@@ -298,8 +298,37 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
     }
   }, [isWidgetFullscreenOpen]);
 
+  // Single source of truth for whether the floating bottom nav (+ FAB) is on screen.
+  const showBottomNav = !isAiChatView && !isWidgetFullscreenOpen && !isTradeDetailOpen && currentView !== 'discipline' && !(isBacktestLabView && isBacktestChartOpen);
+  // Views where <main> itself is the scroll container (everything except the
+  // full-bleed views that manage their own scrolling).
+  const mainScrolls = !isAiChatView && !isLogTradeView && !isBacktestLabView;
+
+  // Measure the real height of the floating nav (FAB + island) and expose it as
+  // --jfx-nav-h, so the bottom spacer always clears it — even if the nav changes.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const root = document.documentElement;
+    const nav = document.querySelector('.jfx-mobile-nav') as HTMLElement | null;
+    if (!showBottomNav || !nav) { root.style.setProperty('--jfx-nav-h', '0px'); return; }
+    const update = () => {
+      const top = nav.getBoundingClientRect().top;
+      root.style.setProperty('--jfx-nav-h', `${Math.max(0, Math.ceil(window.innerHeight - top))}px`);
+    };
+    update();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(nav);
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
+    };
+  }, [showBottomNav, currentView]);
+
   return (
-    <div className="flex flex-col h-screen w-full bg-[#000000] text-zinc-100 overflow-hidden overflow-x-hidden select-none">
+    <div className="jfx-app-shell flex flex-col w-full bg-[#000000] text-zinc-100 overflow-hidden overflow-x-hidden select-none">
       
       {/* 1. Mobile Top Header — hidden on AI chat and Backtest Lab (it has its own header) */}
       {isHomeView && (
@@ -321,6 +350,12 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         onScroll={(e) => {
           if (e.currentTarget.scrollLeft !== 0) {
             e.currentTarget.scrollLeft = 0;
+          }
+          // Full-bleed views (AI chat, Log Trade, Backtest Lab) scroll inside
+          // themselves; <main> must never be scrolled under them or their
+          // headers slide off the top of the screen.
+          if (!mainScrolls && e.currentTarget.scrollTop !== 0) {
+            e.currentTarget.scrollTop = 0;
           }
         }}
         className={`flex-1 overflow-y-auto overflow-x-hidden no-scrollbar overscroll-y-contain ${isAiChatView || isLogTradeView ? 'overflow-hidden' : isBacktestLabView ? 'overflow-hidden flex flex-col' : ''}`}
@@ -387,7 +422,11 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
         {/* BACKTEST LAB VIEW */}
         {isBacktestLabView && (
-          <div className="flex-1 min-h-0 w-full flex flex-col overflow-hidden">
+          <div
+            className="jfx-lab-shell flex-1 min-h-0 w-full flex flex-col overflow-hidden"
+            // Full-bleed view: keep its own scroll lists above the floating nav.
+            style={showBottomNav ? { paddingBottom: 'var(--jfx-nav-h, 9.5rem)' } : undefined}
+          >
             <Suspense fallback={<BrandedLoader />}>
               <BacktestLab isDarkMode={true} userProfile={userProfile} onUpdateProfile={onUpdateProfile} onChartOpenChange={setIsBacktestChartOpen} />
             </Suspense>
@@ -446,7 +485,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
         {/* PORTFOLIOS DEDICATED PAGE */}
         {currentView === 'portfolios' && (
-          <div className="pb-20">
+          <div>
             <MobilePortfoliosView
               portfolios={portfolios || []}
               activePortfolioId={activePortfolioId || null}
@@ -475,7 +514,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
         {/* HISTORY / JOURNAL TRADES VIEW */}
         {currentView === 'history' && (
-          <div className="pb-20">
+          <div>
             <Journal
               isDarkMode={true}
               trades={filteredTrades}
@@ -498,7 +537,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
         {/* JOURNAL / NOTES VIEW */}
         {(currentView === 'notes' || currentView === 'journal') && (
-          <div className="pb-20">
+          <div>
             <Notes
               isDarkMode={true}
               notes={notes}
@@ -515,7 +554,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
         {/* EA SETUP / BROKER CONNECT VIEW */}
         {currentView === 'ea-setup' && userId && (
-          <div className="pb-20">
+          <div>
             <EASetup
               isDarkMode={true}
               userProfile={userProfile}
@@ -573,7 +612,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
         {/* SETTINGS VIEW — desktop Settings (Persona, Plan & Billing, Security…) adapted via .mobile-settings CSS */}
         {currentView === 'settings' && (
-          <div className="pb-20 bg-[#000000] min-h-full">
+          <div className="bg-[#000000] min-h-full">
             <div className="sticky top-0 z-30 bg-[#000000]/90 backdrop-blur-xl border-b border-white/[0.06]">
               <div className="relative flex items-center h-14 px-2">
                 <button
@@ -647,10 +686,22 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
             </Suspense>
           </div>
         )}
+
+        {/* Bottom spacer — guarantees the last content on every scrolling page
+            clears the floating nav/FAB and the device safe area. Guarded by
+            test/mobileScroll.test.ts; do not remove. */}
+        {mainScrolls && (
+          <div
+            aria-hidden="true"
+            data-testid="mobile-bottom-spacer"
+            className="jfx-bottom-spacer shrink-0 w-full pointer-events-none"
+            style={{ height: showBottomNav ? 'calc(var(--jfx-nav-h, 9.5rem) + 1rem)' : 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+          />
+        )}
       </main>
 
       {/* 3. Bottom Navigation Bar — hidden on AI chat, while a Backtest chart is open (replay dock replaces it), while an analytics fullscreen overlay is open, and while the cTrader trade detail owns the screen */}
-      {!isAiChatView && !isWidgetFullscreenOpen && !isTradeDetailOpen && currentView !== 'discipline' && !(isBacktestLabView && isBacktestChartOpen) && (
+      {showBottomNav && (
       <MobileNav
         currentView={currentView}
         onViewChange={(newView) => {
