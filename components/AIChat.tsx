@@ -12,6 +12,9 @@ import { TrendingUp, TrendingDown, Brain, Clock, Coins, ChevronDown, X, Plus, Wo
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from './ui/Toast';
+import GenerativeMessage, { type GenUiNavTarget } from '../lib/openui/GenerativeMessage';
+import { extractGenerativeParts } from '../lib/openui/detect';
+import { GEN_UI } from '../lib/openui/flag';
 
 // Paid data proxies (/api/fmp, /api/finnhub) require an authenticated Supabase
 // session server-side; attach the access token so logged-in users keep working.
@@ -472,6 +475,8 @@ interface AIChatProps {
   onAddNote?: (note: Note) => Promise<Note | undefined>;
   onOpenSettings?: () => void;
   onBackToHome?: () => void;
+  /** In-app navigation for buttons inside AI-generated UI. Never trades. */
+  onNavigate?: (target: GenUiNavTarget, tradeId?: string) => void;
 }
 
 const STRATEGY_SECTION_ORDER = ['IDENTITY', 'MARKET_SELECTION', 'CORE_EDGE', 'RISK', 'STRATEGY_RULES', 'EXECUTION_FLOW', 'EXIT_PROTOCOL', 'ROUTINE', 'REVIEW'];
@@ -954,7 +959,7 @@ const formatForexFactoryCalendarMarkdown = (events: ForexFactoryEvent[]): string
 };
 
 // --- Slash Commands --
-const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, notes = [], goals = [], onAddNote, onOpenSettings, onBackToHome }) => {
+const AIChat: React.FC<AIChatProps> = ({ isDarkMode, trades: rawTrades = [], userProfile, dailyBias = [], eaSession, lastKnownBridgeBalance, isBridgeOnline = false, notes = [], goals = [], onAddNote, onOpenSettings, onBackToHome, onNavigate }) => {
   // Full mentor context: notebook + goals ride as props, live open positions
   // come from the already-connected EA session. Rules checklist is read from
   // localStorage inside the AI service at send time (always fresh).
@@ -2281,6 +2286,9 @@ ${strategyProfile.whyITrade}`;
     const isAudioOnlyUserMessage = isUser && Boolean(audioAttachment) && (!content || content === '[Voice recording]');
 
     let safeContent = isUser ? cleanThinkingTags(content || '') : cleanAssistantResponse(content || '');
+    // Generative UI: detect an OpenUI Lang program before markdown normalisation
+    // can touch it. Plain replies (and every older saved message) skip this.
+    const generativeParts = !isUser && GEN_UI && !audioAttachment ? extractGenerativeParts(safeContent) : null;
     if (!isUser) {
       safeContent = normalizeAssistantMarkdown(safeContent);
       if (message.contextSummary?.mode === 'mentor') {
@@ -2313,14 +2321,25 @@ ${strategyProfile.whyITrade}`;
             )}
           </div>
         )}
-        {isAudioOnlyUserMessage ? null : (
+        {isAudioOnlyUserMessage ? null : generativeParts ? (
+          <div className="space-y-4">
+            {generativeParts.before && renderStructuredContent(normalizeAssistantMarkdown(generativeParts.before), `message-${message.id}-before`)}
+            <GenerativeMessage
+              code={generativeParts.code}
+              isStreaming={message.isStreaming}
+              onNavigate={onNavigate}
+              fallback={renderStructuredContent(safeContent, `message-${message.id}-fallback`)}
+            />
+            {generativeParts.after && renderStructuredContent(normalizeAssistantMarkdown(generativeParts.after), `message-${message.id}-after`)}
+          </div>
+        ) : (
           <div className="space-y-4">
             {renderStructuredContent(safeContent, `message-${message.id}`)}
           </div>
         )}
       </div>
     );
-  }, [isDarkMode, renderMarkdownFragment, renderStructuredContent]);
+  }, [isDarkMode, renderMarkdownFragment, renderStructuredContent, onNavigate]);
 
   // Memoized so the React.memo'd MessageRow actually skips re-renders while
   // the parent updates (typing, generation toggles, etc.).

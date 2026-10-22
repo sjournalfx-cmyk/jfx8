@@ -3,6 +3,8 @@ import { calculateStats } from "../lib/statsUtils";
 import { overallComplianceRate, topViolation, costOfViolations } from "../lib/disciplineChecklist";
 import { cleanAssistantResponse, isInsideThinkingBlock } from "../lib/thinkingCleaner";
 import { isNative } from "../lib/capacitor";
+import { GEN_UI } from "../lib/openui/flag";
+import { getOpenUiSystemPrompt } from "../lib/openui/prompt";
 
 // Web is same-origin only (no native shell, no absolute backend host), so the
 // base URL stays relative exactly like the rest of the web api/* surface.
@@ -497,6 +499,19 @@ const buildMentorDataSummary = (
   };
 };
 
+
+// Generative UI (OpenUI): append the component-library instructions to the
+// existing system prompt. Switch off with VITE_AI_GENERATIVE_UI=false.
+const withGenerativeUi = (basePrompt: string): string => {
+  if (!GEN_UI) return basePrompt;
+  try {
+    return `${basePrompt}\n\n${getOpenUiSystemPrompt()}`;
+  } catch (error) {
+    console.warn("[ai-chat] OpenUI prompt unavailable, using text-only prompt", error);
+    return basePrompt;
+  }
+};
+
 const buildResearchSystemPrompt = () => `
 You are JFX-JOURNAL Research.
 
@@ -659,12 +674,15 @@ export const buildAiRequestPayload = ({
       };
 
   if (assistantMode === "research") {
-    messages.push({ role: "system", content: buildResearchSystemPrompt() });
+    messages.push({ role: "system", content: withGenerativeUi(buildResearchSystemPrompt()) });
   } else {
     const mentorDataSummary = buildMentorDataSummary(trades, userProfile, dailyBias, analyticsSnapshot, extraContext);
     messages.push({
       role: "system",
-      content: buildMentorSystemPrompt(query, userProfile, mentorDataSummary, isPlanMode, isSpecialAnalysis),
+      content: (isPlanMode || isSpecialAnalysis)
+        // Plan / special-analysis replies are parsed into section cards; keep them text-only.
+        ? buildMentorSystemPrompt(query, userProfile, mentorDataSummary, isPlanMode, isSpecialAnalysis)
+        : withGenerativeUi(buildMentorSystemPrompt(query, userProfile, mentorDataSummary, isPlanMode, isSpecialAnalysis)),
     });
   }
 

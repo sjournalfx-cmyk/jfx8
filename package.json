@@ -17,6 +17,8 @@
     "@dnd-kit/sortable": "7.0.2",
     "@dnd-kit/utilities": "3.2.1",
     "@google/generative-ai": "^0.24.1",
+    "@openuidev/lang-core": "^1.0.1",
+    "@openuidev/react-lang": "^1.0.1",
     "@supabase/supabase-js": "^2.89.0",
     "@tabler/icons-react": "^3.36.1",
     "@tiptap/extension-bubble-menu": "^3.15.0",

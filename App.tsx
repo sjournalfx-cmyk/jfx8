@@ -1629,6 +1629,7 @@ const onLogout = async () => {
                 lastKnownBridgeBalance={lastKnownBridgeBalance}
                 isBridgeOnline={isBridgeOnline}
                 onOpenSettings={() => setCurrentView('settings')}
+                onNavigate={(target) => setCurrentView(target)}
               />
             )}
             {currentView === 'log-trade' && activeUserProfile && (

@@ -1,0 +1,459 @@
+{
+  "root": "Stack",
+  "components": {
+    "MetricCard": {
+      "signature": "MetricCard(label: string, value: string, change?: string, tone?: \"positive\" | \"negative\" | \"neutral\")",
+      "description": "A single KPI or metric with a label, value and optional change/tone."
+    },
+    "EquityChart": {
+      "signature": "EquityChart(points: {date: string, value: number}[])",
+      "description": "An area chart of account equity over time. Points must be ordered oldest to newest."
+    },
+    "TradeTable": {
+      "signature": "TradeTable(rows: {pair: string, side: string, result: string, r: number | string, date: string, tradeId?: string}[])",
+      "description": "A compact table of trades. Use for best/worst trades, recent trades, or filtered trade lists."
+    },
+    "RuleViolationList": {
+      "signature": "RuleViolationList(items: {rule: string, count: number, lastSeen?: string}[])",
+      "description": "A list of broken trading rules with occurrence counts. Use for discipline/compliance reviews."
+    },
+    "SessionBreakdown": {
+      "signature": "SessionBreakdown(rows: {session: string, winRate: number, trades: number}[])",
+      "description": "Win rate and trade count by trading session (London, New York, Asia, etc.)."
+    },
+    "ChecklistCard": {
+      "signature": "ChecklistCard(items: {label: string, checked?: boolean}[])",
+      "description": "A short pre-trade or review checklist with checked/unchecked items."
+    },
+    "ActionButtons": {
+      "signature": "ActionButtons(buttons: {label: string, action: {type: \"open_url\", url: string} | {type: \"continue_conversation\", context?: string} | {type: string, params?: Record<string, any>}}[])",
+      "description": "Navigation shortcuts rendered as buttons. Buttons may only open existing app screens; they never place, close or edit trades."
+    },
+    "Stack": {
+      "signature": "Stack(children: (MetricCard | EquityChart | TradeTable | RuleViolationList | SessionBreakdown | ChecklistCard | ActionButtons)[])",
+      "description": "Root vertical container. Pass the other components as its children, in display order."
+    }
+  },
+  "actions": {
+    "OpenJournal": {
+      "signature": "OpenJournal()",
+      "description": "Navigate to the trade journal (history)."
+    },
+    "OpenAnalytics": {
+      "signature": "OpenAnalytics()",
+      "description": "Navigate to analytics / weekly review."
+    },
+    "OpenLogTrade": {
+      "signature": "OpenLogTrade()",
+      "description": "Navigate to the log-trade form. It never submits or modifies a trade."
+    },
+    "OpenTradeDetail": {
+      "signature": "OpenTradeDetail(tradeId: string)",
+      "description": "Open an existing trade in the app. Requires the trade id from the journal context."
+    }
+  },
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "MetricCard": {
+        "$ref": "#/$defs/MetricCard"
+      },
+      "EquityChart": {
+        "$ref": "#/$defs/EquityChart"
+      },
+      "TradeTable": {
+        "$ref": "#/$defs/TradeTable"
+      },
+      "RuleViolationList": {
+        "$ref": "#/$defs/RuleViolationList"
+      },
+      "SessionBreakdown": {
+        "$ref": "#/$defs/SessionBreakdown"
+      },
+      "ChecklistCard": {
+        "$ref": "#/$defs/ChecklistCard"
+      },
+      "ActionButtons": {
+        "$ref": "#/$defs/ActionButtons"
+      },
+      "Stack": {
+        "$ref": "#/$defs/Stack"
+      }
+    },
+    "required": [
+      "MetricCard",
+      "EquityChart",
+      "TradeTable",
+      "RuleViolationList",
+      "SessionBreakdown",
+      "ChecklistCard",
+      "ActionButtons",
+      "Stack"
+    ],
+    "additionalProperties": false,
+    "$defs": {
+      "MetricCard": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "change": {
+            "type": "string"
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative",
+              "neutral"
+            ]
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false,
+        "description": "A single KPI or metric with a label, value and optional change/tone."
+      },
+      "EquityChart": {
+        "type": "object",
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "date",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "additionalProperties": false,
+        "description": "An area chart of account equity over time. Points must be ordered oldest to newest."
+      },
+      "TradeTable": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pair": {
+                  "type": "string"
+                },
+                "side": {
+                  "type": "string"
+                },
+                "result": {
+                  "type": "string"
+                },
+                "r": {
+                  "type": [
+                    "number",
+                    "string"
+                  ]
+                },
+                "date": {
+                  "type": "string"
+                },
+                "tradeId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pair",
+                "side",
+                "result",
+                "r",
+                "date"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "additionalProperties": false,
+        "description": "A compact table of trades. Use for best/worst trades, recent trades, or filtered trade lists."
+      },
+      "RuleViolationList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "rule": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                },
+                "lastSeen": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "rule",
+                "count"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "A list of broken trading rules with occurrence counts. Use for discipline/compliance reviews."
+      },
+      "SessionBreakdown": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "type": "string"
+                },
+                "winRate": {
+                  "type": "number"
+                },
+                "trades": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "session",
+                "winRate",
+                "trades"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "additionalProperties": false,
+        "description": "Win rate and trade count by trading session (London, New York, Asia, etc.)."
+      },
+      "ChecklistCard": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "checked": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "A short pre-trade or review checklist with checked/unchecked items."
+      },
+      "ActionButtons": {
+        "type": "object",
+        "properties": {
+          "buttons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "action": {
+                  "$ref": "#/$defs/ActionExpression"
+                }
+              },
+              "required": [
+                "label",
+                "action"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "buttons"
+        ],
+        "additionalProperties": false,
+        "description": "Navigation shortcuts rendered as buttons. Buttons may only open existing app screens; they never place, close or edit trades."
+      },
+      "ActionExpression": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "open_url"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "continue_conversation"
+              },
+              "context": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Stack": {
+        "type": "object",
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MetricCard"
+                },
+                {
+                  "$ref": "#/$defs/EquityChart"
+                },
+                {
+                  "$ref": "#/$defs/TradeTable"
+                },
+                {
+                  "$ref": "#/$defs/RuleViolationList"
+                },
+                {
+                  "$ref": "#/$defs/SessionBreakdown"
+                },
+                {
+                  "$ref": "#/$defs/ChecklistCard"
+                },
+                {
+                  "$ref": "#/$defs/ActionButtons"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "children"
+        ],
+        "additionalProperties": false,
+        "description": "Root vertical container. Pass the other components as its children, in display order."
+      }
+    },
+    "actions": {
+      "OpenJournal": {
+        "description": "Navigate to the trade journal (history).",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "OpenAnalytics": {
+        "description": "Navigate to analytics / weekly review.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "OpenLogTrade": {
+        "description": "Navigate to the log-trade form. It never submits or modifies a trade.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "OpenTradeDetail": {
+        "description": "Open an existing trade in the app. Requires the trade id from the journal context.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "tradeId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tradeId"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

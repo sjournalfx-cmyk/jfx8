@@ -630,6 +630,15 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
               notes={notes}
               goals={goals}
               onBackToHome={() => onViewChange('dashboard')}
+              onNavigate={(target) => {
+                // Mobile shows analytics as a Home sub-tab, not its own view.
+                if (target === 'analytics') {
+                  setHomeSubTab('analytics');
+                  onViewChange('dashboard');
+                  return;
+                }
+                onViewChange(target);
+              }}
             />
           </div>
         )}
