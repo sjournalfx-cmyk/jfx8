@@ -9,7 +9,9 @@ import {
   dayKeyInTz,
   evaluateLocks,
   isRuleActive,
+  normalizePortfolioLocks,
   readPortfolioLocks,
+  writePortfolioLocks,
 } from '../../lib/tradingLocks';
 
 interface CtraderTradeTabProps {
@@ -133,17 +135,45 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
     if (numericAccountId === null) setInternalSymbolId(null);
   }, [numericAccountId]);
 
-  // Trading locks for this portfolio (per-portfolio rules, fail-open).
+  // Trading locks for this portfolio. Cloud is the source of truth; the
+  // local cache is the fallback and the newest updatedAt wins the merge.
   const [locks, setLocks] = useState(() => readPortfolioLocks(portfolioId));
   useEffect(() => {
+    let alive = true;
     setLocks(readPortfolioLocks(portfolioId));
+    if (!portfolioId) {
+      return () => {
+        alive = false;
+      };
+    }
+    void (async () => {
+      try {
+        const m = await import('../../services/dataService');
+        const remote = await m.dataService.loadPortfolioLocks(portfolioId);
+        if (!alive || !remote) return;
+        const currentLocal = readPortfolioLocks(portfolioId);
+        const remoteAt = Date.parse(remote.updatedAt || '') || 0;
+        const localAt = Date.parse(currentLocal.updatedAt || '') || 0;
+        if (remoteAt > localAt) {
+          const normalized = normalizePortfolioLocks(remote);
+          writePortfolioLocks(portfolioId, normalized);
+          setLocks(normalized);
+        }
+      } catch {
+        // Cloud unavailable: keep the local cache.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, [portfolioId]);
 
   // Fills opened today (account scope) for the max-trades rule.
-  const [fillsToday, setFillsToday] = useState(0);
+  // null = unknown; never treat a failed count as zero.
+  const [fillsToday, setFillsToday] = useState<number | null>(null);
   const refreshFills = useCallback(async () => {
     if (numericAccountId === null) {
-      setFillsToday(0);
+      setFillsToday(null);
       return;
     }
     const n = await countOpensToday(numericAccountId, isDemo, timezone);
@@ -155,8 +185,8 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
 
   // Current selection against the locks (drives button lock states + banner).
   const lockVerdict = useMemo(
-    () => evaluateLocks(locks, { symbolId, volumeLots: volume, fillsToday }),
-    [locks, symbolId, volume, fillsToday]
+    () => evaluateLocks(locks, { symbolId, volumeLots: volume, fillsToday, timezone }),
+    [locks, symbolId, volume, fillsToday, timezone]
   );
   const anyLockActive =
     isRuleActive(locks.pairWhitelist) || isRuleActive(locks.maxTrades) || isRuleActive(locks.lotGuard);
@@ -234,11 +264,16 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
         return;
       }
       // Trading locks gate NEW risk only — closes and SL/TP edits never pass here.
-      const verdict = evaluateLocks(locks, { symbolId, volumeLots: volume, fillsToday });
+      const verdict = evaluateLocks(locks, { symbolId, volumeLots: volume, fillsToday, timezone });
       if (verdict.allowed === false) {
         bumpLockStat(portfolioId, dayKeyInTz(Date.now(), timezone), 'blocks');
         setLastResult(`Locked: ${verdict.message}`);
-        addToast({ type: 'error', title: 'Blocked by trading lock', message: `${verdict.message} Adjust in Rules & Checklists.`, duration: 5000 });
+        addToast({
+          type: 'error',
+          title: 'Blocked by trading lock',
+          message: verdict.reason === 'count_unavailable' ? verdict.message : `${verdict.message} Adjust in Rules & Checklists.`,
+          duration: 5000,
+        });
         return;
       }
       setIsPlacing(side);
@@ -468,11 +503,24 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
       {lastResult && <p className="mt-3 text-center text-[12px] font-medium text-zinc-400 px-4">{lastResult}</p>}
 
       {lockVerdict.allowed === false && (
-        <div className="mt-3 flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
-          <Lock size={14} className="text-amber-300 shrink-0" />
-          <p className="text-[11px] font-bold text-amber-200 leading-snug">
-            Locked: {lockVerdict.message} Adjust in Rules &amp; Checklists.
-          </p>
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
+          <Lock size={14} className="text-amber-300 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold text-amber-200 leading-snug">
+              {lockVerdict.reason === 'count_unavailable'
+                ? lockVerdict.message
+                : `Locked: ${lockVerdict.message} Adjust in Rules & Checklists.`}
+            </p>
+            {lockVerdict.reason === 'count_unavailable' && (
+              <button
+                type="button"
+                onClick={() => void refreshFills()}
+                className="mt-1.5 text-[11px] font-black text-amber-200 underline active:scale-95"
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -497,7 +545,7 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
       </div>
       {anyLockActive && lockVerdict.allowed && (
         <p className="mt-2 text-center text-[10px] font-medium text-zinc-600">
-          Trading locks on for this portfolio · {fillsToday} trade(s) opened today
+          Trading locks on for this portfolio · {fillsToday ?? '…'} trade(s) opened today
         </p>
       )}
     </div>

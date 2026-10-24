@@ -10,15 +10,39 @@
 export const LOCK_UNLOCK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_TZ = 'Africa/Johannesburg';
 
+export interface PendingChange<T> {
+  value: T;
+  requestedAt: string;
+}
+
 export interface LockRule {
   enabled: boolean;
   unlockRequestedAt?: string | null;
+  pendingChange?: PendingChange<any> | null;
 }
 
 export interface PortfolioLocks {
-  pairWhitelist?: { enabled: boolean; symbolIds: number[]; unlockRequestedAt?: string | null };
-  maxTrades?: { enabled: boolean; maxPerDay: number; unlockRequestedAt?: string | null };
-  lotGuard?: { enabled: boolean; minLots?: number; maxLots?: number; unlockRequestedAt?: string | null };
+  pairWhitelist?: {
+    enabled: boolean;
+    symbolIds: number[];
+    symbolNames?: Record<number, string>;
+    unlockRequestedAt?: string | null;
+    pendingChange?: PendingChange<{ symbolIds?: number[]; symbolNames?: Record<number, string> }> | null;
+  };
+  maxTrades?: {
+    enabled: boolean;
+    maxPerDay: number;
+    unlockRequestedAt?: string | null;
+    pendingChange?: PendingChange<{ maxPerDay?: number }> | null;
+  };
+  lotGuard?: {
+    enabled: boolean;
+    minLots?: number;
+    maxLots?: number;
+    unlockRequestedAt?: string | null;
+    pendingChange?: PendingChange<{ minLots?: number | null; maxLots?: number | null }> | null;
+  };
+  updatedAt?: string;
 }
 
 export function unlockMsRemaining(unlockRequestedAt: string | null | undefined, now = Date.now()): number {
@@ -38,6 +62,118 @@ export function isRuleActive(rule: LockRule | undefined, now = Date.now()): bool
   const req = rule.unlockRequestedAt ?? null;
   if (!req) return true;
   return unlockMsRemaining(req, now) > 0;
+}
+
+/**
+ * A pending loosen applies only after its own 24h wait. Future timestamps
+ * are ignored rather than clamped down to "now" (clamping would shorten the
+ * wait); malformed timestamps never apply either.
+ */
+export function pendingChangeElapsed(
+  change: { requestedAt?: string | null } | null | undefined,
+  now = Date.now()
+): boolean {
+  if (!change?.requestedAt) return false;
+  const t = Date.parse(change.requestedAt);
+  if (!Number.isFinite(t)) return false;
+  if (t > now) return false;
+  return t + LOCK_UNLOCK_COOLDOWN_MS <= now;
+}
+
+const normalizeBase = <T extends LockRule>(rule: T, now: number): T => {
+  if (!rule.enabled) return { ...rule, pendingChange: null };
+  if (rule.unlockRequestedAt && unlockMsRemaining(rule.unlockRequestedAt, now) <= 0) {
+    return { ...rule, enabled: false, unlockRequestedAt: null, pendingChange: null };
+  }
+  if (rule.pendingChange && !Number.isFinite(Date.parse(rule.pendingChange.requestedAt))) {
+    return { ...rule, pendingChange: null };
+  }
+  return rule;
+};
+
+const uniqueIds = (ids: unknown): number[] => {
+  const out: number[] = [];
+  for (const raw of Array.isArray(ids) ? ids : []) {
+    const id = Number(raw);
+    if (Number.isFinite(id) && !out.includes(id)) out.push(id);
+  }
+  return out;
+};
+
+const normalizePairWhitelist = (
+  rule: NonNullable<PortfolioLocks['pairWhitelist']>,
+  now: number
+): NonNullable<PortfolioLocks['pairWhitelist']> => {
+  const base = normalizeBase(rule, now);
+  const change = base.pendingChange;
+  if (!change || !pendingChangeElapsed(change, now)) return base;
+  const value = change.value || {};
+  const nextIds = Array.isArray(value.symbolIds) ? uniqueIds(value.symbolIds) : base.symbolIds;
+  // An active rule must never end up with an empty whitelist (that would
+  // block every pair); keep the last current set instead.
+  const symbolIds = nextIds.length === 0 && base.symbolIds.length > 0 ? base.symbolIds : nextIds;
+  const symbolNames = value.symbolNames && typeof value.symbolNames === 'object'
+    ? { ...(base.symbolNames || {}), ...value.symbolNames }
+    : base.symbolNames;
+  return { ...base, symbolIds, symbolNames, pendingChange: null };
+};
+
+const normalizeMaxTrades = (
+  rule: NonNullable<PortfolioLocks['maxTrades']>,
+  now: number
+): NonNullable<PortfolioLocks['maxTrades']> => {
+  const base = normalizeBase(rule, now);
+  const change = base.pendingChange;
+  if (!change || !pendingChangeElapsed(change, now)) return base;
+  const pendingMax = Number(change.value?.maxPerDay);
+  if (!Number.isFinite(pendingMax)) return { ...base, pendingChange: null };
+  return { ...base, maxPerDay: Math.max(1, Math.floor(pendingMax)), pendingChange: null };
+};
+
+const finiteBound = (value: unknown): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+};
+
+const normalizeLotGuard = (
+  rule: NonNullable<PortfolioLocks['lotGuard']>,
+  now: number
+): NonNullable<PortfolioLocks['lotGuard']> => {
+  const base = normalizeBase(rule, now);
+  const change = base.pendingChange;
+  if (!change || !pendingChangeElapsed(change, now)) return base;
+  const value = change.value || {};
+  const next: NonNullable<PortfolioLocks['lotGuard']> = { ...base, pendingChange: null };
+  if (Object.prototype.hasOwnProperty.call(value, 'minLots')) next.minLots = finiteBound(value.minLots);
+  if (Object.prototype.hasOwnProperty.call(value, 'maxLots')) next.maxLots = finiteBound(value.maxLots);
+  return next;
+};
+
+/** Merge elapsed pending changes and drop expired cooling requests. */
+export function normalizeLocks(locks: PortfolioLocks | null | undefined, now = Date.now()): PortfolioLocks | null {
+  if (!locks) return null;
+  return {
+    ...locks,
+    pairWhitelist: locks.pairWhitelist ? normalizePairWhitelist(locks.pairWhitelist, now) : locks.pairWhitelist,
+    maxTrades: locks.maxTrades ? normalizeMaxTrades(locks.maxTrades, now) : locks.maxTrades,
+    lotGuard: locks.lotGuard ? normalizeLotGuard(locks.lotGuard, now) : locks.lotGuard,
+  };
+}
+
+/** Short timezone label (SAST, EDT, …) with the IANA id as a fallback. */
+export function shortTimezoneName(tz?: string, at = Date.now()): string {
+  const zone = tz || FALLBACK_TZ;
+  for (const locale of ['en-ZA', 'en-GB', 'en-US']) {
+    try {
+      const parts = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: 'short' }).formatToParts(new Date(at));
+      const name = parts.find((p) => p.type === 'timeZoneName')?.value || '';
+      if (name && !/^(GMT|UTC)/i.test(name)) return name;
+    } catch {
+      /* try the next locale */
+    }
+  }
+  return zone;
 }
 
 export function dayKeyInTz(timestampMs: number, tz?: string): string {
@@ -88,35 +224,55 @@ export function startOfDayMs(dayKey: string, tz: string): number {
 
 export type LockVerdict =
   | { allowed: true }
-  | { allowed: false; rule: 'pairWhitelist' | 'maxTrades' | 'lotGuard'; message: string };
+  | { allowed: false; rule: 'pairWhitelist' | 'maxTrades' | 'lotGuard'; message: string; reason?: 'count_unavailable' };
 
 export function evaluateLocks(
   locks: PortfolioLocks | null | undefined,
-  input: { symbolId: number | null; volumeLots: number; fillsToday: number },
+  input: { symbolId: number | null; volumeLots: number; fillsToday: number | null; timezone?: string },
   now = Date.now()
 ): LockVerdict {
   if (!locks) return { allowed: true };
+  const effective = normalizeLocks(locks, now) || locks;
 
-  if (isRuleActive(locks.pairWhitelist, now)) {
+  if (isRuleActive(effective.pairWhitelist, now)) {
     const id = Number(input.symbolId);
-    const allowed = (locks.pairWhitelist?.symbolIds || []).map(Number);
+    const allowed = (effective.pairWhitelist?.symbolIds || []).map(Number);
     if (!Number.isFinite(id) || !allowed.includes(id)) {
       return { allowed: false, rule: 'pairWhitelist', message: "This pair isn't on the portfolio's allowed-pairs list." };
     }
   }
 
-  if (isRuleActive(locks.maxTrades, now)) {
-    const max = Math.max(1, Math.floor(Number(locks.maxTrades?.maxPerDay) || 1));
+  if (isRuleActive(effective.maxTrades, now)) {
+    const max = Math.max(1, Math.floor(Number(effective.maxTrades?.maxPerDay) || 1));
+    if (input.fillsToday === null || input.fillsToday === undefined || !Number.isFinite(Number(input.fillsToday))) {
+      return {
+        allowed: false,
+        rule: 'maxTrades',
+        reason: 'count_unavailable',
+        message: "Couldn't confirm today's trade count. Try again in a moment.",
+      };
+    }
     if (input.fillsToday >= max) {
-      return { allowed: false, rule: 'maxTrades', message: `Daily limit reached (${input.fillsToday}/${max}) — resets 00:00.` };
+      return {
+        allowed: false,
+        rule: 'maxTrades',
+        message: `Daily limit reached (${input.fillsToday}/${max}) — resets 00:00 ${shortTimezoneName(input.timezone, now)}.`,
+      };
     }
   }
 
-  if (isRuleActive(locks.lotGuard, now)) {
+  if (isRuleActive(effective.lotGuard, now)) {
     const vol = Number(input.volumeLots);
-    const min = locks.lotGuard?.minLots !== undefined ? Number(locks.lotGuard.minLots) : undefined;
-    const max = locks.lotGuard?.maxLots !== undefined ? Number(locks.lotGuard.maxLots) : undefined;
-    if ((min !== undefined && Number.isFinite(min) && vol < min) || (max !== undefined && Number.isFinite(max) && vol > max)) {
+    const min = finiteBound(effective.lotGuard?.minLots);
+    const max = finiteBound(effective.lotGuard?.maxLots);
+    if (min !== undefined && max !== undefined && min > max) {
+      return {
+        allowed: false,
+        rule: 'lotGuard',
+        message: 'Lot limits are invalid (min above max). Fix them in Trading Locks.',
+      };
+    }
+    if ((min !== undefined && vol < min) || (max !== undefined && vol > max)) {
       return { allowed: false, rule: 'lotGuard', message: `Lot size ${Number.isFinite(vol) ? vol : '?'} is outside the allowed range.` };
     }
   }
@@ -327,25 +483,26 @@ export async function listPortfolioDetails(
     let locks: PortfolioLockSummary | null = null;
     try {
       const raw = await fetchPortfolioLocksStrict(deps, userId, id);
-      if (raw) {
+      const effective = raw ? normalizeLocks(raw, now) : null;
+      if (effective) {
         locks = {
           pairWhitelist: {
-            active: isRuleActive(raw.pairWhitelist, now),
-            symbolIds: (raw.pairWhitelist?.symbolIds || []).map(Number).filter(Number.isFinite),
-            cooldownMsRemaining: cooldownLeft(raw.pairWhitelist, now),
+            active: isRuleActive(effective.pairWhitelist, now),
+            symbolIds: (effective.pairWhitelist?.symbolIds || []).map(Number).filter(Number.isFinite),
+            cooldownMsRemaining: cooldownLeft(effective.pairWhitelist, now),
           },
           maxTrades: {
-            active: isRuleActive(raw.maxTrades, now),
-            maxPerDay: Number.isFinite(Number(raw.maxTrades?.maxPerDay))
-              ? Math.max(1, Math.floor(Number(raw.maxTrades?.maxPerDay)))
+            active: isRuleActive(effective.maxTrades, now),
+            maxPerDay: Number.isFinite(Number(effective.maxTrades?.maxPerDay))
+              ? Math.max(1, Math.floor(Number(effective.maxTrades?.maxPerDay)))
               : null,
-            cooldownMsRemaining: cooldownLeft(raw.maxTrades, now),
+            cooldownMsRemaining: cooldownLeft(effective.maxTrades, now),
           },
           lotGuard: {
-            active: isRuleActive(raw.lotGuard, now),
-            minLots: Number.isFinite(Number(raw.lotGuard?.minLots)) ? Number(raw.lotGuard?.minLots) : null,
-            maxLots: Number.isFinite(Number(raw.lotGuard?.maxLots)) ? Number(raw.lotGuard?.maxLots) : null,
-            cooldownMsRemaining: cooldownLeft(raw.lotGuard, now),
+            active: isRuleActive(effective.lotGuard, now),
+            minLots: Number.isFinite(Number(effective.lotGuard?.minLots)) ? Number(effective.lotGuard?.minLots) : null,
+            maxLots: Number.isFinite(Number(effective.lotGuard?.maxLots)) ? Number(effective.lotGuard?.maxLots) : null,
+            cooldownMsRemaining: cooldownLeft(effective.lotGuard, now),
           },
         };
       }
@@ -419,7 +576,8 @@ const dealOpenTime = (deal: any): number | null => {
 /**
  * Positions opened today (account scope): open positions + closed deals
  * whose openTimestamp falls today in the user's timezone. Returns null when
- * the broker cannot be reached (caller fails open).
+ * the count cannot be confirmed (the caller blocks new opens if maxTrades
+ * is active rather than guessing zero).
  */
 export async function countOpensToday(
   session: BrokerSession,
@@ -429,15 +587,15 @@ export async function countOpensToday(
 ): Promise<number | null> {
   try {
     const today = dayKeyInTz(now, tz);
+    // Never substitute an empty deal list for a failed request: that would
+    // undercount fills and let the maxTrades lock fail open.
     const [rec, dealsRes] = await Promise.all([
       session.send(2124, { ctidTraderAccountId: accountId }),
-      session
-        .send(2133, {
-          ctidTraderAccountId: accountId,
-          fromTimestamp: startOfDayMs(today, tz),
-          toTimestamp: now,
-        })
-        .catch(() => ({ deal: [] })),
+      session.send(2133, {
+        ctidTraderAccountId: accountId,
+        fromTimestamp: startOfDayMs(today, tz),
+        toTimestamp: now,
+      }),
     ]);
     const openNow = ((rec as any)?.position || []).filter((p: any) => {
       const ts = p?.tradeData?.openTimestamp;
@@ -450,7 +608,7 @@ export async function countOpensToday(
     }).length;
     return openNow + opened;
   } catch (e) {
-    console.warn('[locks] opens count failed (fail-open):', (e as Error)?.message);
+    console.warn('[locks] opens count unavailable:', (e as Error)?.message);
     return null;
   }
 }

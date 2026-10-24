@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { persistentGetSync, persistentSet } from '../lib/persistentStore';
+import { dayBoundsInTz, type PortfolioLocks } from '../lib/tradingLocks';
 import { Trade, Note, DailyBias, UserProfile, Goal, StrategyDiagram, DBTrade, DBGoal, BacktestSession, CashTransaction, DBCashTransaction, Portfolio, PortfolioAccount } from '../types';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from '../lib/constants';
 import { normalizeTrade } from '../lib/trade-normalization';
@@ -1132,21 +1133,59 @@ const cleanupNewTradeMedia = async (current: Partial<DBTrade> | undefined, urls:
 };
 
 export const dataService = {
-  // Persist portfolio-scoped trading locks. Graceful no-op when the
-  // portfolio_locks table hasn't been created yet (migration not applied).
-  async savePortfolioLocks(portfolioId: string, locks: unknown) {
-    try {
-      if (!portfolioId || portfolioId === 'default') return;
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { error } = await supabase.from('portfolio_locks').upsert(
-        { user_id: user.id, portfolio_id: portfolioId, locks: locks ?? {}, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,portfolio_id' }
-      );
-      if (error) console.warn('savePortfolioLocks skipped:', error.message || error.code);
-    } catch (err) {
-      console.warn('savePortfolioLocks skipped:', (err as Error)?.message);
-    }
+  // Persist portfolio-scoped trading locks. Throws on failure so the UI can
+  // surface "not synced" instead of silently keeping a device-only lock.
+  async savePortfolioLocks(portfolioId: string, locks: unknown): Promise<void> {
+    if (!portfolioId || portfolioId === 'default') return;
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!user) throw new Error('Not signed in');
+    const { error } = await supabase.from('portfolio_locks').upsert(
+      { user_id: user.id, portfolio_id: portfolioId, locks: locks ?? {}, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,portfolio_id' }
+    );
+    if (error) throw new Error(error.message || error.code || 'Could not save trading locks');
+  },
+
+  // Cloud is the source of truth for trading locks. Throws when the row
+  // cannot be read so callers can fall back to the local cache.
+  async loadPortfolioLocks(portfolioId: string): Promise<PortfolioLocks | null> {
+    if (!portfolioId || portfolioId === 'default') return null;
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!user) return null;
+    const { data, error } = await supabase
+      .from('portfolio_locks')
+      .select('locks, updated_at')
+      .eq('user_id', user.id)
+      .eq('portfolio_id', portfolioId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || error.code || 'Could not load trading locks');
+    if (!data) return null;
+    const raw = data.locks && typeof data.locks === 'object' ? (data.locks as Record<string, any>) : {};
+    return {
+      ...raw,
+      updatedAt: data.updated_at || raw.updatedAt || new Date(0).toISOString(),
+    } as PortfolioLocks;
+  },
+
+  // Server-recorded lock blocks for today in the user's timezone.
+  // Throws on failure so the card can fall back to the local counter.
+  async countLockBlocksToday(portfolioId: string, timezone?: string): Promise<number> {
+    if (!portfolioId || portfolioId === 'default') return 0;
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!user) throw new Error('Not signed in');
+    const { start, end } = dayBoundsInTz(Date.now(), timezone);
+    const { count, error } = await supabase
+      .from('lock_blocks')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('portfolio_id', portfolioId)
+      .gte('created_at', new Date(start).toISOString())
+      .lt('created_at', new Date(end).toISOString());
+    if (error) throw new Error(error.message || error.code || 'Could not load lock blocks');
+    return count ?? 0;
   },
   // --- Audit Logs ---
   async logActivity(action: string, details: Record<string, any>) {

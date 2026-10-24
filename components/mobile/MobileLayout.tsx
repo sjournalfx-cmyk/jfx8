@@ -605,6 +605,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
                   portfolios?.find((p) => p.id === pid)?.accounts?.find((a) => a.provider === 'ctrader')?.externalAccountId ?? null
                 }
                 timezone={userProfile?.timezone}
+                onGoConnect={() => onViewChange('ea-setup')}
               />
             </div>
           </div>

@@ -15,6 +15,7 @@ import {
   evaluateLocks,
   getUserTimezone,
   isRuleActive,
+  normalizeLocks,
   resolvePortfolioContext,
   toLots,
   unlockMsRemaining,
@@ -306,6 +307,29 @@ async function loadUserCtraderAccessToken({
     return { accessToken: minted.accessToken, defaultAccountId, defaultIsDemo };
   } finally {
     await setCtraderRefreshLease(supabaseUrl, serviceKey, userId, false).catch(() => undefined);
+  }
+}
+
+async function recordLockBlock(
+  deps: { supabaseUrl: string; serviceKey: string },
+  userId: string,
+  portfolioId: string,
+  rule: string
+): Promise<void> {
+  try {
+    await fetch(`${deps.supabaseUrl}/rest/v1/lock_blocks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: deps.serviceKey,
+        Authorization: `Bearer ${deps.serviceKey}`,
+      },
+      body: JSON.stringify({ user_id: userId, portfolio_id: portfolioId, rule }),
+      signal: AbortSignal.timeout(2500),
+    });
+  } catch (e: any) {
+    // Never let block telemetry break the actual 403 response.
+    console.warn('[trade] lock block record failed:', e?.message);
   }
 }
 
@@ -833,24 +857,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         try {
           const deps = { supabaseUrl, serviceKey };
           portfolioCtx = await resolvePortfolioContext(deps, authenticatedUserId, accountId!);
-          const locks = portfolioCtx.locks;
+          const locks = normalizeLocks(portfolioCtx.locks);
           if (portfolioCtx.portfolioId && locks) {
             const volumeLotsForLocks = toLots(body.volume ?? body.volumeLots ?? 0.01);
-            let fillsToday = 0;
+            // null means "could not confirm" — never treat that as zero fills.
+            let fillsToday: number | null = 0;
+            let tz: string | undefined;
             if (isRuleActive(locks.maxTrades)) {
-              const tz = await getUserTimezone(deps, authenticatedUserId);
-              const counted = await countOpensToday(session, accountId!, tz);
-              fillsToday = counted ?? 0;
+              tz = await getUserTimezone(deps, authenticatedUserId);
+              fillsToday = await countOpensToday(session, accountId!, tz);
             }
-            const verdict = evaluateLocks(locks, { symbolId, volumeLots: volumeLotsForLocks, fillsToday });
+            const verdict = evaluateLocks(locks, { symbolId, volumeLots: volumeLotsForLocks, fillsToday, timezone: tz });
             if (verdict.allowed === false) {
               const context: Record<string, unknown> = {};
               if (verdict.rule === 'pairWhitelist') {
                 context.allowedSymbolIds = (locks.pairWhitelist?.symbolIds || []).map(Number);
               } else if (verdict.rule === 'maxTrades') {
-                const max = Math.max(1, Math.floor(Number(locks.maxTrades?.maxPerDay) || 1));
-                context.maxPerDay = max;
-                context.fillsToday = fillsToday;
+                if (fillsToday === null) {
+                  context.reason = 'count_unavailable';
+                } else {
+                  const max = Math.max(1, Math.floor(Number(locks.maxTrades?.maxPerDay) || 1));
+                  context.maxPerDay = max;
+                  context.fillsToday = fillsToday;
+                }
               } else {
                 if (locks.lotGuard?.minLots !== undefined) context.minLots = Number(locks.lotGuard.minLots);
                 if (locks.lotGuard?.maxLots !== undefined) context.maxLots = Number(locks.lotGuard.maxLots);
@@ -860,6 +889,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 0,
                 unlockMsRemaining(locks[verdict.rule]?.unlockRequestedAt ?? null)
               );
+              await recordLockBlock(deps, authenticatedUserId, portfolioCtx.portfolioId, verdict.rule);
               session.close();
               await auditLog(403);
               res.status(403).json({
