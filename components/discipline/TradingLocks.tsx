@@ -146,11 +146,10 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
   const [maxEditOpen, setMaxEditOpen] = useState(false);
   const [lotEditOpen, setLotEditOpen] = useState(false);
   useEffect(() => {
-    setPairPickerOpen(readPortfolioLocks(selectedPid).pairWhitelist.symbolIds.length === 0);
+    setPairPickerOpen(false);
+    setMaxEditOpen(false);
+    setLotEditOpen(false);
   }, [selectedPid]);
-  useEffect(() => {
-    if (locks.pairWhitelist.symbolIds.length === 0) setPairPickerOpen(true);
-  }, [locks.pairWhitelist.symbolIds.length]);
   // Raw text for the lot inputs: the field shows exactly what is typed
   // (so "0.01" is typeable) while the parsed number commits to the lock.
   const [minRaw, setMinRaw] = useState('');
@@ -191,11 +190,19 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
       // Guards: never enable a lock that would block 100% of trading —
       // open the editor instead so the missing setup can be completed.
       if (key === 'pairWhitelist' && locks.pairWhitelist.symbolIds.length === 0) {
+        if (pairPickerOpen) {
+          setPairPickerOpen(false);
+          return;
+        }
         setPairPickerOpen(true);
         addToast({ type: 'info', title: 'Select pairs first', message: 'Tick at least 1 pair below, then switch the lock on.', duration: 4000 });
         return;
       }
       if (key === 'lotGuard' && locks.lotGuard.minLots === undefined && locks.lotGuard.maxLots === undefined) {
+        if (lotEditOpen) {
+          setLotEditOpen(false);
+          return;
+        }
         setLotEditOpen(true);
         addToast({ type: 'info', title: 'Set a limit first', message: 'Enter a min and/or max lot size below, then switch the lock on.', duration: 4000 });
         return;
