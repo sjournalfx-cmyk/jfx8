@@ -668,6 +668,18 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
         return { count: currentStreak, type: currentType };
     }, [trades]);
 
+    // Calculate Stats (memoized: runs once per trade-list change, not per render)
+    const { totalPnL, wins, losses, winRate, profitFactor } = useMemo(() => {
+        const pnl = trades.reduce((acc, t) => acc + (Number.isFinite(Number(t.pnl)) ? Number(t.pnl) : 0), 0);
+        const w = trades.filter(t => t.result === 'Win');
+        const l = trades.filter(t => t.result === 'Loss');
+        const wr = trades.length > 0 ? ((w.length / trades.length) * 100).toFixed(1) : 0;
+        const grossProfit = w.reduce((acc, t) => acc + safePnL(t.pnl), 0);
+        const grossLoss = Math.abs(l.reduce((acc, t) => acc + safePnL(t.pnl), 0));
+        const pf = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : (grossProfit > 0 ? "9.9" : "0.00");
+        return { totalPnL: pnl, wins: w, losses: l, winRate: wr, profitFactor: pf };
+    }, [trades]);
+
     const InfoPanel = ({ info, onClose }: { info: { title: string, content: string }, onClose: () => void }) => (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 sm:p-12 animate-in fade-in duration-300">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -726,17 +738,6 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
         }
     };
 
-    // Calculate Stats (memoized: runs once per trade-list change, not per render)
-    const { totalPnL, wins, losses, winRate, profitFactor } = useMemo(() => {
-        const pnl = trades.reduce((acc, t) => acc + (Number.isFinite(Number(t.pnl)) ? Number(t.pnl) : 0), 0);
-        const w = trades.filter(t => t.result === 'Win');
-        const l = trades.filter(t => t.result === 'Loss');
-        const wr = trades.length > 0 ? ((w.length / trades.length) * 100).toFixed(1) : 0;
-        const grossProfit = w.reduce((acc, t) => acc + safePnL(t.pnl), 0);
-        const grossLoss = Math.abs(l.reduce((acc, t) => acc + safePnL(t.pnl), 0));
-        const pf = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : (grossProfit > 0 ? "9.9" : "0.00");
-        return { totalPnL: pnl, wins: w, losses: l, winRate: wr, profitFactor: pf };
-    }, [trades]);
     const isPro = currentPlan === APP_CONSTANTS.PLANS.HOBBY;
 
     const hasNoTrades = trades.length === 0 && !isDemoMode;

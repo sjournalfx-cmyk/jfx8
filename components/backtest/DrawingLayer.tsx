@@ -509,9 +509,6 @@ export const DrawingLayer = React.memo<DrawingLayerProps>(({
     isLocked,
     isDarkMode
 }) => {
-    // Early return if no chart/series
-    if (!chart || !series) return null;
-
     // Use stable container dimensions - prevent layout thrashing.
     // containerWidth already excludes the price scale (parent passes
     // width - PRICE_SCALE_WIDTH); plotHeight additionally excludes the
@@ -587,6 +584,9 @@ export const DrawingLayer = React.memo<DrawingLayerProps>(({
         onDoubleClickDrawing,
         tick
     ]);
+
+    // Early return if no chart/series
+    if (!chart || !series) return null;
 
     return (
         <svg

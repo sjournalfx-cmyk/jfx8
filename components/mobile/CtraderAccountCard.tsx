@@ -214,6 +214,18 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
     [numericAccountId, isDemo, refreshPositions, onTradingEvent, symbols]
   );
 
+  // Compute live floating P/L from spot ticks to derive real-time equity.
+  const liveFloatingTotal = useMemo(() => {
+    let total = 0;
+    for (const pos of positions) {
+      const symDigits = digitsFor(Number(pos.symbolId), symbols) ?? 5;
+      const tick = spotTicks[String(pos.symbolId)];
+      const res = calculateLivePositionProfit(pos, tick?.bid, tick?.ask, symDigits);
+      total += res.floating;
+    }
+    return total;
+  }, [positions, spotTicks, symbols]);
+
   if (numericAccountId === null) {
     return (
       <div className={embedded ? '' : 'px-4 pt-4 pb-28'}>
@@ -240,17 +252,6 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
   const leverage = trader?.leverageInCents ? trader.leverageInCents / 100 : 100;
   const depositAsset = trader?.depositAsset || (account as any)?.currency || 'USD';
   const balance = Number(trader?.balance ?? (account as any)?.balance ?? 0);
-  // Compute live floating P/L from spot ticks to derive real-time equity.
-  const liveFloatingTotal = useMemo(() => {
-    let total = 0;
-    for (const pos of positions) {
-      const symDigits = digitsFor(Number(pos.symbolId), symbols) ?? 5;
-      const tick = spotTicks[String(pos.symbolId)];
-      const res = calculateLivePositionProfit(pos, tick?.bid, tick?.ask, symDigits);
-      total += res.floating;
-    }
-    return total;
-  }, [positions, spotTicks, symbols]);
   const equity = positions.length > 0 ? balance + liveFloatingTotal : Number(trader?.equity ?? (account as any)?.equity ?? 0);
   const margin = Number(trader?.margin ?? 0);
   const level = margin > 0 && equity > 0 ? `${Math.round((equity / margin) * 100)}%` : '—';
