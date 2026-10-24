@@ -14,6 +14,7 @@ interface AuthProps {
 const Auth: React.FC<AuthProps> = ({ isDarkMode, onLogin, onRegister }) => {
   const [isLoginView, setIsLoginView] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +59,24 @@ const Auth: React.FC<AuthProps> = ({ isDarkMode, onLogin, onRegister }) => {
     setPassword('');
   };
 
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setIsGoogleLoading(true);
+    try {
+      // Dynamic origin: works on both apex and www without config changes.
+      // supabase-js auto-redirects the browser to the returned OAuth URL.
+      const { error } = await authService.signInWithGoogle(
+        `${window.location.origin}/auth/callback`
+      );
+      if (error) throw error;
+      // Navigation away happens automatically; keep the spinner in case it stalls.
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Google sign-in failed. Please try again.');
+      setIsGoogleLoading(false);
+    }
+  };
+
   const bgColor = isDarkMode ? 'bg-[#000000]' : 'bg-slate-50';
   const cardBg = isDarkMode ? 'bg-[#000000]' : 'bg-white';
   const textColor = isDarkMode ? 'text-white' : 'text-slate-900';
@@ -96,6 +115,35 @@ const Auth: React.FC<AuthProps> = ({ isDarkMode, onLogin, onRegister }) => {
             <p className="text-[12px] sm:text-[13px] text-zinc-500 px-0 sm:px-2">
               {isLoginView ? 'Access your institutional-grade trading workspace.' : 'Join the elite traders mastering their psychology.'}
             </p>
+          </div>
+
+          <div className="space-y-4 mb-8">
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isGoogleLoading || isLoading}
+                className={`w-full flex items-center justify-center gap-3 py-2 rounded-2xl border-2 font-black text-[13px] transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 disabled:cursor-wait ${isDarkMode ? 'bg-[#000000] border-white/10 hover:bg-[#050505] text-white' : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-900 shadow-sm'}`}>
+                 {isGoogleLoading ? (
+                   <div className="w-[18px] h-[18px] border-2 border-zinc-500/30 border-t-zinc-400 rounded-full animate-spin" />
+                 ) : (
+                 <svg viewBox="0 0 24 24" aria-hidden="true" className="w-[18px] h-[18px] shrink-0" fill="none">
+                   <path d="M21.35 11.1H12v2.95h5.35c-.23 1.22-.94 2.25-2 2.94v2.44h3.24c1.9-1.75 2.99-4.34 2.99-7.43 0-.72-.07-1.41-.23-1.98Z" fill="#4285F4" />
+                   <path d="M12 22c2.7 0 4.97-.9 6.63-2.57l-3.24-2.44c-.9.6-2.06.96-3.39.96-2.6 0-4.81-1.75-5.6-4.1H2.99v2.56A10 10 0 0 0 12 22Z" fill="#34A853" />
+                   <path d="M6.4 13.85A6 6 0 0 1 6.4 10.15V7.59H2.99a10 10 0 0 0 0 8.82l3.41-2.56Z" fill="#FBBC05" />
+                   <path d="M12 5.96c1.47 0 2.79.51 3.84 1.5l2.88-2.88C16.96 2.78 14.7 1.75 12 1.75A10 10 0 0 0 2.99 7.59l3.41 2.56C7.19 7.71 9.4 5.96 12 5.96Z" fill="#EA4335" />
+                 </svg>
+                 )}
+                 <span>{isGoogleLoading ? 'Connecting to Google…' : 'Continue with Google'}</span>
+              </button>
+          </div>
+
+          <div className="relative mb-8">
+            <div className={`absolute inset-0 flex items-center`}>
+              <div className={`w-full border-t ${borderColor}`}></div>
+            </div>
+            <div className="relative flex justify-center text-[10px] font-black uppercase tracking-widest">
+              <span className={`px-4 ${bgColor} text-zinc-500`}>Or continue with email</span>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5 px-0 sm:px-1">
