@@ -5,6 +5,7 @@ import LogTrade from './components/LogTrade';
 import Dashboard from './components/Dashboard';
 import Journal from './components/Journal';
 import Auth from './components/Auth';
+import AuthCallback from './components/AuthCallback';
 import BetaSplash from './components/BetaSplash';
 import { PrivacyPolicy, TermsOfService } from './components/LegalPages';
 import { ChevronLeft } from 'lucide-react';
@@ -1273,16 +1274,36 @@ const onLogout = async () => {
     }
   }, [isMobile, activeUserProfile]);
 
-  // §2.3A: auth-callback path reset runs as an effect (hooks live above
-  // every early return). Render below reads state only — no setState in render.
+  // Keep the latest loadUserData without making handleOAuthSuccess unstable.
+  const loadUserDataRef = useRef(loadUserData);
   useEffect(() => {
-    if (isAuthCallbackPath) {
-      if (typeof window !== 'undefined') {
-        window.history.replaceState({}, '', '/');
+    loadUserDataRef.current = loadUserData;
+  }, [loadUserData]);
+
+  const oauthSuccessHandledRef = useRef(false);
+  const handleOAuthSuccess = useCallback(async () => {
+    if (oauthSuccessHandledRef.current) return;
+    oauthSuccessHandledRef.current = true;
+
+    setIsInitialLoading(true);
+    try {
+      const user = await authService.getCurrentUser();
+      if (user) {
+        setUserId(user.id);
+        setUserEmail(user.email || '');
+        await loadUserDataRef.current(user.id);
+        setIsAuthenticated(true);
+        posthog.identify(user.id, { email: user.email || '' });
       }
-      setCurrentPath('/');
+    } catch (error) {
+      console.error("Login data load failed:", error);
+    } finally {
+      setIsInitialLoading(false);
     }
-  }, [isAuthCallbackPath]);
+
+    window.history.replaceState({}, '', '/');
+    setCurrentPath('/');
+  }, [setIsAuthenticated, setIsInitialLoading, setUserEmail, setUserId]);
 
   if (publicPath === '/privacy') {
     return <PrivacyPolicy />;
@@ -1293,7 +1314,7 @@ const onLogout = async () => {
   }
 
   if (isAuthCallbackPath) {
-    return <BrandedLoader />;
+    return <AuthCallback onSuccess={handleOAuthSuccess} />;
   }
 
   if (isInitialLoading) {
