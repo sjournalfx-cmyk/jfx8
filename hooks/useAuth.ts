@@ -130,7 +130,11 @@ export const useAuth = () => {
   }, []);
 
   const handleLogout = async () => {
-    await authService.signOut();
+    try {
+      await authService.signOut();
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
     setIsAuthenticated(false);
     setUserProfile(null);
     setUserId(null);

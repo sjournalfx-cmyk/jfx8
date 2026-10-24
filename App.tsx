@@ -1818,20 +1818,21 @@ const onLogout = async () => {
           maxTradesThisMonth={currentPlanFeatures.maxTradesPerMonth}
         />
 
-        <ConfirmationModal
-          isOpen={confirmModal.isOpen}
-          title={confirmModal.title}
-          description={confirmModal.description}
-          confirmText={confirmModal.confirmText}
-      cancelText={confirmModal.cancelText}
-          variant={confirmModal.variant}
-          showCancel={confirmModal.showCancel}
-          onConfirm={confirmModal.onConfirm}
-          onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-          isDarkMode={isDarkMode}
-        />
       </div>
       )}
+
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        description={confirmModal.description}
+        confirmText={confirmModal.confirmText}
+        cancelText={confirmModal.cancelText}
+        variant={confirmModal.variant}
+        showCancel={confirmModal.showCancel}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        isDarkMode={isDarkMode}
+      />
 
       {/* Trade recap — peak-moment acknowledgement after a NEW trade saves.
           Rendered above both the mobile shell and the desktop layout. */}
