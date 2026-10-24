@@ -25,7 +25,7 @@ import { UserProfile, BacktestSession, Trade, BacktestTrade, Candle } from '../t
 import { loadSeries, saveSeries, mergeBars, peekMeta, listCachedSeries, CachedSeriesInfo } from '../lib/candleStore';
 import { dataService } from '../services/dataService';
 import { fetchCtraderCandles, isAuthenticated as isCtraderAuthenticated, getAccounts as getCtraderAccounts, refreshToken as refreshCtraderToken, getSelectedAccountId } from '../services/ctraderService';
-import { fetchSharedCandles } from '../lib/sharedCandles';
+import { fetchSharedCandlesDetailed } from '../lib/sharedCandles';
 import CustomChart, { PADDING_RIGHT as PRICE_SCALE_WIDTH } from './CustomChart';
 import CtraderAuthModal from './backtest/CtraderAuthModal';
 import StartScreen from './backtest/StartScreen';
@@ -68,6 +68,15 @@ const optimizeCandleData = (data: any[]) => data.map(d => ({
     low: Number(d.low.toFixed(5)),
     close: Number(d.close.toFixed(5))
 }));
+
+const formatStaleDate = (value: string | null): string => {
+    if (!value) return 'unknown date';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'unknown date';
+    return date.toLocaleString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+};
 
 const BACKTEST_TF_SECONDS: Record<string, number> = {
     'M1': 60, 'M5': 300, 'M15': 900, 'M30': 1800, 'H1': 3600, 'H4': 14400, 'D1': 86400
@@ -191,6 +200,9 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     // regains focus, so returning from the cTrader OAuth flow (Settings or the
     // Connect modal) is picked up automatically without a manual refresh.
     const [ctraderConnected, setCtraderConnected] = useState<boolean>(() => isCtraderAuthenticated());
+    // Shown when the shared store served stale bars and no live cTrader
+    // fallback was available, so old data is never rendered silently.
+    const [dataNotice, setDataNotice] = useState<string | null>(null);
 
     // TradingView-style watchlist sidebar
     const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
@@ -202,6 +214,10 @@ const BacktestLab: React.FC<BacktestLabProps> = ({ isDarkMode, userProfile, onUp
     useEffect(() => {
         unlockOrientation();
     }, []);
+
+    useEffect(() => {
+        setDataNotice(null);
+    }, [symbol, timeframe]);
 
     useEffect(() => {
         let mounted = true;
@@ -690,8 +706,14 @@ useEffect(() => {
         if (!meta) return null;
         sharedTopUpInFlight.current.add(key);
         try {
-            const fresh = await fetchSharedCandles(sym, tf, meta.lastTime);
-            if (!fresh) return null;
+            const result = await fetchSharedCandlesDetailed(sym, tf, meta.lastTime);
+            if (result?.stale) {
+                setDataNotice(`Data last updated ${formatStaleDate(result.updatedAt)}`);
+            } else if (result) {
+                setDataNotice(null);
+            }
+            const fresh = result?.candles ?? null;
+            if (!fresh || fresh.length === 0) return null;
             const existing = loadSeries(sym, tf) || [];
             const merged = mergeBars(existing, fresh);
             if (merged.length === 0) return null;
@@ -725,8 +747,10 @@ useEffect(() => {
                     // store first (no auth needed); personal cTrader only as a
                     // fallback for pairs the harvester hasn't reached.
                     if (!peekMeta(sym, tf)) {
-                        const shared = await fetchSharedCandles(sym, tf);
-                        if (shared && shared.length > 0) { saveToLocalCache(shared, sym, tf); return; }
+                        const sharedResult = await fetchSharedCandlesDetailed(sym, tf);
+                        if (sharedResult?.stale) setDataNotice(`Data last updated ${formatStaleDate(sharedResult.updatedAt)}`);
+                        const shared = sharedResult?.candles ?? [];
+                        if (shared.length > 0) { saveToLocalCache(shared, sym, tf); return; }
                         const accounts = await getCtraderAccounts();
                         const savedAccountId = getSelectedAccountId();
                         const account = accounts.find(a => a.ctidTraderAccountId === savedAccountId) || accounts[0];
@@ -895,10 +919,13 @@ setAllData(validData);
             // server-harvested store before giving up. This lets users who
             // never connected cTrader browse charts seamlessly — and silently
             // switches the active source to cTrader for subsequent loads.
-            const sharedFull = seq === activeFetchSeqRef.current
-                ? await fetchSharedCandles(activeSymbol, activeTF)
+            const sharedResult = seq === activeFetchSeqRef.current
+                ? await fetchSharedCandlesDetailed(activeSymbol, activeTF)
                 : null;
             if (seq !== activeFetchSeqRef.current) return;
+            if (sharedResult?.stale) setDataNotice(`Data last updated ${formatStaleDate(sharedResult.updatedAt)}`);
+            else if (sharedResult) setDataNotice(null);
+            const sharedFull = sharedResult?.candles ?? null;
             if (sharedFull && sharedFull.length > 0) {
                 saveToLocalCache(sharedFull, activeSymbol, activeTF);
                 setCurrentIdx(Math.min(sharedFull.length - 1, 50));
@@ -1000,8 +1027,11 @@ setAllData(validData);
                     servedFromShared = true;
                 } else {
                     // Nothing stored locally yet → try a FULL shared-series load.
-                    const sharedFull = await fetchSharedCandles(activeSymbol, activeTF);
+                    const sharedResult = await fetchSharedCandlesDetailed(activeSymbol, activeTF);
                     if (seq !== activeFetchSeqRef.current) return;
+                    if (sharedResult?.stale) setDataNotice(`Data last updated ${formatStaleDate(sharedResult.updatedAt)}`);
+                    else if (sharedResult) setDataNotice(null);
+                    const sharedFull = sharedResult?.candles ?? null;
                     if (sharedFull && sharedFull.length > 0) {
                         saveToLocalCache(sharedFull, activeSymbol, activeTF);
                         setCurrentIdx(Math.min(sharedFull.length - 1, 50));
@@ -1295,7 +1325,10 @@ setAllData(validData);
             // MT5 refresh failed — try shared history before giving up so an
             // offline bridge doesn't look like a total sync failure.
             try {
-                const shared = await fetchSharedCandles(symbol, timeframe);
+                const sharedResult = await fetchSharedCandlesDetailed(symbol, timeframe);
+                if (sharedResult?.stale) setDataNotice(`Data last updated ${formatStaleDate(sharedResult.updatedAt)}`);
+                else if (sharedResult) setDataNotice(null);
+                const shared = sharedResult?.candles ?? null;
                 if (shared && shared.length > 0) {
                     saveToLocalCache(shared, symbol, timeframe);
                     setAllData(shared);
@@ -3080,6 +3113,14 @@ setAllData(validData);
                     toggleStickyMode={() => setStickyMode((v: boolean) => !v)}
                 />
                 )}
+                    {dataNotice && allData.length > 0 && (
+                        <div
+                            role="status"
+                            className={`absolute bottom-2 left-2 z-40 rounded-lg border px-2.5 py-1 text-[10px] font-bold shadow-lg backdrop-blur-sm ${isDarkMode ? 'border-amber-500/25 bg-black/75 text-amber-300' : 'border-amber-300 bg-amber-50/95 text-amber-700'}`}
+                        >
+                            {dataNotice}
+                        </div>
+                    )}
                     <ChartErrorBoundary>
                         {/* Armed-tool chip (TV): obvious draw mode + on-screen cancel */}
                         {isChartOpen && allData.length > 0 && activeTool !== 'cursor' && (

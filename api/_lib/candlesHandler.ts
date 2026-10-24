@@ -37,23 +37,32 @@ const PT = {
   ERROR_RES: 2142,
 };
 
-function mapTimeframeToPeriod(tf: string): number {
-  switch (String(tf || 'H1').toUpperCase().trim()) {
-    case 'M1': case '1M': return 1;
-    case 'M2': case '2M': return 2;
-    case 'M3': case '3M': return 3;
-    case 'M4': case '4M': return 4;
-    case 'M5': case '5M': return 5;
-    case 'M10': case '10M': return 6;
-    case 'M15': case '15M': return 7;
-    case 'M30': case '30M': return 8;
-    case 'H1': case '1H': return 9;
-    case 'H4': case '4H': return 10;
-    case 'D1': case '1D': return 11;
-    case 'W1': case '1W': return 12;
-    case 'MN1': case '1MN': case 'MN': return 13;
-    default: return 9;
-  }
+const TIMEFRAME_PERIODS: Record<string, number> = {
+  M1: 1, M2: 2, M3: 3, M4: 4, M5: 5, M10: 6, M15: 7, M30: 8,
+  H1: 9, H4: 10, D1: 11, W1: 12, MN1: 13,
+};
+
+const TIMEFRAME_ALIASES: Record<string, string> = {
+  '1M': 'M1', '2M': 'M2', '3M': 'M3', '4M': 'M4', '5M': 'M5',
+  '10M': 'M10', '15M': 'M15', '30M': 'M30',
+  '1H': 'H1', '4H': 'H4', '1D': 'D1', '1W': 'W1', '1MN': 'MN1', MN: 'MN1',
+};
+
+export const ALLOWED_TIMEFRAMES = Object.keys(TIMEFRAME_PERIODS);
+
+/** Canonical timeframe + cTrader period, or null when the value is unknown. */
+function resolveTimeframe(raw: string): { timeframe: string; period: number } | null {
+  const norm = String(raw || '').trim().toUpperCase();
+  const canonical = TIMEFRAME_ALIASES[norm] || norm;
+  const period = TIMEFRAME_PERIODS[canonical];
+  return period ? { timeframe: canonical, period } : null;
+}
+
+/** cTrader timestamps are milliseconds; accept unix seconds too. */
+function toTimestampMs(value: unknown): number | undefined {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
 }
 
 function getCredentials() {
@@ -169,11 +178,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: "Query param 'symbol' is required, e.g. ?symbol=EURUSD&timeframe=H1" });
     return;
   }
-  const timeframe = String(q.timeframe || 'H1').toUpperCase();
-  const period = mapTimeframeToPeriod(timeframe);
+  const resolvedTimeframe = resolveTimeframe(String(q.timeframe || 'H1'));
+  if (!resolvedTimeframe) {
+    auditLog(400);
+    res.status(400).json({
+      error: 'invalid_timeframe',
+      message: `Unknown timeframe '${String(q.timeframe)}'.`,
+      allowed: ALLOWED_TIMEFRAMES,
+    });
+    return;
+  }
+  const { timeframe, period } = resolvedTimeframe;
   const count = Math.min(5000, Math.max(1, Number(q.count || q.limit || 500) || 500));
-  const from = Number(q.from || 0) || undefined;
-  const to = Number(q.to || 0) || undefined;
+  const from = toTimestampMs(q.from);
+  const to = toTimestampMs(q.to);
   let accountId = Number(q.ctidTraderAccountId || q.accountId || defaultAccountId) || null;
   const isDemo = parseIsDemo(q.isDemo, defaultIsDemo);
   const host = isDemo ? 'demo.ctraderapi.com' : 'live.ctraderapi.com';

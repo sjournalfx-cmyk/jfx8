@@ -3,9 +3,28 @@ import { createPortal } from 'react-dom';
 import { Bot, Check, Copy, Download, KeyRound, Plus, RefreshCw, Terminal, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import ConfirmationModal from './ConfirmationModal';
+import { describeApiError, formatRelativeTime, getApiKeyStatus } from '../lib/apiKeyUi';
 
 type ApiKey = { id: string; name: string; key_prefix: string; scopes: string[]; last_used_at: string | null; expires_at: string | null; created_at: string; status: 'active' | 'revoked'; revoked_at: string | null };
 type Scope = 'trades:read' | 'trades:write' | 'notes:read' | 'notes:write' | 'bridge:read' | 'me:read';
+type CheckState = 'pass' | 'warn' | 'fail';
+type CheckKey = 'journal' | 'trading' | 'candles';
+type CheckResult = { state: CheckState; detail: string };
+type TestChecks = Record<CheckKey, CheckResult>;
+
+const CHECK_LABELS: Record<CheckKey, string> = {
+  journal: 'Journal',
+  trading: 'cTrader trading',
+  candles: 'Live candles',
+};
+
+const checkBadge = (state: CheckState, isDarkMode: boolean) => {
+  if (state === 'pass') return isDarkMode ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700';
+  if (state === 'warn') return isDarkMode ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700';
+  return isDarkMode ? 'bg-rose-500/15 text-rose-300' : 'bg-rose-100 text-rose-700';
+};
+
+const checkWord = (state: CheckState) => state === 'pass' ? 'Pass' : state === 'warn' ? 'Attention' : 'Fail';
 
 const scopeGroups: Array<{ label: string; items: Array<{ value: Scope; label: string; desc?: string }> }> = [
   {
@@ -42,15 +61,15 @@ const JFX_API_BASE = 'https://lwlikhjgwazyrahucatl.supabase.co/functions/v1/jfx-
 // auth headers on redirect, which surfaced as "Failed to fetch".
 const JFX_CTRADER_TRADE_URL = 'https://www.jfxjournal.site/api/ctrader/trade';
 const JFX_CTRADER_TRADE_URL_DEV = 'http://127.0.0.1:3000/api/ctrader/trade';
-// Live OHLC trendbars for the user's own connected cTrader account. Derived
-// from the same host as the execution endpoint so staging/local stay in
-// lockstep. (The APK resolves this through apiUrl() from lib/capacitor; web has
-// no native shell to prefix, so it is derived from the URL above instead —
-// never import a static @capacitor/* specifier into this bundle.)
-// Live candles share the trade route via an `action=candles` flag: Vercel's
-// Hobby plan caps a deployment at 12 Serverless Functions, and a standalone
-// api/ctrader/candles.ts pushed the build over that limit.
-const JFX_CTRADER_CANDLES_URL = JFX_CTRADER_TRADE_URL + '?action=candles';
+// Live OHLC trendbars for the user's own connected cTrader account. The
+// canonical route is /api/ctrader/candles (vercel.json rewrites it internally
+// to the trade function as ?action=candles because Hobby caps a deployment at
+// 12 Serverless Functions). The alias is kept for old links.
+// (The APK resolves this through apiUrl() from lib/capacitor; web has no native
+// shell to prefix, so it uses the absolute URL — never import a static
+// @capacitor/* specifier into this bundle.)
+const JFX_CTRADER_CANDLES_URL = 'https://www.jfxjournal.site/api/ctrader/candles';
+// Local Vite middleware only implements the trade alias.
 const JFX_CTRADER_CANDLES_URL_DEV = JFX_CTRADER_TRADE_URL_DEV + '?action=candles';
 const DEFAULT_SCOPES: Scope[] = ['trades:read', 'trades:write'];
 const agentSkill = `---
@@ -65,7 +84,7 @@ The API key is stored in the \`JFX_KEY\` environment variable. Never reveal the 
 Base URLs:
 - Journal & Analytics API: ${JFX_API_BASE}
 - cTrader Execution API: ${JFX_CTRADER_TRADE_URL} (local dev: ${JFX_CTRADER_TRADE_URL_DEV})
-- cTrader Live Candles API: ${JFX_CTRADER_CANDLES_URL} (local dev: ${JFX_CTRADER_CANDLES_URL_DEV})
+- cTrader Live Candles API: ${JFX_CTRADER_CANDLES_URL} (local dev alias: ${JFX_CTRADER_CANDLES_URL_DEV})
 
 Environment (.env downloaded from the key screen):
 \`\`\`
@@ -207,16 +226,16 @@ Only execute trading actions when explicitly requested or confirmed by the user.
 
 ## 2b. cTrader Live Candles (OHLC)
 
-Endpoint: \`GET \${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}&symbol=EURUSD&timeframe=H1&count=500\`
+Endpoint: \`GET \${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}?symbol=EURUSD&timeframe=H1&count=500\`
 Header: \`X-API-Key: $JFX_KEY\` — requires \`trades:read\` (or \`trades:write\`).
 Reads live trendbars from the user's own broker account (their cTrader must be connected), unlike the shared backtest store.
 
-Query params: \`symbol\` (required, e.g. \`EURUSD\`), \`timeframe\` (default \`H1\`; \`M1 M5 M15 M30 H1 H4 D1 W1 MN1\`), \`count\` (default 500, max 5000), optional \`from\`/\`to\` (ms), \`ctidTraderAccountId\`, \`isDemo\` (default true).
+Query params: \`symbol\` (required, e.g. \`EURUSD\`), \`timeframe\` (default \`H1\`; \`M1 M5 M15 M30 H1 H4 D1 W1 MN1\`), \`count\` (default 500, max 5000), optional \`from\`/\`to\` (unix seconds or ms; values < 1e12 are treated as seconds), \`ctidTraderAccountId\`, \`isDemo\` (default true).
 Response: \`{ ok, symbol, symbolId, timeframe, digits, accountId, isDemo, count, bars: [{ time, open, high, low, close }] }\` (\`time\` is unix seconds).
 
 \`\`\`bash
 curl -sS -H "X-API-Key: $JFX_KEY" \
-  "\${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}&symbol=EURUSD&timeframe=H1&count=5"
+  "\${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}?symbol=EURUSD&timeframe=H1&count=5"
 \`\`\`
 
 ## 3. Error Handling
@@ -231,7 +250,28 @@ curl -sS -H "X-API-Key: $JFX_KEY" \
 - \`400 ctrader_not_connected\` — key valid but cTrader not linked; ask user to connect cTrader once on the **Connect & Import** page
 - \`502 ctrader_auth_failed\` — stored cTrader grant expired/revoked; ask user to reconnect cTrader on the **Connect & Import** page, then retry
 - \`429 rate_limited\` — too many requests; retry after \`Retry-After\` seconds. \`503 rate_limiter_unavailable\` means the server limiter is down — retry shortly, do not recreate the key.
+- \`503 ctrader_refresh_in_progress\` — another request is rotating this account's cTrader token; retry after \`Retry-After\` (1s).
+- \`503 server_not_configured / service_unavailable\` — backend is not configured or temporarily down; retry shortly and report it if it persists. Do not recreate the key.
+- \`500 internal_error / auth_failed\` — unexpected server/auth failure. Retry once; if it persists, report the request id/time.
+- \`404 not_found\` — wrong path or resource; check the base URL and query parameters.
 `;
+
+function TestCheckRows({ checks, isDarkMode }: { checks: TestChecks; isDarkMode: boolean }) {
+  return (
+    <div className="mt-2 space-y-1.5">
+      {(Object.keys(CHECK_LABELS) as CheckKey[]).map(name => {
+        const check = checks[name];
+        return (
+          <div key={name} className={`flex flex-col gap-1 rounded-xl px-3 py-2 text-[11px] sm:flex-row sm:items-start sm:gap-2 ${isDarkMode ? 'bg-white/[0.03]' : 'bg-white'}`}>
+            <span className={`w-fit shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${checkBadge(check.state, isDarkMode)}`}>{checkWord(check.state)}</span>
+            <span className="shrink-0 font-black">{CHECK_LABELS[name]}</span>
+            <span className="min-w-0 opacity-70">{check.detail}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -248,6 +288,8 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
   const [testKeyInput, setTestKeyInput] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [testChecks, setTestChecks] = useState<TestChecks | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<ApiKey | null>(null);
 
   const cardClass = isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white';
@@ -285,64 +327,82 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
   const toggleScope = (scope: Scope) => setScopes(previous => previous.includes(scope) ? previous.filter(item => item !== scope) : [...previous, scope]);
   const testConnection = async (candidate?: string) => {
     const keyToTest = (candidate ?? testKeyInput ?? '').trim() || rawKey || '';
+    setTestChecks(null);
+    setTestResult(null);
     if (!keyToTest) { setTestResult('Paste a key first (starts with jfx_pat_).'); return; }
     if (!/^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/.test(keyToTest)) {
       setTestResult('That does not look like a full key — it should match jfx_pat_<8>_<32>. Copy the full value; do not truncate or add spaces.');
       return;
     }
-    setTesting(true); setTestResult(null);
+    setTesting(true);
+    const checks: TestChecks = {
+      journal: { state: 'fail', detail: 'Not run.' },
+      trading: { state: 'fail', detail: 'Not run.' },
+      candles: { state: 'fail', detail: 'Not run.' },
+    };
+    const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const activeTradeUrl = isLocal ? JFX_CTRADER_TRADE_URL_DEV : JFX_CTRADER_TRADE_URL;
+    const activeCandlesUrl = isLocal ? JFX_CTRADER_CANDLES_URL_DEV : JFX_CTRADER_CANDLES_URL;
+    const headers = { 'X-API-Key': keyToTest };
     try {
-      const headers = { 'X-API-Key': keyToTest };
-      const meRes = await fetch(`${JFX_API_BASE}/v1/trades?limit=1`, { headers });
-      const meBody = await meRes.json().catch(() => ({}));
-      if (!meRes.ok) {
-        const hint = meRes.status === 403
-          ? 'Key works but lacks the needed scope — recreate with trades:read/trades:write.'
-          : meRes.status === 401
-            ? 'Key rejected (revoked/expired/truncated). Recreate it and copy the full value.'
-            : meRes.status === 429 ? 'Rate limited — wait 60s and retry.' : (meBody?.message || meBody?.error || '');
-        setTestResult(`Journal check failed (${meRes.status} ${meBody?.error || ''}): ${hint}`);
-        return;
+      // 1) Journal API (Supabase Edge).
+      const journalRes = await fetch(`${JFX_API_BASE}/v1/trades?limit=1`, { headers });
+      const journalBody = await journalRes.json().catch(() => ({}));
+      if (journalRes.ok) {
+        checks.journal = { state: 'pass', detail: 'Key accepted; journal API reachable.' };
+      } else {
+        checks.journal = {
+          state: 'fail',
+          detail: `${journalRes.status} ${journalBody?.error || 'request_failed'} — ${describeApiError(journalBody?.error, journalRes.status)}`,
+        };
       }
-      const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const activeTradeUrl = isLocal ? JFX_CTRADER_TRADE_URL_DEV : JFX_CTRADER_TRADE_URL;
-      const activeCandlesUrl = isLocal ? JFX_CTRADER_CANDLES_URL_DEV : JFX_CTRADER_CANDLES_URL;
 
+      // 2) cTrader trading route (check_auth never opens a position).
       const tradeRes = await fetch(activeTradeUrl, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'check_auth', isDemo: true }),
       });
       const tradeBody = await tradeRes.json().catch(() => ({}));
-      if (!tradeRes.ok) {
-        if (tradeBody?.error === 'ctrader_not_connected') { setTestResult('Journal OK. cTrader not linked — connect once on Connect & Import, then re-test.'); return; }
-        if (tradeBody?.error === 'insufficient_scope') { setTestResult('Journal OK. Key lacks trades:write for trading — recreate with trades:write enabled.'); return; }
-        if (tradeBody?.error === 'ctrader_auth_failed') { setTestResult('Journal OK. cTrader grant expired — reconnect cTrader on Connect & Import, then re-test.'); return; }
-        if (tradeBody?.error === 'unknown_account') {
-          const suggestions = Array.isArray(tradeBody?.suggestions) && tradeBody.suggestions.length ? ` Did you mean: ${tradeBody.suggestions.join(', ')}?` : '';
-          setTestResult(`Journal OK. Unknown cTrader account id${suggestions} Re-run get_accounts to list valid ids, or flip isDemo if the account lives on the other host.`);
-          return;
-        }
-        setTestResult(`Journal OK. Trade check failed (${tradeRes.status} ${tradeBody?.error || ''}): ${tradeBody?.message || 'see response'}`);
-        return;
+      if (tradeRes.ok) {
+        checks.trading = { state: 'pass', detail: `cTrader verified (Account #${tradeBody?.accountId || 'active'}).` };
+      } else {
+        const code = String(tradeBody?.error || 'request_failed');
+        const warn = ['ctrader_not_connected', 'insufficient_scope', 'ctrader_auth_failed', 'ctrader_refresh_in_progress'].includes(code);
+        checks.trading = {
+          state: warn ? 'warn' : 'fail',
+          detail: `${tradeRes.status} ${code} — ${describeApiError(code, tradeRes.status)}`,
+        };
       }
-      // Read-only OHLC probe — proves the key can pull live trendbars from the
-      // user's own broker account. Never opens a position.
-      const candlesRes = await fetch(`${activeCandlesUrl}&symbol=EURUSD&timeframe=H1&count=5`, { headers });
+
+      // 3) Live OHLC candles (canonical route). Read-only; proves broker data access.
+      const candlesUrl = `${activeCandlesUrl}${activeCandlesUrl.includes('?') ? '&' : '?'}symbol=EURUSD&timeframe=H1&count=5`;
+      const candlesRes = await fetch(candlesUrl, { headers });
       const candlesBody = await candlesRes.json().catch(() => ({}));
-      if (!candlesRes.ok) {
-        if (candlesBody?.error === 'ctrader_not_connected') { setTestResult(`Journal OK, cTrader linked (Account #${tradeBody?.accountId || 'active'}), but the candles endpoint could not read trendbars — reconnect on Connect & Import.`); return; }
-        setTestResult(`Journal OK and cTrader verified (Account #${tradeBody?.accountId || 'active'}), but the candles check failed (${candlesRes.status} ${candlesBody?.error || ''}): ${candlesBody?.message || 'see response'}`);
-        return;
+      if (candlesRes.ok) {
+        const bars = candlesBody?.count ?? candlesBody?.bars?.length ?? 0;
+        checks.candles = { state: 'pass', detail: `${bars} ${candlesBody?.symbol || 'EURUSD'} bars returned.` };
+      } else {
+        const code = String(candlesBody?.error || 'request_failed');
+        const warn = ['ctrader_not_connected', 'insufficient_scope', 'ctrader_auth_failed', 'ctrader_refresh_in_progress'].includes(code);
+        checks.candles = {
+          state: warn ? 'warn' : 'fail',
+          detail: `${candlesRes.status} ${code} — ${describeApiError(code, candlesRes.status)}`,
+        };
       }
-      setTestResult(`OK — journal reachable, cTrader verified (Account #${tradeBody?.accountId || 'active'}) and live candles returned (${candlesBody?.count ?? candlesBody?.bars?.length ?? 0} ${candlesBody?.symbol || 'EURUSD'} bars). Safe to hand this key to your agent.`);
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e);
-      const hint = /failed to fetch|networkerror|load failed|cors/i.test(raw)
-        ? 'The browser blocked the request (CORS/network). Your key is likely fine — verify with curl, check ad-blocker/VPN, and make sure the Edge function with the CORS preflight fix is deployed. Try again in a minute.'
+      const detail = /failed to fetch|networkerror|load failed|cors/i.test(raw)
+        ? 'The browser blocked the request (CORS/network). The key may still be fine — verify with curl and check VPN/ad-blockers.'
         : raw;
-      setTestResult(`Network error while testing: ${hint}`);
-    } finally { setTesting(false); }
+      (Object.keys(checks) as CheckKey[]).forEach(name => {
+        if (checks[name].detail === 'Not run.') checks[name] = { state: 'fail', detail };
+      });
+      setTestResult(`Network error while testing: ${detail}`);
+    } finally {
+      setTestChecks(checks);
+      setTesting(false);
+    }
   };
   const downloadEnv = () => {
     if (!rawKey) return;
@@ -362,6 +422,15 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
     await navigator.clipboard.writeText(agentSkill);
     setCopiedGuide(true);
     window.setTimeout(() => setCopiedGuide(false), 2000);
+  };
+  const copyField = async (value: string, field: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      window.setTimeout(() => setCopiedField(current => current === field ? null : current), 1800);
+    } catch {
+      setError('Clipboard access was blocked by the browser. Select and copy the value manually.');
+    }
   };
 
   return <>
@@ -387,18 +456,47 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
         <input value={testKeyInput} onChange={e => setTestKeyInput(e.target.value)} placeholder="jfx_pat_…" spellCheck={false} className={`flex-1 rounded-xl border px-3 py-2 font-mono text-xs outline-none ${inputClass}`} />
         <button onClick={() => void testConnection()} disabled={testing} className="flex items-center justify-center gap-2 rounded-xl bg-[#FF4F01] px-3 py-2 text-xs font-black text-white disabled:opacity-50"><RefreshCw size={14} className={testing ? 'animate-spin' : ''} />{testing ? 'Testing…' : 'Test connection'}</button>
       </div>
-      {testResult && <p className={`mt-2 rounded-xl px-3 py-2 text-xs ${testResult.startsWith('OK') ? 'bg-emerald-500/10 text-emerald-600' : testResult.startsWith('Journal OK') ? 'bg-amber-500/10 text-amber-600' : 'bg-rose-500/10 text-rose-500'}`}>{testResult}</p>}
+      {testResult && <p className={`mt-2 rounded-xl px-3 py-2 text-xs ${testResult.startsWith('OK') ? 'bg-emerald-500/10 text-emerald-600' : 'bg-rose-500/10 text-rose-500'}`}>{testResult}</p>}
+      {testChecks && <TestCheckRows checks={testChecks} isDarkMode={isDarkMode} />}
     </section>
-    <div className="mt-5 overflow-x-auto rounded-2xl border border-dashed">
-      {loading ? <p className="p-4 text-xs opacity-50">Loading API keys…</p> : keys.length === 0 ? <p className="p-4 text-xs opacity-55">No API keys yet. Create a scoped key for an external tool.</p> : <div className="min-w-[720px]">
-        <div className={`grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_0.7fr_40px] gap-3 border-b px-4 py-2 text-[9px] font-black uppercase tracking-[0.14em] opacity-45 ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}><span>Name / Key</span><span>Scopes</span><span>Created</span><span>Last Used</span><span>Status</span><span /></div>
-        {keys.map(key => <div key={`${key.status}-${key.id}`} className={`grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_0.7fr_40px] items-center gap-3 px-4 py-3 text-xs ${isDarkMode ? 'border-white/[0.06] even:bg-white/[0.02]' : 'border-slate-100 even:bg-slate-50'}`}>
-          <div><p className="font-black">{key.name}</p><code className="mt-0.5 block text-[10px] text-[#FF4F01]">{key.key_prefix}_••••••••</code><code className="mt-0.5 block text-[9px] opacity-40">id {key.id.slice(0, 8)}…</code></div>
-          <div className="flex flex-wrap gap-1">{key.scopes.map(scope => <span key={scope} className="rounded-md bg-[#FF4F01]/10 px-1.5 py-0.5 text-[9px] font-bold text-[#FF4F01]">{scope}</span>)}</div>
-          <span className="opacity-60">{formatDate(key.created_at)}</span><span className="opacity-60">{formatDate(key.last_used_at)}</span>
-          <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-wide ${key.status === 'revoked' ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'}`}>{key.status}</span>
-          {key.status === 'active' ? <button onClick={() => setPendingRevoke(key)} title="Revoke key" className="rounded-lg p-2 text-rose-500 hover:bg-rose-500/10"><Trash2 size={15} /></button> : <span />}
-        </div>)}
+    <div className="mt-5 rounded-2xl border border-dashed">
+      {loading ? <p className="p-4 text-xs opacity-50">Loading API keys…</p> : keys.length === 0 ? <p className="p-4 text-xs opacity-55">No API keys yet. Create a scoped key for an external tool.</p> : <div>
+        <div className={`hidden grid-cols-[1.6fr_1fr_0.8fr_0.8fr_0.9fr_40px] gap-3 border-b px-4 py-2 text-[9px] font-black uppercase tracking-[0.14em] opacity-45 sm:grid ${isDarkMode ? 'border-white/[0.08]' : 'border-slate-200'}`}><span>Name / Key</span><span>Scopes</span><span>Created</span><span>Last Used</span><span>Status</span><span /></div>
+        {keys.map(key => {
+          const life = getApiKeyStatus(key);
+          const prefixField = `prefix-${key.id}`;
+          const idField = `id-${key.id}`;
+          const toneClass = life.tone === 'success'
+            ? 'bg-emerald-500/10 text-emerald-500'
+            : life.tone === 'warning'
+              ? 'bg-amber-500/10 text-amber-600'
+              : 'bg-rose-500/10 text-rose-500';
+          return <div key={`${key.status}-${key.id}`} className={`grid grid-cols-1 gap-2 px-4 py-3 text-xs sm:grid-cols-[1.6fr_1fr_0.8fr_0.8fr_0.9fr_40px] sm:items-center sm:gap-3 ${isDarkMode ? 'border-b border-white/[0.06] even:bg-white/[0.02]' : 'border-b border-slate-100 even:bg-slate-50'}`}>
+            <div className="min-w-0">
+              <p className="font-black">{key.name}</p>
+              <div className="mt-0.5 flex min-w-0 items-center gap-1">
+                <code className="truncate text-[10px] text-[#FF4F01]">{key.key_prefix}_••••••••</code>
+                <button onClick={() => void copyField(key.key_prefix, prefixField)} title="Copy key prefix" className="shrink-0 rounded p-0.5 opacity-50 hover:opacity-100">
+                  {copiedField === prefixField ? <Check size={11} /> : <Copy size={11} />}
+                </button>
+              </div>
+              <div className="mt-0.5 flex min-w-0 items-center gap-1 opacity-40">
+                <code className="truncate text-[9px]">id {key.id.slice(0, 8)}…</code>
+                <button onClick={() => void copyField(key.id, idField)} title="Copy full key id" className="shrink-0 rounded p-0.5 hover:opacity-100">
+                  {copiedField === idField ? <Check size={10} /> : <Copy size={10} />}
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1"><span className="mr-1 text-[9px] font-black uppercase tracking-wide opacity-40 sm:hidden">Scopes</span>{key.scopes.map(scope => <span key={scope} className="rounded-md bg-[#FF4F01]/10 px-1.5 py-0.5 text-[9px] font-bold text-[#FF4F01]">{scope}</span>)}</div>
+            <span className="hidden opacity-60 sm:block">{formatDate(key.created_at)}</span>
+            <span className="hidden opacity-60 sm:block">{formatRelativeTime(key.last_used_at)}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-wide ${toneClass}`}>{life.label}</span>
+              <span className="text-[10px] opacity-45 sm:hidden">Created {formatDate(key.created_at)} · Last used {formatRelativeTime(key.last_used_at)}</span>
+            </div>
+            {key.status === 'active' ? <button onClick={() => setPendingRevoke(key)} title="Revoke key (retains audit metadata)" className="w-fit rounded-lg p-2 text-rose-500 hover:bg-rose-500/10"><Trash2 size={15} /></button> : <span className="hidden sm:block" />}
+          </div>;
+        })}
       </div>}
     </div>
 
@@ -565,10 +663,11 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
         </button>
 
         {testResult && (
-          <p className={`mt-2.5 rounded-xl px-3 py-2 text-xs ${testResult.startsWith('OK') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+          <p className="mt-2.5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
             {testResult}
           </p>
         )}
+        {testChecks && <TestCheckRows checks={testChecks} isDarkMode={isDarkMode} />}
 
         <div className="mt-4 flex items-center gap-2 text-xs text-white/70">
           <input
@@ -585,7 +684,7 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
 
         <button
           disabled={!copied}
-          onClick={() => { setRawKey(null); setCopied(false); setCopiedKey(false); setTestResult(null); }}
+          onClick={() => { setRawKey(null); setCopied(false); setCopiedKey(false); setTestResult(null); setTestChecks(null); }}
           className="mt-4 w-full rounded-xl border border-white/[0.15] bg-white/[0.05] hover:bg-white/[0.1] px-3 py-2 text-xs font-bold text-white transition-all disabled:opacity-30"
         >
           Done
@@ -596,8 +695,8 @@ export function ApiKeysPanel({ isDarkMode }: { isDarkMode: boolean }) {
   <ConfirmationModal
     isOpen={pendingRevoke !== null}
     title="Revoke API key?"
-    description={pendingRevoke ? `Revoke “${pendingRevoke.name}”? This permanently deletes the live API key and cannot be undone.` : ''}
-    confirmText="Revoke"
+    description={pendingRevoke ? `Revoke “${pendingRevoke.name}”? Agents using it lose access immediately. The key is disabled, not deleted — its row and audit metadata stay for your records. This cannot be undone.` : ''}
+    confirmText="Revoke key"
     variant="danger"
     onConfirm={confirmRevoke}
     onCancel={() => setPendingRevoke(null)}

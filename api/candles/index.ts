@@ -14,6 +14,12 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
 };
 
+const TIMEFRAME_SECONDS: Record<string, number> = {
+  M1: 60, M2: 120, M3: 180, M4: 240, M5: 300, M10: 600,
+  M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400,
+  W1: 604800, MN1: 2592000,
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
@@ -50,6 +56,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? (since > 0 ? row.bars.filter((b: any) => Number(b?.time) > since) : row.bars)
     : [];
 
+  // Staleness is relative to the bar interval: a daily series is still fresh
+  // for two days, while M1 is stale after two minutes. Anything untouched for
+  // >24h is always stale so a broken harvester can never look healthy.
+  const updatedMs = Date.parse(String(row.updated_at || ''));
+  const ageMs = Number.isFinite(updatedMs) ? Math.max(0, Date.now() - updatedMs) : null;
+  const tfMs = (TIMEFRAME_SECONDS[timeframe] || 3600) * 1000;
+  const stale = ageMs === null || ageMs > 2 * tfMs || ageMs > 24 * 60 * 60 * 1000;
+
   // Keep the response lean: metadata always, full bars only when fresh/asked.
   res.setHeader('Cache-Control', 'public, max-age=60');
   res.status(200).json({
@@ -59,6 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     last_bar_time: row.last_bar_time,
     digits: row.digits,
     updated_at: row.updated_at,
+    stale,
+    age_hours: ageMs === null ? null : Number((ageMs / 3_600_000).toFixed(1)),
     bars,
   });
 }

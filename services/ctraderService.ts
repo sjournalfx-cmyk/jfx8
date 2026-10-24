@@ -818,14 +818,11 @@ export const buildDigitsMap = (symbols: any[]): SymbolDigitsMap => {
   return map;
 };
 
-export const scalePrice = (
-  raw: unknown,
+const resolveDigits = (
   symbolId: unknown,
   digitsById: SymbolDigitsMap | undefined,
   symbolName?: string
 ): number => {
-  const n = Number(raw ?? 0);
-  if (!Number.isFinite(n)) return 0;
   let digits = symbolId !== undefined && symbolId !== null && digitsById
     ? digitsById.get(Number(symbolId))
     : undefined;
@@ -834,7 +831,41 @@ export const scalePrice = (
     const clean = (symbolName || '').toUpperCase().replace('/', '');
     digits = clean.endsWith('JPY') ? 3 : 5;
   }
-  return n / Math.pow(10, digits);
+  return digits;
+};
+
+/** Decode a scaled integer tick price (trendbars / legacy payloads). */
+export const scalePrice = (
+  raw: unknown,
+  symbolId: unknown,
+  digitsById: SymbolDigitsMap | undefined,
+  symbolName?: string
+): number => {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return n / Math.pow(10, resolveDigits(symbolId, digitsById, symbolName));
+};
+
+/**
+ * Decode a ProtoOA deal/position price exactly once.
+ *
+ * ProtoOA returns executionPrice and ProtoOAClosePositionDetail.entryPrice as
+ * `double` values already expressed in human units (e.g. NZDUSD 0.56904).
+ * Dividing those by 10^digits produced the 0.0000056904 rows seen in the
+ * journal. Legacy payloads occasionally still carry the old integer-tick form,
+ * so only those are scaled — an already-decimal value is passed through.
+ */
+export const decodeDealPrice = (
+  raw: unknown,
+  symbolId: unknown,
+  digitsById: SymbolDigitsMap | undefined,
+  symbolName?: string
+): number => {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  if (!Number.isInteger(n)) return n;
+  const scale = Math.pow(10, resolveDigits(symbolId, digitsById, symbolName));
+  return Math.abs(n) >= scale ? n / scale : n;
 };
 
 export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?: number, toTimestamp?: number, isDemo: boolean = true, digitsById?: SymbolDigitsMap): Promise<CtraderDeal[]> {
@@ -903,20 +934,20 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
       symbolId: typeof symbolId === 'number' && Number.isFinite(symbolId) ? symbolId : undefined,
       tradeSide: deal.tradeSide === 1 ? 'buy' : 'sell',
       volume: Number(deal.filledVolume ?? deal.volume ?? 0) / 10000000,
-      price: scalePrice(deal.executionPrice ?? deal.price ?? 0, symbolId, digitsById, deal.symbolName || tradeData.symbolName),
+      price: decodeDealPrice(deal.executionPrice ?? deal.price ?? 0, symbolId, digitsById, deal.symbolName || tradeData.symbolName),
       profit: Number(deal.closePositionDetail?.grossProfit ?? deal.profit ?? 0) / 100,
       swap: Number(deal.closePositionDetail?.swap ?? deal.swap ?? 0) / 100,
       commission: Number(deal.commission ?? 0) / 100,
       openTimestamp: openTime ? new Date(openTime).toISOString() : '',
       closeTimestamp: closeTime ? new Date(closeTime).toISOString() : '',
       stopLoss: deal.closePositionDetail?.stopLoss
-        ? scalePrice(deal.closePositionDetail.stopLoss, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
+        ? decodeDealPrice(deal.closePositionDetail.stopLoss, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
         : undefined,
       takeProfit: deal.closePositionDetail?.takeProfit
-        ? scalePrice(deal.closePositionDetail.takeProfit, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
+        ? decodeDealPrice(deal.closePositionDetail.takeProfit, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
         : undefined,
       entryPrice: deal.closePositionDetail?.entryPrice
-        ? scalePrice(deal.closePositionDetail.entryPrice, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
+        ? decodeDealPrice(deal.closePositionDetail.entryPrice, symbolId, digitsById, deal.symbolName || tradeData.symbolName)
         : undefined,
     };
   });

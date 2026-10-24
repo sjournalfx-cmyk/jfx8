@@ -1,0 +1,32 @@
+name: Candle harvest
+
+on:
+  schedule:
+    # Vercel Hobby crons are daily-only; this replaces the external pinger and
+    # keeps the shared candle store fresh every 15 minutes.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check HARVEST_SECRET
+        id: guard
+        env:
+          HARVEST_SECRET: ${{ secrets.HARVEST_SECRET }}
+        run: |
+          if [ -z "$HARVEST_SECRET" ]; then
+            echo "::notice title=Candle harvest skipped::HARVEST_SECRET is not configured; nothing was triggered."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger harvest
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          HARVEST_SECRET: ${{ secrets.HARVEST_SECRET }}
+        run: |
+          curl -fsS -X POST https://www.jfxjournal.site/api/candles/harvest \
+            -H "x-harvest-secret: $HARVEST_SECRET"

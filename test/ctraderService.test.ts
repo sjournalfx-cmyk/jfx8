@@ -212,6 +212,45 @@ describe('ctraderService - WebSocket API integration', () => {
     expect(deals[0].profit).toBe(-15);
   });
 
+  it('keeps already-decimal NZDUSD deal prices intact (no double scaling)', async () => {
+    MockWebSocket.mockResponses = {
+      [PT.DEAL_LIST_REQ]: {
+        deal: [
+          {
+            dealId: 6003,
+            orderId: 7003,
+            symbol: 'NZDUSD',
+            symbolId: 42,
+            tradeSide: 1,
+            filledVolume: 1000000,
+            // ProtoOA deal prices are doubles in human units, not raw ticks.
+            executionPrice: 0.56904,
+            closePositionDetail: {
+              grossProfit: 250,
+              swap: 0,
+              entryPrice: 0.56904,
+              commission: -30,
+              createTimestamp: 1718000000000,
+              executionTimestamp: 1718003600000,
+            },
+          },
+        ],
+      },
+    };
+
+    const deals = await ctraderService.getClosedDeals(1001, undefined, undefined, true, new Map([[42, 5]]));
+    expect(deals).toHaveLength(1);
+    expect(deals[0].entryPrice).toBe(0.56904);
+    expect(deals[0].price).toBe(0.56904);
+  });
+
+  it('decodeDealPrice only scales legacy integer ticks', () => {
+    const digits = new Map([[42, 5]]);
+    expect(ctraderService.decodeDealPrice(0.56904, 42, digits, 'NZDUSD')).toBe(0.56904);
+    expect(ctraderService.decodeDealPrice(1, 42, digits, 'NZDUSD')).toBe(1);
+    expect(ctraderService.decodeDealPrice(108542, 1, new Map([[1, 5]]), 'EURUSD')).toBe(1.08542);
+  });
+
   it('does not open a browser WebSocket for broker requests', async () => {
     MockWebSocket.mockResponses = { [PT.RECONCILE_REQ]: { position: [] } };
     const positions = await ctraderService.getPositions(1001);

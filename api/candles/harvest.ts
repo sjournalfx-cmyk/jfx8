@@ -15,9 +15,11 @@ import {
 //
 // NOTE on cadence: ONE tick processes ONE batch (default 50 series, hard max
 // 50, plus a 45s time-budget guard). With ~1100 series in the queue a full
-// refresh cycle takes ~22 daily ticks — or under a day with the healthy
-// 15-minute external pinger. Claims are stalest-first so every series
-// advances each cycle.
+// refresh cycle takes ~22 daily ticks — or under a day with the 15-minute
+// GitHub Actions scheduler in .github/workflows/candle-harvest.yml.
+// claim_harvest_jobs prioritises pending work, then 'done' rows whose
+// candle_series.updated_at is oldest (popular symbols/timeframes first), so
+// every series keeps advancing even while the queue never fully drains.
 //
 // Env required:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -123,10 +125,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (claimError) throw claimError;
 
     if (!queue || queue.length === 0) {
-      // A completed queue is a refresh cycle, not a terminal state. Requeue
-      // completed rows before claiming the next bounded batch; otherwise the
-      // unique(symbol_id,timeframe) insert below would leave every existing
-      // row "done" forever and candles would never refresh again.
+      // Safety net for deployments whose claim_harvest_jobs predates the
+      // reclaim-done migration: a completed queue is a refresh cycle, not a
+      // terminal state, so requeue done rows and try one more claim. Once the
+      // migration is applied the RPC returns done rows directly and this
+      // branch is never reached.
       const { error: requeueError } = await supabase
         .from('harvest_queue')
         .update({ status: 'pending', claimed_at: null, attempts: 0, updated_at: new Date().toISOString() })

@@ -353,6 +353,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const rawKey = extractRawApiKey(req.headers as Record<string, string | string[] | undefined>);
 
+  // Candles is a read-only GET sub-route. Dispatch it before any body
+  // parsing / POST-only handling so `/api/ctrader/candles` (vercel.json
+  // rewrite -> `?action=candles`) and the legacy alias both work.
+  if (String(req.query.action || '').toLowerCase() === 'candles') {
+    return candlesHandler(req, res);
+  }
+
   const body = (typeof req.body === 'object' && req.body !== null) ? req.body : {};
   const action = String(body.action || req.query.action || (req.method === 'GET' ? 'get_positions' : 'open')).toLowerCase();
 

@@ -4,7 +4,8 @@
   "rewrites": [
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
-    { "source": "/auth/callback", "destination": "/index.html" }
+    { "source": "/auth/callback", "destination": "/index.html" },
+    { "source": "/api/ctrader/candles", "destination": "/api/ctrader/trade?action=candles" }
   ],
   "functions": {
     "api/**/*.ts": {
