@@ -21,18 +21,12 @@ export const MOBILE_ROUTES = new Set<string>([
   'portfolios',  // portfolio manager (drawer + desktop nav)
 ]);
 
-// Desktop-only: never render on APK / small screens — show DesktopOnlyStub instead.
+// Desktop-only: never render on APK / small screens — show a desktop-only notice instead.
 // Includes Market Grid (charts) + heavy labs.
 export const DESKTOP_ONLY_ROUTES = new Set<string>([
   'charts',        // <-- Market Grid / ChartGrid
   'market-grid',   // alias if router ever uses this id
-  'playbook',
-  'rules',
-  'goals',
-  'daily-bias',
   'settings',
-  'mt5',
-  'terminal',
   // Desktop live-trading surfaces (mobile uses the Log Trade tabs instead).
   'trade',
   'quotes',
