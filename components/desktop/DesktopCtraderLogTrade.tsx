@@ -38,7 +38,7 @@ const DesktopCtraderLogTrade: React.FC<DesktopCtraderLogTradeProps> = ({
             onTradingEvent={notify}
           />
         ) : (
-          <div className="p-4">
+          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
             <CtraderConnectPrompt onGoConnect={onGoConnect} />
           </div>
         )}
