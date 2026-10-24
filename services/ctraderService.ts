@@ -173,7 +173,19 @@ async function ctraderApiRequest(body: Record<string, unknown>): Promise<any> {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.message || data?.error || `cTrader request failed (HTTP ${res.status})`);
+  if (!res.ok) {
+    const error = new Error(data?.message || data?.error || `cTrader request failed (HTTP ${res.status})`) as Error & {
+      code?: string;
+      status?: number;
+      data?: unknown;
+    };
+    // Preserve structured server errors (e.g. `locked_by_rule`) so the UI can
+    // render the correct message/notification instead of a generic failure.
+    error.code = typeof data?.error === 'string' ? data.error : undefined;
+    error.status = res.status;
+    error.data = data;
+    throw error;
+  }
   return data;
 }
 

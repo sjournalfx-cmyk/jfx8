@@ -3,6 +3,7 @@ import { Lock, Minus, Plus, RefreshCw } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { haptic } from '../../lib/haptics';
 import { useCtraderSymbols, type CtraderQuoteSymbol } from '../../hooks/useCtraderSymbols';
+import type { TradingEvent } from '../../lib/tradingNotifications';
 import {
   bumpLockStat,
   countOpensToday,
@@ -34,6 +35,8 @@ interface CtraderTradeTabProps {
   /** Portfolio scope for trading locks (per-portfolio rules). */
   portfolioId?: string | null;
   timezone?: string;
+  /** Desktop notification bridge. Mobile omits it and keeps its current toasts. */
+  onTradingEvent?: (event: TradingEvent) => void;
 }
 
 const VOLUME_STEPS: { delta: number; label: string }[] = [
@@ -79,6 +82,7 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
   compact = false,
   portfolioId,
   timezone,
+  onTradingEvent,
 }) => {
   const { addToast } = useToast();
   const numericAccountId = useMemo(() => {
@@ -274,6 +278,12 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
           message: verdict.reason === 'count_unavailable' ? verdict.message : `${verdict.message} Adjust in Rules & Checklists.`,
           duration: 5000,
         });
+        onTradingEvent?.({
+          kind: 'error',
+          message: verdict.message,
+          errorCode: 'locked_by_rule',
+          alreadyToasted: true,
+        });
         return;
       }
       setIsPlacing(side);
@@ -296,16 +306,24 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
         const msg = `${side === 'buy' ? 'Buy' : 'Sell'} ${volume.toFixed(2)} ${activeSymbol?.symbolName ?? ''} placed`;
         setLastResult(msg);
         addToast({ type: 'success', title: 'Order sent', message: msg, duration: 4000 });
+        onTradingEvent?.({ kind: 'order_placed', message: msg, alreadyToasted: true });
         void refreshFills();
       } catch (e: any) {
         const msg = e?.message || 'Order failed. Check connection and retry.';
         setLastResult(msg);
         addToast({ type: 'error', title: 'Order failed', message: msg, duration: 5000 });
+        onTradingEvent?.({
+          kind: 'error',
+          message: msg,
+          errorCode: e?.code,
+          status: e?.status,
+          alreadyToasted: true,
+        });
       } finally {
         setIsPlacing(null);
       }
     },
-    [numericAccountId, symbolId, volume, stopLoss, takeProfit, isDemo, isDemoMode, activeSymbol, addToast, locks, fillsToday, portfolioId, timezone, refreshFills]
+    [numericAccountId, symbolId, volume, stopLoss, takeProfit, isDemo, isDemoMode, activeSymbol, addToast, onTradingEvent, locks, fillsToday, portfolioId, timezone, refreshFills]
   );
 
   if (numericAccountId === null) {

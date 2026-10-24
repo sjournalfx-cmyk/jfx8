@@ -33,6 +33,11 @@ export const DESKTOP_ONLY_ROUTES = new Set<string>([
   'settings',
   'mt5',
   'terminal',
+  // Desktop live-trading surfaces (mobile uses the Log Trade tabs instead).
+  'trade',
+  'quotes',
+  'live-chart',
+  'trading-locks',
 ]);
 
 export const isMobileRoute = (view: string) => MOBILE_ROUTES.has(view);

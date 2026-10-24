@@ -2,6 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 import { CtraderTradeTab } from './CtraderTradeTab';
 import type { CtraderQuoteSymbol } from '../../hooks/useCtraderSymbols';
+import type { TradingEvent } from '../../lib/tradingNotifications';
 import { haptic } from '../../lib/haptics';
 
 interface CtraderTradeDetailProps {
@@ -18,6 +19,7 @@ interface CtraderTradeDetailProps {
   onGoConnect?: () => void;
   portfolioId?: string | null;
   timezone?: string;
+  onTradingEvent?: (event: TradingEvent) => void;
 }
 
 /**
@@ -39,6 +41,7 @@ export const CtraderTradeDetail: React.FC<CtraderTradeDetailProps> = ({
   onGoConnect,
   portfolioId,
   timezone,
+  onTradingEvent,
 }) => {
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-[#000000]">
@@ -72,6 +75,7 @@ export const CtraderTradeDetail: React.FC<CtraderTradeDetailProps> = ({
           compact
           portfolioId={portfolioId}
           timezone={timezone}
+          onTradingEvent={onTradingEvent}
         />
       </div>
     </div>

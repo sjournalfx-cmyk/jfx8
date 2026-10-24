@@ -6,7 +6,9 @@ import {
   Copy,
   LocateFixed,
   Lock,
+  Maximize2,
   Menu,
+  Minimize2,
   Minus,
   Palette,
   Trash2,
@@ -40,6 +42,8 @@ interface CtraderChartViewProps {
   symbols?: CtraderQuoteSymbol[];
   /** Switch the chart to another quote (parent swaps symbolId/symbolName). */
   onSymbolChange?: (symbolId: number) => void;
+  /** Desktop: expose a fullscreen toggle for the chart surface. */
+  enableFullscreen?: boolean;
 }
 
 const TIMEFRAMES = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1'] as const;
@@ -133,11 +137,35 @@ export const CtraderChartView: React.FC<CtraderChartViewProps> = ({
   onClose,
   symbols = [],
   onSymbolChange,
+  enableFullscreen = false,
 }) => {
   const [timeframe, setTimeframe] = useState<string>('M1');
   const [follow, setFollow] = useState(true);
   const [tfOpen, setTfOpen] = useState(false);
   const [quoteOpen, setQuoteOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      haptic.selection();
+    } catch {}
+    try {
+      if (document.fullscreenElement === containerRef.current) {
+        await document.exitFullscreen?.();
+      } else {
+        await containerRef.current?.requestFullscreen?.();
+      }
+    } catch {
+      /* fullscreen may be blocked by the browser */
+    }
+  }, []);
   const { bars, isLoading, error, isStale, reload } = useLiveCandles(
     ctidAccountId,
     isDemo,
@@ -803,8 +831,8 @@ export const CtraderChartView: React.FC<CtraderChartViewProps> = ({
   const toolLabel = TOOL_LABELS[activeTool] ?? activeTool;
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-[#000000]">
-      {/* Top bar: back + symbol + live state ... follow + TF + menu */}
+    <div ref={containerRef} className="flex-1 min-h-0 flex flex-col bg-[#000000]">
+      {/* Top bar: back + symbol + live state ... follow + fullscreen + TF + menu */}
       <div className="shrink-0 flex items-center gap-1.5 px-2 pt-2">
         <button
           type="button"
@@ -843,6 +871,18 @@ export const CtraderChartView: React.FC<CtraderChartViewProps> = ({
         >
           <LocateFixed size={17} />
         </button>
+
+        {enableFullscreen && (
+          <button
+            type="button"
+            onClick={() => void toggleFullscreen()}
+            aria-label={isFullscreen ? 'Exit fullscreen chart' : 'Open chart in fullscreen'}
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            className="flex items-center justify-center w-11 h-11 min-w-[44px] rounded-lg border border-transparent bg-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/10 transition-all shrink-0 active:scale-95"
+          >
+            {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+          </button>
+        )}
 
         {/* Timeframe dropdown */}
         <div className="relative shrink-0">

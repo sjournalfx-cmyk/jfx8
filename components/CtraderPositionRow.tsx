@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Pencil } from 'lucide-react';
+import { X, Pencil, ArrowUpRight } from 'lucide-react';
 import { haptic } from '../lib/haptics';
 import { useToast } from './ui/Toast';
 import ConfirmationModal from './ConfirmationModal';
@@ -19,6 +19,10 @@ interface CtraderPositionRowProps {
   onSaveSltp: (position: any, stopLoss: number | undefined, takeProfit: number | undefined) => Promise<void>;
   /** Navigate to the existing cTrader connect flow when the session is dead. */
   onReconnect?: () => void;
+  /** Desktop: show explicit edit/close buttons instead of swipe-only actions. */
+  desktopActions?: boolean;
+  /** Desktop: open the full trade detail for this position. */
+  onOpenDetail?: () => void;
 }
 
 // Auth/session failures can't be fixed by retrying the same request — the only
@@ -58,6 +62,8 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
   onClose,
   onSaveSltp,
   onReconnect,
+  desktopActions = false,
+  onOpenDetail,
 }) => {
   const [swipeX, setSwipeX] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -272,7 +278,53 @@ export const CtraderPositionRow: React.FC<CtraderPositionRowProps> = ({
               )}
             </div>
           </div>
-          <div className="text-right shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
+            {(desktopActions || onOpenDetail) && (
+              <div className="flex items-center gap-1 mr-1">
+                {onOpenDetail && (
+                  <button
+                    type="button"
+                    aria-label={`Open ${symbolName} trade detail`}
+                    title="Open trade detail"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenDetail();
+                    }}
+                    className="w-8 h-8 rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 flex items-center justify-center transition-colors"
+                  >
+                    <ArrowUpRight size={14} />
+                  </button>
+                )}
+                {desktopActions && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label={`Edit ${symbolName} stop loss and take profit`}
+                      title="Edit SL/TP"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditor();
+                      }}
+                      className="w-8 h-8 rounded-lg border border-white/10 text-zinc-400 hover:text-[#FF4F01] hover:bg-white/5 flex items-center justify-center transition-colors"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Close ${symbolName} position`}
+                      title="Close position"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleClose();
+                      }}
+                      className="w-8 h-8 rounded-lg border border-white/10 text-zinc-400 hover:text-[#e5484d] hover:bg-white/5 flex items-center justify-center transition-colors"
+                    >
+                      <X size={15} />
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <span className={`text-[14px] font-bold tabular-nums transition-colors duration-300 ${
               floating >= 0 ? 'text-[#30a46c]' : 'text-[#e5484d]'
             }`}>

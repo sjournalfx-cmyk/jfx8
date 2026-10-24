@@ -50,6 +50,11 @@ const AIChat = safeLazy(() => import('./components/AIChat'));
 const BacktestLab = safeLazy(() => import('./components/BacktestLab'));
 const ChartGrid = safeLazy(() => import('./components/ChartGrid'));
 const Notes = safeLazy(() => import('./components/Notes'));
+const DesktopCtraderTradeView = safeLazy(() => import('./components/desktop/DesktopCtraderTradeView'));
+const DesktopCtraderQuotesView = safeLazy(() => import('./components/desktop/DesktopCtraderQuotesView'));
+const DesktopCtraderChartView = safeLazy(() => import('./components/desktop/DesktopCtraderChartView'));
+const DesktopCtraderLocksView = safeLazy(() => import('./components/desktop/DesktopCtraderLocksView'));
+const DesktopCtraderLogTrade = safeLazy(() => import('./components/desktop/DesktopCtraderLogTrade'));
 
 const AppContent: React.FC = () => {
   const [currentView, setCurrentView] = useState(() => {
@@ -273,6 +278,7 @@ const {
   }, [addPortfolio]);
 
   const linkPortfolio = activePortfolio && (activePortfolio.source || 'manual') !== 'manual' ? activePortfolio : null;
+  const isCtraderPortfolio = (activePortfolio?.source || 'manual') === 'ctrader';
   const activeTrades = isDemoMode ? demoTrades : portfolioTrades;
   const activeNotes = isDemoMode ? demoNotes : notes;
   const activeDailyBias = isDemoMode ? demoDailyBias : dailyBias;
@@ -1603,6 +1609,7 @@ const onLogout = async () => {
               trades={activeTrades}
               offlineQueueCount={offlineQueue.length}
               isDemoMode={isDemoMode}
+              hasCtraderAccount={Boolean(ctraderAccountId)}
               onToggleDemoMode={() => {
                 const nextDemo = !isDemoMode;
                 setIsDemoMode(nextDemo);
@@ -1637,6 +1644,9 @@ const onLogout = async () => {
                 isLoading={isDataLoading}
                 offlineQueue={offlineQueue}
                 isDemoMode={isDemoMode}
+                ctraderAccountId={ctraderAccountId}
+                ctraderPortfolioId={activePortfolioId}
+                userTimezone={activeUserProfile?.timezone}
               />
             )}
             {currentView === 'ai-chat' && (
@@ -1654,22 +1664,71 @@ const onLogout = async () => {
               />
             )}
             {currentView === 'log-trade' && activeUserProfile && (
-              <LogTrade
-                key={editingTrade?.id || 'new-trade'}
-                isDarkMode={isDarkMode}
-                onSave={handleAddTrade}
-                onBatchSave={handleBatchAddTrades}
-                onCancel={() => {
-                  setEditingTrade(null);
-                  setCurrentView(editingTrade ? 'history' : 'dashboard');
-                }}
-                initialTrade={editingTrade}
-                currencySymbol={activeUserProfile.currencySymbol}
-                trades={activeTrades}
-                userProfile={activeUserProfile}
-                isReadOnly={isDemoMode}
-                tradesUsedThisMonth={tradesThisMonth}
-                maxTradesThisMonth={currentPlanFeatures.maxTradesPerMonth}
+              isCtraderPortfolio && !editingTrade ? (
+                <DesktopCtraderLogTrade
+                  ctidAccountId={ctraderAccountId}
+                  isDemoMode={isDemoMode}
+                  onGoConnect={() => setCurrentView('ea-setup')}
+                  portfolioId={activePortfolioId}
+                  timezone={activeUserProfile.timezone}
+                />
+              ) : (
+                <LogTrade
+                  key={editingTrade?.id || 'new-trade'}
+                  isDarkMode={isDarkMode}
+                  onSave={handleAddTrade}
+                  onBatchSave={handleBatchAddTrades}
+                  onCancel={() => {
+                    setEditingTrade(null);
+                    setCurrentView(editingTrade ? 'history' : 'dashboard');
+                  }}
+                  initialTrade={editingTrade}
+                  currencySymbol={activeUserProfile.currencySymbol}
+                  trades={activeTrades}
+                  userProfile={activeUserProfile}
+                  isReadOnly={isDemoMode}
+                  tradesUsedThisMonth={tradesThisMonth}
+                  maxTradesThisMonth={currentPlanFeatures.maxTradesPerMonth}
+                />
+              )
+            )}
+            {currentView === 'trade' && activeUserProfile && (
+              <DesktopCtraderTradeView
+                ctidAccountId={ctraderAccountId}
+                portfolioId={activePortfolioId}
+                timezone={activeUserProfile.timezone}
+                onGoConnect={() => setCurrentView('ea-setup')}
+                onViewChange={setCurrentView}
+              />
+            )}
+            {currentView === 'quotes' && activeUserProfile && (
+              <DesktopCtraderQuotesView
+                ctidAccountId={ctraderAccountId}
+                portfolioId={activePortfolioId}
+                timezone={activeUserProfile.timezone}
+                onGoConnect={() => setCurrentView('ea-setup')}
+                onViewChange={setCurrentView}
+              />
+            )}
+            {currentView === 'live-chart' && activeUserProfile && (
+              <DesktopCtraderChartView
+                ctidAccountId={ctraderAccountId}
+                portfolioId={activePortfolioId}
+                timezone={activeUserProfile.timezone}
+                onGoConnect={() => setCurrentView('ea-setup')}
+                onViewChange={setCurrentView}
+              />
+            )}
+            {currentView === 'trading-locks' && activeUserProfile && (
+              <DesktopCtraderLocksView
+                portfolios={portfolios}
+                activePortfolioId={activePortfolioId}
+                resolveCtraderAccountId={(portfolioId) =>
+                  portfolios.find((p) => p.id === portfolioId)?.accounts?.find((a) => a.provider === 'ctrader')?.externalAccountId ?? null
+                }
+                timezone={activeUserProfile.timezone}
+                hasCtraderAccount={Boolean(ctraderAccountId)}
+                onGoConnect={() => setCurrentView('ea-setup')}
               />
             )}
             {currentView === 'backtest-lab' && activeUserProfile && (

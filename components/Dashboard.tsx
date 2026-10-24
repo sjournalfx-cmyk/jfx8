@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import React, { lazy, Suspense, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { ArrowUpRight, ArrowDownRight, Activity, TrendingUp, DollarSign, BarChart2, Zap, Coins, GripVertical, Cpu, ArrowRight, Lock, Info, X, Gauge, CalendarDays, AlertTriangle, RefreshCw, Plus, Sparkles, Flame, Inbox } from 'lucide-react';
 import {
     DndContext,
@@ -21,9 +21,15 @@ import SessionClock from './SessionClock';
 import DailyQuote from './DailyQuote';
 import { SortableWidget } from './ui/SortableWidget';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useCtraderSymbols } from '../hooks/useCtraderSymbols';
 import { dataService } from '../services/dataService';
 import { supabase } from '../lib/supabase';
 import OpenPositions from './OpenPositions';
+
+// Keep the live-trading stack out of the dashboard's initial bundle.
+const CtraderAccountPanel = lazy(() =>
+    import('./desktop/CtraderAccountPanel').then((m) => ({ default: m.CtraderAccountPanel }))
+);
 import { EquityCurveWidget } from './analytics/EquityCurveWidget';
 import { PerformanceBySession } from './analytics/PerformanceBySession';
 import { Skeleton, EmptyState } from './ui/Skeleton';
@@ -72,6 +78,9 @@ interface DashboardProps {
     isLoading?: boolean;
     offlineQueue?: Trade[];
     isDemoMode?: boolean;
+    ctraderAccountId?: string | null;
+    ctraderPortfolioId?: string | null;
+    userTimezone?: string;
 }
 
 // --- MOBILE EMPTY STATE (shared EmptyState + CTA to Log) ---
@@ -599,10 +608,11 @@ const DASHBOARD_PRESETS = {
     ANALYTICS: ['equityCurve', 'recentTrades', 'dailyBias', 'openPositions']
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, onUpdateBias, userProfile, onViewChange, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, isLoading, offlineQueue = [], isDemoMode = false }) => {
+const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, onUpdateBias, userProfile, onViewChange, eaSession, lastKnownBridgeBalance, isBridgeOnline = false, isLoading, offlineQueue = [], isDemoMode = false, ctraderAccountId, ctraderPortfolioId, userTimezone }) => {
     // Robust free tier check
     const currentPlan = normalizePlan(userProfile?.plan);
     const isFreeTier = !userProfile || currentPlan === APP_CONSTANTS.PLANS.FREE;
+    const ctraderSymbols = useCtraderSymbols(ctraderAccountId);
     const [activeInfo, setActiveInfo] = useState<{ title: string, content: string } | null>(null);
     // Widgets State for Reordering
     const [widgetOrder, setWidgetOrder] = useLocalStorage('dashboard_widget_order', DASHBOARD_PRESETS.STANDARD);
@@ -780,6 +790,38 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
             case 'equityCurve':
                 return <EquityCurveWidget trades={trades} equityData={equityData} isDarkMode={isDarkMode} currencySymbol={userProfile.currencySymbol} hideCurrentValue={!isFreeTier && trades.length === 0} isLoading={isLoading} />;
             case 'openPositions':
+                if (ctraderAccountId && !isDemoMode) {
+                    return (
+                        <div className="h-full min-h-[300px] rounded-2xl border border-zinc-800 bg-black p-2 text-zinc-200 sm:p-3">
+                            <div className="flex items-center justify-between px-2 py-1.5">
+                                <h3 className="flex items-center gap-2 text-sm font-bold text-white">
+                                    <Activity size={18} className="text-emerald-500" /> Open Positions
+                                </h3>
+                                <button
+                                    type="button"
+                                    onClick={() => onViewChange('trade')}
+                                    className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-[#FF4F01] hover:text-[#ff7a3d]"
+                                >
+                                    Trade <ArrowRight size={12} />
+                                </button>
+                            </div>
+                            <Suspense fallback={<div className="py-8 text-center text-[11px] text-zinc-500">Loading cTrader positions…</div>}>
+                                <CtraderAccountPanel
+                                    ctidAccountId={ctraderAccountId}
+                                    portfolioId={ctraderPortfolioId}
+                                    timezone={userTimezone}
+                                    onGoConnect={() => onViewChange('ea-setup')}
+                                    mode="positions"
+                                    symbols={ctraderSymbols.symbols}
+                                    isDemo={ctraderSymbols.isDemo}
+                                    isLoadingSymbols={ctraderSymbols.isLoading}
+                                    symbolsError={ctraderSymbols.error}
+                                    onRefreshSymbols={ctraderSymbols.reload}
+                                />
+                            </Suspense>
+                        </div>
+                    );
+                }
                 if (!userProfile.eaConnected) {
                     // Stale cached sessions would show ghost positions — the
                     // widget is only meaningful with an active bridge.
@@ -889,6 +931,47 @@ const Dashboard: React.FC<DashboardProps> = ({ isDarkMode, trades, dailyBias, on
             <div className="mb-6 [&>div]:!p-4 sm:[&>div]:!p-6 [&>div]:!rounded-2xl [&>div]:!mb-0">
                 <DailyQuote isDarkMode={isDarkMode} />
             </div>
+
+            {ctraderAccountId && !isDemoMode && (
+                <div className="mb-6 rounded-2xl border border-zinc-800 bg-black p-3 text-zinc-200">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1">
+                        <div>
+                            <h2 className="text-sm font-black text-white">cTrader Account</h2>
+                            <p className="text-[11px] text-zinc-500">Balance, equity, margin, and open positions from your linked account.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => onViewChange('trade')}
+                                className="inline-flex h-8 items-center gap-1 rounded-lg bg-[#FF4F01] px-3 text-[10px] font-black uppercase tracking-widest text-white hover:brightness-110"
+                            >
+                                Open trading <ArrowRight size={12} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onViewChange('quotes')}
+                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/10 px-3 text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:bg-white/5"
+                            >
+                                Quotes
+                            </button>
+                        </div>
+                    </div>
+                    <Suspense fallback={<div className="py-6 text-center text-[11px] text-zinc-500">Loading cTrader account…</div>}>
+                        <CtraderAccountPanel
+                            ctidAccountId={ctraderAccountId}
+                            portfolioId={ctraderPortfolioId}
+                            timezone={userTimezone}
+                            onGoConnect={() => onViewChange('ea-setup')}
+                            mode="summary"
+                            symbols={ctraderSymbols.symbols}
+                            isDemo={ctraderSymbols.isDemo}
+                            isLoadingSymbols={ctraderSymbols.isLoading}
+                            symbolsError={ctraderSymbols.error}
+                            onRefreshSymbols={ctraderSymbols.reload}
+                        />
+                    </Suspense>
+                </div>
+            )}
 
             {/* Stats Row (Fixed) */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

@@ -31,6 +31,7 @@ import {
 import { UserProfile, Trade } from '../types';
 import { useToast } from './ui/Toast';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from '../lib/constants';
+import { desktopTradingNavItems } from '../lib/desktopTradingRoutes';
 import { FloatingDock } from './ui/floating-dock';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -53,6 +54,8 @@ interface SidebarProps {
    * sidebar still works in any context that has no portfolio store wired.
    */
   activePortfolioSource?: 'manual' | 'ctrader' | 'bridge';
+  /** Shows the live-trading nav group when a cTrader account is linked. */
+  hasCtraderAccount?: boolean;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -68,6 +71,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   isDemoMode = false,
   onToggleDemoMode,
   activePortfolioSource,
+  hasCtraderAccount = false,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -103,6 +107,17 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [markNotificationsRead, showNotifications]);
 
+  const tradingItems = desktopTradingNavItems(hasCtraderAccount).map((item) => ({
+    id: item.id,
+    icon:
+      item.id === 'trade' ? <Activity size={18} /> :
+      item.id === 'quotes' ? <Globe size={18} /> :
+      item.id === 'live-chart' ? <CandlestickChart size={18} /> :
+      <Lock size={18} />,
+    label: item.label,
+    description: item.description,
+  }));
+
   const menuItems = [
     { id: 'dashboard', icon: <IconLayoutDashboard size={18} />, label: 'Dashboard', description: 'Overview of your trading performance' },
     { id: 'ea-setup', icon: <IconLink size={18} />, label: 'Connect & Import', restricted: true, description: 'Connect accounts or import trades' },
@@ -126,12 +141,14 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'charts', icon: <IconChartCandle size={18} />, label: 'Market Grid', restricted: true, description: 'Multi-chart analysis view' },
     { id: 'backtest-lab', icon: <IconFlask size={18} />, label: 'Backtest Lab', restricted: true, description: 'Test strategies historically' },
     { id: 'ai-chat', icon: <IconMessage size={18} />, label: 'AI Assistant', description: 'Get AI trading insights' },
+    ...tradingItems,
   ];
 
   // Section grouping for the primary nav. Ids must match `menuItems`; the
   // log-trade gate (hidden for non-basic tiers) still applies per item.
   const menuGroups: { label: string; ids: string[] }[] = [
     { label: 'Trade', ids: ['dashboard', 'log-trade', 'history', 'ea-setup'] },
+    { label: 'Live Trading', ids: tradingItems.map((item) => item.id) },
     { label: 'Review', ids: ['analytics', 'notes', 'portfolios'] },
     { label: 'Tools', ids: ['charts', 'backtest-lab', 'ai-chat'] },
   ];

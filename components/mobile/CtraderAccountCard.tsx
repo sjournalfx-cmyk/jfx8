@@ -4,6 +4,7 @@ import { CtraderPositionRow } from '../CtraderPositionRow';
 import { useCtraderSpots } from '../../hooks/useCtraderSpots';
 import { calculateLivePositionProfit } from '../../lib/ctraderPnl';
 import type { CtraderQuoteSymbol } from '../../hooks/useCtraderSymbols';
+import type { TradingEvent } from '../../lib/tradingNotifications';
 import type { CtraderDeal, CtraderPosition } from '../../services/ctraderService';
 
 interface CtraderAccountCardProps {
@@ -11,6 +12,14 @@ interface CtraderAccountCardProps {
   isDemo?: boolean;
   symbols?: CtraderQuoteSymbol[];
   onGoConnect?: () => void;
+  /** Desktop: trim mobile bottom-nav padding and use hover action buttons. */
+  embedded?: boolean;
+  /** Desktop layout modes. Defaults to the full mobile card. */
+  mode?: 'full' | 'summary' | 'positions';
+  /** Desktop notification bridge. */
+  onTradingEvent?: (event: TradingEvent) => void;
+  /** Desktop: open the trade detail for a position/history row. */
+  onOpenTradeDetail?: (symbolId: number, symbolName: string) => void;
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000;
@@ -40,6 +49,10 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
   isDemo = true,
   symbols = [],
   onGoConnect,
+  embedded = false,
+  mode = 'full',
+  onTradingEvent,
+  onOpenTradeDetail,
 }) => {
   const numericAccountId = useMemo(() => {
     const n = Number(ctidAccountId);
@@ -62,6 +75,12 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
       const accs = await svc.getAccounts().catch(() => [] as any[]);
       const match = (accs || []).find((a: any) => Number(a.ctidTraderAccountId) === numericAccountId) ?? null;
       if (match) setAccount(match);
+      if (mode === 'summary') {
+        const t = await svc.getTrader(numericAccountId, isDemo).catch(() => null);
+        if (t) setTrader(t);
+        setError(null);
+        return;
+      }
       const [t, pos, ord, dl] = await Promise.all([
         svc.getTrader(numericAccountId, isDemo).catch(() => null),
         svc.getPositions(numericAccountId, isDemo).catch(() => [] as CtraderPosition[]),
@@ -76,12 +95,17 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
     } catch (e: any) {
       setError(e?.message || 'Could not load account.');
     }
-  }, [numericAccountId, isDemo]);
+  }, [numericAccountId, isDemo, mode]);
 
   const refreshPositions = useCallback(async () => {
     if (numericAccountId === null) return;
     try {
       const svc = await import('../../services/ctraderService');
+      if (mode === 'summary') {
+        const t = await svc.getTrader(numericAccountId, isDemo).catch(() => null);
+        if (t) setTrader(t);
+        return;
+      }
       const [t, pos, ord] = await Promise.all([
         svc.getTrader(numericAccountId, isDemo).catch(() => null),
         svc.getPositions(numericAccountId, isDemo).catch(() => null),
@@ -93,7 +117,7 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
     } catch {
       /* best-effort live refresh */
     }
-  }, [numericAccountId, isDemo]);
+  }, [numericAccountId, isDemo, mode]);
 
   useEffect(() => {
     if (numericAccountId === null) {
@@ -144,25 +168,55 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
     async (pos: any) => {
       if (numericAccountId === null) throw new Error('No cTrader account selected.');
       const svc = await import('../../services/ctraderService');
-      await svc.closePosition(numericAccountId, Number(pos.positionId), Number(pos.volume) || 0, isDemo);
-      await refreshPositions();
+      try {
+        await svc.closePosition(numericAccountId, Number(pos.positionId), Number(pos.volume) || 0, isDemo);
+        onTradingEvent?.({
+          kind: 'position_closed',
+          message: `${symbolNameFor(pos, symbols)} ${Number(pos.volume || 0).toFixed(2)} closed at market.`,
+        });
+        await refreshPositions();
+      } catch (e: any) {
+        onTradingEvent?.({
+          kind: 'error',
+          message: e?.message || 'Could not close position.',
+          errorCode: e?.code,
+          status: e?.status,
+          alreadyToasted: true,
+        });
+        throw e;
+      }
     },
-    [numericAccountId, isDemo, refreshPositions]
+    [numericAccountId, isDemo, refreshPositions, onTradingEvent, symbols]
   );
 
   const handleSaveSltp = useCallback(
     async (pos: any, stopLoss?: number, takeProfit?: number) => {
       if (numericAccountId === null) throw new Error('No cTrader account selected.');
       const svc = await import('../../services/ctraderService');
-      await svc.amendPositionSltp(numericAccountId, Number(pos.positionId), { stopLoss, takeProfit, isDemo });
-      await refreshPositions();
+      try {
+        await svc.amendPositionSltp(numericAccountId, Number(pos.positionId), { stopLoss, takeProfit, isDemo });
+        onTradingEvent?.({
+          kind: 'position_modified',
+          message: `${symbolNameFor(pos, symbols)} SL/TP updated.`,
+        });
+        await refreshPositions();
+      } catch (e: any) {
+        onTradingEvent?.({
+          kind: 'error',
+          message: e?.message || 'Could not update SL/TP.',
+          errorCode: e?.code,
+          status: e?.status,
+          alreadyToasted: true,
+        });
+        throw e;
+      }
     },
-    [numericAccountId, isDemo, refreshPositions]
+    [numericAccountId, isDemo, refreshPositions, onTradingEvent, symbols]
   );
 
   if (numericAccountId === null) {
     return (
-      <div className="px-4 pt-4 pb-28">
+      <div className={embedded ? '' : 'px-4 pt-4 pb-28'}>
         <div className="p-5 rounded-2xl border bg-[#0a0a0a] border-zinc-800/80 text-center">
           <p className="text-[15px] font-bold text-white">No cTrader account linked</p>
           <p className="text-[12px] text-zinc-500 mt-1">Link this portfolio to see your account here.</p>
@@ -203,10 +257,10 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
   const openCount = positions.length + orders.length;
 
   return (
-    <div className="px-2.5 pt-2 pb-28">
+    <div className={embedded ? '' : 'px-2.5 pt-2 pb-28'}>
       <div className="rounded-lg border border-white/5 bg-white/[0.01] overflow-hidden">
         {/* Broker row */}
-        <div className="px-3 py-2.5 border-b border-white/5">
+        {mode !== 'positions' && <div className="px-3 py-2.5 border-b border-white/5">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-[10px] text-zinc-500 leading-tight">Broker Server</p>
@@ -224,10 +278,10 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
               <p className="text-xs font-semibold text-white leading-tight mt-px">{trader?.isHedgingEnabled ? 'Yes' : 'No'}</p>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* Balance row */}
-        <div className="grid grid-cols-4 border-b border-white/5">
+        {mode !== 'positions' && <div className="grid grid-cols-4 border-b border-white/5">
           {[
             { label: 'Balance', value: balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), tone: 'text-white' },
             { label: 'Equity', value: equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), tone: equity > 0 ? 'text-white' : 'text-[#e5484d]' },
@@ -239,8 +293,10 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
               <p className={`text-[13px] font-bold mt-px tabular-nums truncate ${c.tone}`}>{c.value}</p>
             </div>
           ))}
-        </div>
+        </div>}
 
+        {mode !== 'summary' && (
+          <>
         {/* Tabs */}
         <div className="flex items-center gap-0.5 p-1 bg-black">
           {(
@@ -287,10 +343,16 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
                         digits={digitsFor(Number(p.symbolId), symbols)}
                         liveBid={tick?.bid}
                         liveAsk={tick?.ask}
-                        onClose={handleClosePosition}
-                        onSaveSltp={handleSaveSltp}
-                        onReconnect={onGoConnect}
-                      />
+                         onClose={handleClosePosition}
+                         onSaveSltp={handleSaveSltp}
+                         onReconnect={onGoConnect}
+                         desktopActions={embedded}
+                         onOpenDetail={
+                           onOpenTradeDetail
+                             ? () => onOpenTradeDetail(Number(p.symbolId), symbolNameFor(p, symbols))
+                             : undefined
+                         }
+                       />
                     );
                   })}
                   {orders.length > 0 && <p className="text-[10px] font-semibold text-zinc-500 pt-2 pb-0.5">Pending ({orders.length})</p>}
@@ -327,8 +389,22 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
                   {deals.map((d) => {
                     const net = Number(d.profit ?? 0) + Number(d.swap ?? 0) + Number(d.commission ?? 0);
                     const when = d.closeTimestamp ? new Date(d.closeTimestamp) : null;
+                    const dealSymbolId = Number((d as any).symbolId ?? d.symbol);
+                    const canOpen = Boolean(onOpenTradeDetail) && Number.isFinite(dealSymbolId) && dealSymbolId > 0;
                     return (
-                      <div key={d.dealId} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                      <div
+                        key={d.dealId}
+                        role={canOpen ? 'button' : undefined}
+                        tabIndex={canOpen ? 0 : undefined}
+                        onClick={canOpen ? () => onOpenTradeDetail?.(dealSymbolId, d.symbol || symbolNameFor(d, symbols)) : undefined}
+                        onKeyDown={canOpen ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onOpenTradeDetail?.(dealSymbolId, d.symbol || symbolNameFor(d, symbols));
+                          }
+                        } : undefined}
+                        className={`flex items-center justify-between py-2 border-b border-white/5 last:border-0 ${canOpen ? 'cursor-pointer hover:bg-white/5' : ''}`}
+                      >
                         <div className="min-w-0 pr-3 flex-1">
                           <h3 className="text-[13px] font-bold uppercase tracking-tight leading-tight text-white truncate">
                             {d.symbol || symbolNameFor(d, symbols)}
@@ -352,6 +428,8 @@ export const CtraderAccountCard: React.FC<CtraderAccountCardProps> = ({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );

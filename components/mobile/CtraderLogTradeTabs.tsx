@@ -6,6 +6,7 @@ import { CtraderTradeDetail } from './CtraderTradeDetail';
 import { CtraderChartView } from './CtraderChartView';
 import { CtraderQuoteSheet } from './CtraderQuoteSheet';
 import { useCtraderSymbols } from '../../hooks/useCtraderSymbols';
+import type { TradingEvent } from '../../lib/tradingNotifications';
 import { haptic } from '../../lib/haptics';
 
 type CtraderLogTab = 'quotes' | 'trade';
@@ -19,6 +20,9 @@ interface CtraderLogTradeTabsProps {
   onDetailOpenChange?: (open: boolean) => void;
   portfolioId?: string | null;
   timezone?: string;
+  /** Desktop: remove mobile nav padding and enable chart fullscreen. */
+  desktop?: boolean;
+  onTradingEvent?: (event: TradingEvent) => void;
 }
 
 /**
@@ -35,6 +39,8 @@ export const CtraderLogTradeTabs: React.FC<CtraderLogTradeTabsProps> = ({
   onDetailOpenChange,
   portfolioId,
   timezone,
+  desktop = false,
+  onTradingEvent,
 }) => {
   const [tab, setTab] = useState<CtraderLogTab>('quotes');
   const { symbols, isLoading, error, isDemo, reload } = useCtraderSymbols(ctidAccountId);
@@ -126,6 +132,7 @@ export const CtraderLogTradeTabs: React.FC<CtraderLogTradeTabsProps> = ({
             setSymbolId(id);
             setChartId(id);
           }}
+          enableFullscreen={desktop}
         />
       </div>
     );
@@ -152,6 +159,7 @@ export const CtraderLogTradeTabs: React.FC<CtraderLogTradeTabsProps> = ({
         onGoConnect={onGoConnect}
         portfolioId={portfolioId}
         timezone={timezone}
+        onTradingEvent={onTradingEvent}
       />
     );
   }
@@ -215,6 +223,8 @@ export const CtraderLogTradeTabs: React.FC<CtraderLogTradeTabsProps> = ({
               isDemo={isDemo}
               symbols={symbols}
               onGoConnect={onGoConnect}
+              embedded={desktop}
+              onTradingEvent={onTradingEvent}
             />
           </div>
         )}
