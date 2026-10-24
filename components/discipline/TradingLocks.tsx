@@ -25,6 +25,10 @@ import {
   writePortfolioLocks,
   type PortfolioLocks,
 } from '../../lib/tradingLocks';
+import {
+  notifyElapsedLockChanges,
+  syncNativeLockChangeNotifications,
+} from '../../lib/tradingNotifications';
 
 interface TradingLocksProps {
   portfolios: Portfolio[];
@@ -189,6 +193,7 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
 
   const [locks, setLocks] = useState<PortfolioLocks>(() => readPortfolioLocks(selectedPid));
   const [syncFailed, setSyncFailed] = useState(false);
+  const { addToast } = useToast();
   const syncSeq = useRef(0);
   // Bumped on every local edit so an in-flight cloud load can never clobber
   // (or push a stale copy over) a change the user just made.
@@ -212,6 +217,7 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
       const stamped = { ...next, updatedAt: new Date().toISOString() };
       setLocks(stamped);
       writePortfolioLocks(selectedPid, stamped);
+      syncNativeLockChangeNotifications(selectedPid, stamped);
       void saveToCloud(selectedPid, stamped);
     },
     [selectedPid, saveToCloud]
@@ -227,7 +233,11 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
         alive = false;
       };
     }
+    // Apply any 24h pending loosening before reading, so the UI reflects the
+    // new limits and the user gets exactly one "now active" notification.
+    notifyElapsedLockChanges(selectedPid, addToast);
     const local = readPortfolioLocks(selectedPid);
+    syncNativeLockChangeNotifications(selectedPid, local);
     setLocks(local);
     const loadSeq = persistSeq.current;
     void (async () => {
@@ -245,8 +255,10 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
         if (remoteAt > localAt) {
           const normalized = normalizePortfolioLocks(remote);
           writePortfolioLocks(selectedPid, normalized);
+          syncNativeLockChangeNotifications(selectedPid, normalized);
           setLocks(normalized);
         } else if (localAt > remoteAt) {
+          syncNativeLockChangeNotifications(selectedPid, currentLocal);
           void saveToCloud(selectedPid, currentLocal);
         }
       } catch {
@@ -256,7 +268,7 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
     return () => {
       alive = false;
     };
-  }, [selectedPid, saveToCloud]);
+  }, [addToast, selectedPid, saveToCloud]);
 
   // Merge elapsed pending changes / expiring cooling counts while mounted.
   useEffect(() => {
@@ -275,18 +287,22 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
     }
     if (waits.length === 0) return;
     const id = window.setTimeout(() => {
-      const normalized = normalizePortfolioLocks(locks);
+      // Announce (once) any pending loosening that just became effective,
+      // then refresh the state from the normalized cache.
+      notifyElapsedLockChanges(selectedPid, addToast);
+      const normalized = readPortfolioLocks(selectedPid);
       if (JSON.stringify(normalized) !== JSON.stringify(locks)) {
         persistSeq.current += 1;
         setLocks(normalized);
         writePortfolioLocks(selectedPid, normalized);
+        syncNativeLockChangeNotifications(selectedPid, normalized);
         // Keep the server-side mirror current when a cooling countdown or a
         // pending loosening lands while this screen is open.
         void saveToCloud(selectedPid, normalized);
       }
     }, Math.min(...waits) + 50);
     return () => window.clearTimeout(id);
-  }, [locks, selectedPid, saveToCloud]);
+  }, [addToast, locks, selectedPid, saveToCloud]);
 
   const accountId = selectedPid ? resolveCtraderAccountId(selectedPid) : null;
   const { symbols, isLoading: symbolsLoading, isDemo } = useCtraderSymbols(accountId);
@@ -407,8 +423,6 @@ export const TradingLocks: React.FC<TradingLocksProps> = ({
   const blocksToday = serverBlocks ?? stats.blocks;
 
   const selectedPortfolio = options.find((p) => p.id === selectedPid) ?? null;
-
-  const { addToast } = useToast();
 
   const flip = (key: RuleKey) => {
     const rule = locks[key] as { enabled: boolean; unlockRequestedAt: string | null };

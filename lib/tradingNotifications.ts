@@ -3,9 +3,23 @@
  *
  * Mobile (APK/web shell) keeps its existing toasts; this module adds the
  * desktop layer: in-app toasts plus the browser Notification API when the
- * user granted permission. It never imports Capacitor — the native globals
+ * user granted permission, and Capacitor LocalNotifications when running
+ * inside the native shell. It never imports Capacitor — the native globals
  * are only probed defensively — so loading it on web can never throw.
  */
+
+import {
+  LOCK_RULE_KEYS,
+  LOCK_RULE_LABELS,
+  LOCK_UNLOCK_COOLDOWN_MS,
+  applyElapsedLockChanges,
+  hasNotifiedLockChange,
+  markLockChangeNotified,
+  pendingChangeDescription,
+  pendingChangeElapsed,
+  type LockRuleKey,
+  type PortfolioLocks,
+} from './tradingLocks';
 
 export type TradingNotificationKind =
   | 'order_placed'
@@ -36,6 +50,25 @@ export type TradingEvent =
   | { kind: 'position_modified'; title?: string; message?: string; alreadyToasted?: boolean }
   | { kind: 'position_closed'; title?: string; message?: string; alreadyToasted?: boolean }
   | { kind: 'error'; message: string; errorCode?: string; status?: number; alreadyToasted?: boolean };
+
+export interface LockBlockContext {
+  maxPerDay?: number;
+  fillsToday?: number | null;
+  minLots?: number;
+  maxLots?: number;
+  volumeLots?: number;
+  allowedSymbolIds?: number[];
+  reason?: string;
+}
+
+export interface LockBlockInput {
+  rule?: string | null;
+  message?: string | null;
+  context?: LockBlockContext | null;
+  symbolName?: string | null;
+  volumeLots?: number | null;
+  portfolioName?: string | null;
+}
 
 interface ContentSeed {
   title: string;
@@ -95,6 +128,74 @@ export const tradingNotificationContent = (kind: TradingNotificationKind, messag
     toastType: seed.toastType,
   };
 };
+
+const isLockRuleKey = (rule: string | null | undefined): rule is LockRuleKey =>
+  rule === 'pairWhitelist' || rule === 'maxTrades' || rule === 'lotGuard';
+
+export const lockRuleLabel = (rule: string | null | undefined): string =>
+  isLockRuleKey(rule) ? LOCK_RULE_LABELS[rule] : 'Trading lock';
+
+const finiteNumber = (value: unknown): number | null => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const formatLots = (value: number | null): string => (value === null ? '…' : String(value));
+
+/**
+ * Builds the "Trade blocked by <rule>" notification. The rule key drives the
+ * title; the server's structured context (when present) produces a concrete
+ * reason such as "EURUSD not in allowed pairs" instead of a generic message.
+ */
+export const buildLockBlockContent = (input: LockBlockInput): TradingNotificationContent => {
+  const fallback = CONTENT.locked_by_rule;
+  const title = `Trade blocked by ${lockRuleLabel(input.rule)}`;
+  const rawMessage = input.message && input.message.trim() ? input.message.trim() : '';
+
+  let message = rawMessage || fallback.fallbackMessage;
+
+  if (input.rule === 'pairWhitelist') {
+    const pair = input.symbolName?.trim();
+    if (pair) message = `${pair} not in allowed pairs`;
+  } else if (input.rule === 'maxTrades') {
+    if (input.context?.reason === 'count_unavailable' && rawMessage) {
+      message = rawMessage;
+    } else {
+      const max = finiteNumber(input.context?.maxPerDay);
+      const fills = finiteNumber(input.context?.fillsToday);
+      if (max !== null) {
+        message = `Max ${max} trades/day reached${fills !== null ? ` (${fills}/${max} today)` : ''}`;
+      }
+    }
+  } else if (input.rule === 'lotGuard') {
+    const min = finiteNumber(input.context?.minLots);
+    const max = finiteNumber(input.context?.maxLots);
+    const volume = finiteNumber(input.context?.volumeLots ?? input.volumeLots);
+    if (min !== null || max !== null) {
+      const range = `${formatLots(min)}–${formatLots(max)} lots`;
+      message = volume !== null ? `Lot size ${volume} is outside ${range}` : `Allowed lot size is ${range}`;
+    }
+  }
+
+  return {
+    kind: 'locked_by_rule',
+    title,
+    message,
+    toastType: fallback.toastType,
+  };
+};
+
+export interface LockChangeNotificationContent extends TradingNotificationContent {
+  description: string;
+}
+
+export const buildLockChangeContent = (description: string): LockChangeNotificationContent => ({
+  kind: 'locked_by_rule',
+  title: 'Lock change now active',
+  message: description,
+  toastType: 'info',
+  description,
+});
 
 interface ToastLike {
   type: TradingToastType;
@@ -156,6 +257,76 @@ const showBrowserNotification = (content: TradingNotificationContent): void => {
   }
 };
 
+const nativeLocalNotifications = (): any | null => {
+  if (!isNativeShell()) return null;
+  try {
+    return (window as any).Capacitor?.Plugins?.LocalNotifications ?? null;
+  } catch {
+    return null;
+  }
+};
+
+/** Stable 32-bit id so rescheduling the same rule replaces its notification. */
+const nativeNotificationId = (seed: string): number => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return (Math.abs(hash) % 2_147_483_000) + 1;
+};
+
+const showNativeNotification = (content: TradingNotificationContent, seed?: string): void => {
+  const plugin = nativeLocalNotifications();
+  if (!plugin?.schedule) return;
+  void (async () => {
+    try {
+      if (typeof plugin.checkPermissions === 'function') {
+        const permission = await plugin.checkPermissions();
+        if (permission && permission.display !== 'granted') return;
+      }
+      await plugin.schedule({
+        notifications: [
+          {
+            id: seed ? nativeNotificationId(seed) : (Date.now() % 2_147_483_000) + 1,
+            title: content.title,
+            body: content.message,
+            schedule: { at: new Date(Date.now() + 100) },
+          },
+        ],
+      });
+    } catch {
+      /* Native plugin unavailable or permission denied. */
+    }
+  })();
+};
+
+interface DeliverOptions {
+  skipToast?: boolean;
+  /** Use Capacitor LocalNotifications when running in the native shell. */
+  useNative?: boolean;
+  nativeSeed?: string;
+}
+
+const deliverNotification = (
+  content: TradingNotificationContent,
+  options: TradingNotifyOptions,
+  deliver: DeliverOptions = {}
+): void => {
+  if (!deliver.skipToast && options.addToast) {
+    options.addToast({
+      type: content.toastType,
+      title: content.title,
+      message: content.message,
+      duration: content.toastType === 'error' ? 6000 : 4000,
+    });
+  }
+
+  if (options.browserNotifications !== false) {
+    showBrowserNotification(content);
+    if (deliver.useNative) showNativeNotification(content, deliver.nativeSeed);
+  }
+};
+
 /**
  * Emit one trading notification. Returns the resolved content so callers
  * (and tests) can assert the mapping without inspecting browser state.
@@ -173,18 +344,86 @@ export const notifyTradingEvent = (
     'title' in event ? event.title : undefined
   );
 
-  if (!event.alreadyToasted && options.addToast) {
-    options.addToast({
-      type: content.toastType,
-      title: content.title,
-      message: content.message,
-      duration: content.toastType === 'error' ? 6000 : 4000,
-    });
-  }
-
-  if (options.browserNotifications !== false) {
-    showBrowserNotification(content);
-  }
-
+  deliverNotification(content, options, { skipToast: event.alreadyToasted });
   return content;
+};
+
+/** Emit the "Trade blocked by <rule>" toast/browser/native notification. */
+export const notifyLockBlock = (
+  input: LockBlockInput,
+  options: TradingNotifyOptions = {}
+): TradingNotificationContent => {
+  const content = buildLockBlockContent(input);
+  deliverNotification(content, options, {
+    useNative: true,
+    nativeSeed: `lock-block:${input.rule || 'lock'}:${Date.now()}`,
+  });
+  return content;
+};
+
+/**
+ * Drops native LocalNotifications when a pending change is cancelled and
+ * schedules one for each future effective time. Same per-portfolio/rule id
+ * means a newer schedule replaces the previous one.
+ */
+export const syncNativeLockChangeNotifications = (
+  portfolioId: string,
+  locks: PortfolioLocks | null | undefined
+): void => {
+  const plugin = nativeLocalNotifications();
+  if (!plugin || !portfolioId || !locks) return;
+
+  for (const rule of LOCK_RULE_KEYS) {
+    const id = nativeNotificationId(`lock-change:${portfolioId}:${rule}`);
+    const pending = locks[rule]?.pendingChange;
+    const requestedAt = pending?.requestedAt ? Date.parse(pending.requestedAt) : NaN;
+    const effectiveAt = Number.isFinite(requestedAt) ? requestedAt + LOCK_UNLOCK_COOLDOWN_MS : NaN;
+
+    if (pending && Number.isFinite(effectiveAt) && effectiveAt > Date.now() && !pendingChangeElapsed(pending)) {
+      const description = pendingChangeDescription(rule, pending.value);
+      void (async () => {
+        try {
+          await plugin.cancel?.({ notifications: [{ id }] });
+          await plugin.schedule?.({
+            notifications: [
+              {
+                id,
+                title: 'Lock change now active',
+                body: description,
+                schedule: { at: new Date(effectiveAt), allowWhileIdle: true },
+              },
+            ],
+          });
+        } catch {
+          /* Native plugin unavailable or permission denied. */
+        }
+      })();
+    } else {
+      void plugin.cancel?.({ notifications: [{ id }] }).catch?.(() => {});
+    }
+  }
+};
+
+/**
+ * Applies elapsed pending lock changes and emits each one exactly once. The
+ * dedupe key is portfolio+rule+pending timestamp in localStorage, so the
+ * 60-second poll can call this repeatedly without duplicate alerts.
+ */
+export const notifyElapsedLockChanges = (
+  portfolioId: string,
+  addToast?: (toast: ToastLike) => void
+): TradingNotificationContent[] => {
+  const changes = applyElapsedLockChanges(portfolioId);
+  const delivered: TradingNotificationContent[] = [];
+  for (const change of changes) {
+    if (hasNotifiedLockChange(change.dedupeKey)) continue;
+    markLockChangeNotified(change.dedupeKey);
+    const content = buildLockChangeContent(change.description);
+    // Same id as the pre-scheduled native notification for this portfolio/rule,
+    // so an immediate alert replaces the scheduled one instead of doubling it.
+    const nativeSeed = `lock-change:${portfolioId}:${change.rule}`;
+    deliverNotification(content, { addToast }, { useNative: true, nativeSeed });
+    delivered.push(content);
+  }
+  return delivered;
 };

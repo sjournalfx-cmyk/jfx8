@@ -1474,27 +1474,34 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-charts': ['lightweight-charts'],
-            'vendor-tiptap': [
-              '@tiptap/react',
-              '@tiptap/starter-kit',
-              '@tiptap/extension-image',
-              '@tiptap/extension-link',
-              '@tiptap/extension-table',
-              '@tiptap/extension-color',
-              '@tiptap/extension-text-style',
-              '@tiptap/extension-underline',
-              '@tiptap/extension-task-list',
-              '@tiptap/extension-task-item',
-            ],
-            'vendor-ui': ['@dnd-kit/core', '@dnd-kit/sortable', 'motion', 'lucide-react'],
-            'vendor-ai': ['@google/generative-ai', 'agentation'],
+          // Group third-party libraries into stable vendor chunks. A function
+          // (instead of the object form) lets each package land in exactly one
+          // group, which avoids the vendor-tiptap <-> vendor-ui cycle Rollup
+          // reported when transitively shared deps were assigned twice.
+          manualChunks(id) {
+            // Vite's dynamic-import preload helper is used by the entry while
+            // the lazy AI chunk happens to also use it. Pin it to the entry's
+            // vendor chunk so first paint does not preload the AI/OpenUI chunk.
+            if (id.includes('vite/preload-helper')) return 'vendor-react';
+            if (!id.includes('node_modules')) return undefined;
+            if (/node_modules\/(react|react-dom|scheduler|use-sync-external-store)\//.test(id)) return 'vendor-react';
+            // Shared utilities are used by the entry and by lazy chart/AI
+            // chunks; pin them to the already-preloaded UI chunk so the entry
+            // does not drag the whole recharts graph into first paint.
+            if (/node_modules\/(clsx|tailwind-merge|class-variance-authority)\//.test(id)) return 'vendor-ui';
+            if (/node_modules\/(lightweight-charts|recharts|d3-[\w-]+|victory-vendor)\//.test(id)) return 'vendor-charts';
+            if (/node_modules\/(@tiptap|prosemirror-[\w-]+)\//.test(id)) return 'vendor-tiptap';
+            if (/node_modules\/@supabase\//.test(id)) return 'vendor-supabase';
+            if (/node_modules\/posthog-js\//.test(id)) return 'vendor-posthog';
+            if (/node_modules\/(@xenova|mermaid)\//.test(id)) return 'vendor-heavy-media';
+            if (/node_modules\/(openai|@google\/generative-ai)\//.test(id)) return 'vendor-ai';
+            if (/node_modules\/(@openuidev|zod)\//.test(id)) return 'vendor-openui';
+            if (/node_modules\/(@dnd-kit|motion|framer-motion|lucide-react|@tabler\/icons-react)\//.test(id)) return 'vendor-ui';
+            return undefined;
           },
         },
       },
-      chunkSizeWarningLimit: 600,
+      chunkSizeWarningLimit: 900,
     },
     server: {
       port: 3000,

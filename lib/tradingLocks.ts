@@ -46,6 +46,22 @@ export interface PortfolioLocks {
 
 export type TradingLocksStore = Record<string, PortfolioLocks>;
 
+export const LOCK_RULE_KEYS = ['pairWhitelist', 'maxTrades', 'lotGuard'] as const;
+export type LockRuleKey = (typeof LOCK_RULE_KEYS)[number];
+
+export const LOCK_RULE_LABELS: Record<LockRuleKey, string> = {
+  pairWhitelist: 'Allowed pairs',
+  maxTrades: 'Max trades per day',
+  lotGuard: 'Lot size limits',
+};
+
+export interface ElapsedLockChange {
+  rule: LockRuleKey;
+  requestedAt: string;
+  description: string;
+  dedupeKey: string;
+}
+
 export interface LockStats {
   blocks: number;
   fills: number;
@@ -88,13 +104,21 @@ const storage = {
 
 export const readLocks = (): TradingLocksStore => safeParse(storage.get(LOCKS_KEY)) ?? {};
 
+/**
+ * Raw local cache entry (pending changes still attached). Use this when a
+ * caller must detect a pending change *before* normalization clears it.
+ */
+export const readStoredPortfolioLocks = (portfolioId: string | null | undefined): PortfolioLocks | null => {
+  if (!portfolioId) return null;
+  return readLocks()[portfolioId] ?? null;
+};
+
 export const readPortfolioLocks = (portfolioId: string | null | undefined): PortfolioLocks => {
   // No local entry: use a blank with an epoch timestamp so a cloud row (or a
   // blank local cache) always wins the updatedAt merge instead of "now".
   const empty = { ...blankPortfolioLocks(), updatedAt: new Date(0).toISOString() };
   if (!portfolioId) return empty;
-  const store = readLocks();
-  const found = store[portfolioId];
+  const found = readStoredPortfolioLocks(portfolioId);
   if (!found) return empty;
   return normalizePortfolioLocks(found);
 };
@@ -141,6 +165,87 @@ export const pendingChangeElapsed = (
   if (!Number.isFinite(t)) return false;
   if (t > now) return false;
   return t + LOCK_UNLOCK_COOLDOWN_MS <= now;
+};
+
+const pairDescription = (value: { symbolIds?: number[]; symbolNames?: Record<number, string> } | null | undefined): string => {
+  const rawIds = Array.isArray(value?.symbolIds) ? value?.symbolIds : [];
+  const ids = uniqueIds(rawIds);
+  const names = ids
+    .map((id) => value?.symbolNames?.[id])
+    .filter((name): name is string => Boolean(name));
+  if (names.length > 0 && names.length <= 3) return `Allowed pairs are now ${names.join(', ')}`;
+  return `Allowed pairs updated to ${pairCountLabel(ids.length)}`;
+};
+
+/** Human description of the loosening a pending change will apply. */
+export const pendingChangeDescription = (
+  rule: LockRuleKey,
+  value: PendingChange<unknown>['value'] | null | undefined
+): string => {
+  if (rule === 'pairWhitelist') {
+    return pairDescription(value as { symbolIds?: number[]; symbolNames?: Record<number, string> } | null);
+  }
+  if (rule === 'maxTrades') {
+    const max = Math.max(1, Math.floor(Number((value as { maxPerDay?: number } | null)?.maxPerDay) || 1));
+    return `Max trades per day is now ${max}`;
+  }
+  const lot = value as { minLots?: number | null; maxLots?: number | null } | null;
+  const min = finiteBound(lot?.minLots);
+  const max = finiteBound(lot?.maxLots);
+  return `Lot limits are now ${min ?? '…'}–${max ?? '…'} lots`;
+};
+
+const LOCK_CHANGE_NOTICE_PREFIX = 'jfx_lock_change_notified_v1';
+
+export const lockChangeDedupeKey = (portfolioId: string, rule: LockRuleKey, requestedAt: string): string =>
+  `${LOCK_CHANGE_NOTICE_PREFIX}:${portfolioId}:${rule}:${requestedAt}`;
+
+export const hasNotifiedLockChange = (key: string): boolean => storage.get(key) !== null;
+
+export const markLockChangeNotified = (key: string): void => {
+  storage.set(key, new Date().toISOString());
+};
+
+/**
+ * Pending loosening changes that should already be in force. The caller is
+ * responsible for normalizing/writing the lock row; this helper only reports
+ * what elapsed so notifications can be raised before the pending value is
+ * cleared.
+ */
+export const collectElapsedLockChanges = (
+  portfolioId: string,
+  locks: PortfolioLocks | null | undefined,
+  now = Date.now()
+): ElapsedLockChange[] => {
+  if (!portfolioId || !locks) return [];
+  const changes: ElapsedLockChange[] = [];
+  for (const rule of LOCK_RULE_KEYS) {
+    // A disabled/unlocked rule normalizes its pending change away, so there is
+    // nothing to announce even if an old cache entry still carries one.
+    if (!isRuleActive(locks[rule], now)) continue;
+    const pending = locks[rule]?.pendingChange;
+    if (!pending || !pendingChangeElapsed(pending, now)) continue;
+    changes.push({
+      rule,
+      requestedAt: pending.requestedAt,
+      description: pendingChangeDescription(rule, pending.value),
+      dedupeKey: lockChangeDedupeKey(portfolioId, rule, pending.requestedAt),
+    });
+  }
+  return changes;
+};
+
+/**
+ * Applies elapsed pending changes to the local cache (so the new limits bind
+ * even when no lock screen is open) and returns what changed.
+ */
+export const applyElapsedLockChanges = (portfolioId: string, now = Date.now()): ElapsedLockChange[] => {
+  const raw = readStoredPortfolioLocks(portfolioId);
+  if (!raw) return [];
+  const changes = collectElapsedLockChanges(portfolioId, raw, now);
+  if (changes.length === 0) return [];
+  writePortfolioLocks(portfolioId, normalizePortfolioLocks(raw, now));
+  return changes;
 };
 
 const normalizeBase = <T extends { enabled: boolean; unlockRequestedAt: string | null; pendingChange?: any }>(

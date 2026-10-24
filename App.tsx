@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import { safeLazy } from './lib/safeLazy';
 import Sidebar from './components/Sidebar';
-import LogTrade from './components/LogTrade';
 import Dashboard from './components/Dashboard';
-import Journal from './components/Journal';
 import Auth from './components/Auth';
 import AuthCallback from './components/AuthCallback';
 import BetaSplash from './components/BetaSplash';
@@ -13,8 +11,6 @@ import { PortfolioSwitcher } from './components/PortfolioSwitcher';
 
 import { Trade, Note, DailyBias, UserProfile, Portfolio } from './types';
 import Onboarding from './components/Onboarding';
-import Settings from './components/Settings';
-import EASetup from './components/EASetup';
 import ConfirmationModal from './components/ConfirmationModal';
 import QuickLogModal from './components/QuickLogModal';
 import TradeRecapSheet from './components/TradeRecapSheet';
@@ -27,29 +23,40 @@ import { buildPsychologyInsightsPrompt, extractSectionBody, getPsychologyInsight
 import { dataService, isTradeInPortfolio, removeTradePortfolioOverlays, writeTradePortfolioOverlays, writeTradePortfolioOverlay } from './services/dataService';
 import { usePortfolios } from './hooks/usePortfolios';
 import { useCtraderLiveBalance } from './hooks/useCtraderLiveBalance';
-import { modalResearchService } from './services/nvidiaAiService';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { OfflineBanner, useNetworkStatus } from './components/OfflineBlocker';
 import { BrandedLoader } from './components/ui/BrandedLoader';
 import { MobileBlocker } from './components/ui/MobileBlocker';
-import { MobileLayout } from './components/mobile/MobileLayout';
 import { MOBILE_ENABLED, IS_CAPACITOR } from './lib/featureFlags';
 import { useAuth } from './hooks/useAuth';
 import { useData } from './hooks/useData';
+import { useLockChangeNotifications } from './hooks/useLockChangeNotifications';
 import { authService } from './services/authService';
-import posthog from 'posthog-js';
-import { Agentation, type Annotation } from "agentation";
+import { captureAnalytics, identifyAnalytics, initAnalytics } from './lib/analytics';
+import type { Annotation } from "agentation";
 import { getSafePnL } from './lib/trade-normalization';
 import { normalizeThemePreference } from './lib/theme';
 import { demoDailyBias, demoEASession, demoNotes, demoTrades, getDemoProfile } from './lib/demoData';
 import { resolveBridgeBackedBalance } from './lib/bridgeBalance';
 
-// Lazy load heavy components for performance
+// Lazy load heavy components for performance. These views pull in tiptap,
+// lightweight-charts, EASetup's broker stack, and the mobile shell's own
+// views — none of which should ride in the dashboard's first-paint bundle.
 const Analytics = safeLazy(() => import('./components/Analytics'));
 const AIChat = safeLazy(() => import('./components/AIChat'));
 const BacktestLab = safeLazy(() => import('./components/BacktestLab'));
 const ChartGrid = safeLazy(() => import('./components/ChartGrid'));
 const Notes = safeLazy(() => import('./components/Notes'));
+const Journal = safeLazy(() => import('./components/Journal'));
+const LogTrade = safeLazy(() => import('./components/LogTrade'));
+const Settings = safeLazy(() => import('./components/Settings'));
+const EASetup = safeLazy(() => import('./components/EASetup'));
+const MobileLayout = safeLazy(() =>
+  import('./components/mobile/MobileLayout').then((m) => ({ default: m.MobileLayout }))
+);
+const DevAgentation = import.meta.env.DEV
+  ? safeLazy(() => import('agentation').then((m) => ({ default: m.Agentation })))
+  : null;
 const DesktopCtraderTradeView = safeLazy(() => import('./components/desktop/DesktopCtraderTradeView'));
 const DesktopCtraderQuotesView = safeLazy(() => import('./components/desktop/DesktopCtraderQuotesView'));
 const DesktopCtraderChartView = safeLazy(() => import('./components/desktop/DesktopCtraderChartView'));
@@ -114,13 +121,9 @@ const AppContent: React.FC = () => {
     setUserEmail
   } = useAuth();
 
-  // PostHog analytics initialization
+  // PostHog analytics initialization (loaded as a deferred chunk).
   useEffect(() => {
-    posthog.init('phc_afcj9r3oxhjFLVOZq2hUbcbkWBYM0mPxgNpiYYYjlSw', {
-      api_host: 'https://us.i.posthog.com',
-      autocapture: true,
-      capture_pageview: false,
-    });
+    initAnalytics();
   }, []);
 
   useEffect(() => {
@@ -186,7 +189,7 @@ const AppContent: React.FC = () => {
   // Track view changes as pageviews
   useEffect(() => {
     if (isAuthenticated) {
-      posthog.capture('$pageview', { view: currentView });
+      captureAnalytics('$pageview', { view: currentView });
     }
   }, [currentView, isAuthenticated]);
 
@@ -222,6 +225,15 @@ const {
     removePortfolio,
     findLinkCollision,
   } = usePortfolios(isDemoMode ? null : userId);
+
+  // Apply + announce elapsed 24h lock loosenings while the app stays open.
+  // Reads the local lock cache, so it is cheap even with many portfolios.
+  const lockNotificationPortfolioIds = useMemo(
+    () => (isAuthenticated && !isDemoMode ? portfolios.map((p) => p.id) : []),
+    [isAuthenticated, isDemoMode, portfolios]
+  );
+  useLockChangeNotifications(lockNotificationPortfolioIds, isAuthenticated && !isDemoMode);
+
   // Portfolio scoping: legacy trades without a portfolio live in Default.
   // Fail open (show all) while the store is still resolving ids or when 'all' is chosen.
   const portfolioTrades = useMemo(() => {
@@ -456,6 +468,7 @@ const {
         });
       }
 
+      const { modalResearchService } = await import('./services/nvidiaAiService');
       const response = await modalResearchService.generateResponse(
         buildPsychologyInsightsPrompt(psychologyInsightsSourceFacts),
         activeTrades,
@@ -1299,7 +1312,7 @@ const onLogout = async () => {
         setUserEmail(user.email || '');
         await loadUserDataRef.current(user.id);
         setIsAuthenticated(true);
-        posthog.identify(user.id, { email: user.email || '' });
+        identifyAnalytics(user.id, { email: user.email || '' });
       }
     } catch (error) {
       console.error("Login data load failed:", error);
@@ -1340,7 +1353,7 @@ const onLogout = async () => {
               setUserEmail(user.email || '');
               await loadUserData(user.id);
               setIsAuthenticated(true);
-              posthog.identify(user.id, { email: user.email || '' });
+              identifyAnalytics(user.id, { email: user.email || '' });
             }
           } catch (error) {
             console.error("Login data load failed:", error);
@@ -1357,7 +1370,7 @@ const onLogout = async () => {
               setUserEmail(user.email || '');
               await loadUserData(user.id);
               setIsAuthenticated(true);
-              posthog.identify(user.id, { email: user.email || '' });
+              identifyAnalytics(user.id, { email: user.email || '' });
             }
           } catch (error) {
             console.error("Registration data load failed:", error);
@@ -1514,6 +1527,7 @@ const onLogout = async () => {
         </div>
       )}
       {isMobile && activeUserProfile ? (
+        <Suspense fallback={<BrandedLoader />}>
         <MobileLayout
           currentView={currentView}
           onViewChange={setCurrentView}
@@ -1593,6 +1607,7 @@ const onLogout = async () => {
           onDeduplicate={handleDeduplicate}
           migrationVersion={currentMigrationVersion}
         />
+        </Suspense>
       ) : (
       <div className={`compact-scale flex h-screen w-full transition-colors duration-300 ${isDemoMode ? 'pt-16' : ''} ${isDarkMode ? 'text-zinc-100' : 'bg-slate-50 text-slate-900'}`} style={isDarkMode ? { background: '#000000' } : {}}>
 
@@ -1957,12 +1972,14 @@ const App: React.FC = () => {
         />
       )}
       <AppContent />
-      {import.meta.env.DEV && (
-        <Agentation 
-          onAnnotationAdd={handleAnnotationAdd}
-          onAnnotationUpdate={() => {}}
-          onAnnotationDelete={() => {}}
-        />
+      {import.meta.env.DEV && DevAgentation && (
+        <Suspense fallback={null}>
+          <DevAgentation
+            onAnnotationAdd={handleAnnotationAdd}
+            onAnnotationUpdate={() => {}}
+            onAnnotationDelete={() => {}}
+          />
+        </Suspense>
       )}
     </ToastProvider>
   );

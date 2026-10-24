@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  applyElapsedLockChanges,
   blankPortfolioLocks,
+  collectElapsedLockChanges,
   dayBoundsInTz,
   dayKeyInTz,
   editLotGuard,
@@ -8,12 +10,18 @@ import {
   editPairWhitelist,
   evaluateLocks,
   formatUnlockCountdown,
+  hasNotifiedLockChange,
   isRuleActive,
+  lockChangeDedupeKey,
   LOCK_UNLOCK_COOLDOWN_MS,
+  markLockChangeNotified,
   normalizePortfolioLocks,
   pairCountLabel,
+  pendingChangeDescription,
   pendingChangeElapsed,
+  readPortfolioLocks,
   unlockMsRemaining,
+  writePortfolioLocks,
 } from './tradingLocks';
 
 describe('unlock cooling', () => {
@@ -256,5 +264,73 @@ describe('dayKeyInTz', () => {
     // 2026-01-01T22:30:00Z is 2026-01-02 00:30 in Johannesburg (UTC+2).
     expect(dayKeyInTz(Date.parse('2026-01-01T22:30:00Z'), 'Africa/Johannesburg')).toBe('2026-01-02');
     expect(dayKeyInTz(Date.parse('2026-01-01T22:30:00Z'), 'UTC')).toBe('2026-01-01');
+  });
+});
+
+describe('lock change notifications', () => {
+  const NOW = Date.now();
+  const elapsed = () => new Date(NOW - LOCK_UNLOCK_COOLDOWN_MS - 1_000).toISOString();
+  const future = () => new Date(NOW - 60_000).toISOString();
+
+  const withPending = () => {
+    const locks = blankPortfolioLocks();
+    locks.pairWhitelist = {
+      enabled: true,
+      symbolIds: [1],
+      symbolNames: { 1: 'EURUSD' },
+      unlockRequestedAt: null,
+      pendingChange: { value: { symbolIds: [1, 2], symbolNames: { 1: 'EURUSD', 2: 'GBPUSD' } }, requestedAt: elapsed() },
+    };
+    locks.maxTrades = {
+      enabled: true,
+      maxPerDay: 2,
+      unlockRequestedAt: null,
+      pendingChange: { value: { maxPerDay: 5 }, requestedAt: elapsed() },
+    };
+    locks.lotGuard = {
+      enabled: true,
+      minLots: 0.1,
+      maxLots: 1,
+      unlockRequestedAt: null,
+      pendingChange: { value: { maxLots: 2 }, requestedAt: future() },
+    };
+    return locks;
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('describes each rule change for humans', () => {
+    expect(pendingChangeDescription('maxTrades', { maxPerDay: 5 })).toBe('Max trades per day is now 5');
+    expect(pendingChangeDescription('lotGuard', { minLots: 0.1, maxLots: 2 })).toBe('Lot limits are now 0.1–2 lots');
+    expect(pendingChangeDescription('pairWhitelist', { symbolIds: [1, 2], symbolNames: { 1: 'EURUSD', 2: 'GBPUSD' } }))
+      .toBe('Allowed pairs are now EURUSD, GBPUSD');
+  });
+
+  it('collects only elapsed pending changes and applies them to the cache', () => {
+    const locks = withPending();
+    const changes = collectElapsedLockChanges('p1', locks, NOW);
+    expect(changes.map((c) => c.rule)).toEqual(['pairWhitelist', 'maxTrades']);
+    expect(changes.every((c) => c.requestedAt === elapsed())).toBe(true);
+
+    writePortfolioLocks('p1', locks);
+    expect(applyElapsedLockChanges('p1', NOW).map((c) => c.rule)).toEqual(['pairWhitelist', 'maxTrades']);
+
+    const stored = readPortfolioLocks('p1');
+    expect(stored.pairWhitelist.symbolIds).toEqual([1, 2]);
+    expect(stored.pairWhitelist.pendingChange).toBeNull();
+    expect(stored.maxTrades.maxPerDay).toBe(5);
+    expect(stored.maxTrades.pendingChange).toBeNull();
+    expect(stored.lotGuard.maxLots).toBe(1);
+    expect(stored.lotGuard.pendingChange?.value).toEqual({ maxLots: 2 });
+  });
+
+  it('dedupe keys are stable per portfolio/rule/request timestamp', () => {
+    const key = lockChangeDedupeKey('p1', 'maxTrades', elapsed());
+    expect(hasNotifiedLockChange(key)).toBe(false);
+    markLockChangeNotified(key);
+    expect(hasNotifiedLockChange(key)).toBe(true);
+    expect(hasNotifiedLockChange(lockChangeDedupeKey('p2', 'maxTrades', elapsed()))).toBe(false);
   });
 });

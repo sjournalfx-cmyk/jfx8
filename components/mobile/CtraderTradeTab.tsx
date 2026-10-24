@@ -3,7 +3,12 @@ import { Lock, Minus, Plus, RefreshCw } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { haptic } from '../../lib/haptics';
 import { useCtraderSymbols, type CtraderQuoteSymbol } from '../../hooks/useCtraderSymbols';
-import type { TradingEvent } from '../../lib/tradingNotifications';
+import {
+  notifyElapsedLockChanges,
+  notifyLockBlock,
+  syncNativeLockChangeNotifications,
+  type TradingEvent,
+} from '../../lib/tradingNotifications';
 import {
   bumpLockStat,
   countOpensToday,
@@ -144,7 +149,10 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
   const [locks, setLocks] = useState(() => readPortfolioLocks(portfolioId));
   useEffect(() => {
     let alive = true;
-    setLocks(readPortfolioLocks(portfolioId));
+    if (portfolioId) notifyElapsedLockChanges(portfolioId, addToast);
+    const local = readPortfolioLocks(portfolioId);
+    if (portfolioId) syncNativeLockChangeNotifications(portfolioId, local);
+    setLocks(local);
     if (!portfolioId) {
       return () => {
         alive = false;
@@ -161,6 +169,7 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
         if (remoteAt > localAt) {
           const normalized = normalizePortfolioLocks(remote);
           writePortfolioLocks(portfolioId, normalized);
+          syncNativeLockChangeNotifications(portfolioId, normalized);
           setLocks(normalized);
         }
       } catch {
@@ -272,18 +281,23 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
       if (verdict.allowed === false) {
         bumpLockStat(portfolioId, dayKeyInTz(Date.now(), timezone), 'blocks');
         setLastResult(`Locked: ${verdict.message}`);
-        addToast({
-          type: 'error',
-          title: 'Blocked by trading lock',
-          message: verdict.reason === 'count_unavailable' ? verdict.message : `${verdict.message} Adjust in Rules & Checklists.`,
-          duration: 5000,
-        });
-        onTradingEvent?.({
-          kind: 'error',
-          message: verdict.message,
-          errorCode: 'locked_by_rule',
-          alreadyToasted: true,
-        });
+        notifyLockBlock(
+          {
+            rule: verdict.rule,
+            message: verdict.message,
+            context: {
+              reason: verdict.reason,
+              maxPerDay: locks.maxTrades?.maxPerDay,
+              fillsToday,
+              minLots: locks.lotGuard?.minLots,
+              maxLots: locks.lotGuard?.maxLots,
+              volumeLots: volume,
+            },
+            symbolName: activeSymbol?.symbolName,
+            volumeLots: volume,
+          },
+          { addToast }
+        );
         return;
       }
       setIsPlacing(side);
@@ -311,6 +325,20 @@ export const CtraderTradeTab: React.FC<CtraderTradeTabProps> = ({
       } catch (e: any) {
         const msg = e?.message || 'Order failed. Check connection and retry.';
         setLastResult(msg);
+        if (e?.code === 'locked_by_rule' || e?.data?.error === 'locked_by_rule') {
+          notifyLockBlock(
+            {
+              rule: e.data?.rule,
+              message: msg,
+              context: e.data?.context,
+              symbolName: activeSymbol?.symbolName,
+              volumeLots: volume,
+              portfolioName: e.data?.portfolioName,
+            },
+            { addToast }
+          );
+          return;
+        }
         addToast({ type: 'error', title: 'Order failed', message: msg, duration: 5000 });
         onTradingEvent?.({
           kind: 'error',

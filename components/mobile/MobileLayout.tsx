@@ -3,22 +3,12 @@ import { Trade, UserProfile, DailyBias, EASession, Note, Goal, Portfolio, CashTr
 import { type PsychologyInsightsEntry } from '../../lib/psychologyInsights';
 import { MobileTopHeader, HomeSubTab } from './MobileTopHeader';
 import { MobileDashboardView } from './views/MobileDashboardView';
-import { MobileAnalyticsView } from './views/MobileAnalyticsView';
 import { MobileNav } from '../ui/MobileNav';
 import { MobileDrawer } from './MobileDrawer';
 import { MobilePortfoliosView } from './MobilePortfoliosView';
 import { MobilePortfolioSheet } from './MobilePortfolioSheet';
 import { MobileFilterModal, MobileFilterState } from './MobileFilterModal';
-import Journal from './journal/Journal';
-import Notes from './notebook/Notes';
-import LogTrade from '../LogTrade';
-import { CtraderLogTradeTabs } from './CtraderLogTradeTabs';
-import EASetup from '../EASetup';
-import Settings from '../Settings';
 import { ChevronLeft } from 'lucide-react';
-import QuickLogModal from '../QuickLogModal';
-import { ChecklistBuilder } from '../discipline/ChecklistBuilder';
-import { TradingLocks } from '../discipline/TradingLocks';
 import { BrandedLoader } from '../ui/BrandedLoader';
 import { safeLazy } from '../../lib/safeLazy';
 
@@ -27,6 +17,24 @@ const BacktestLab = safeLazy(() => import('../BacktestLab'));
 // when the user opens it, instead of riding in the main bundle. App.tsx
 // already lazy-loads it; this static import was defeating that split.
 const AIChat = safeLazy(() => import('../AIChat'));
+const MobileAnalyticsView = safeLazy(() =>
+  import('./views/MobileAnalyticsView').then((m) => ({ default: m.MobileAnalyticsView }))
+);
+const Journal = safeLazy(() => import('./journal/Journal'));
+const Notes = safeLazy(() => import('./notebook/Notes'));
+const LogTrade = safeLazy(() => import('../LogTrade'));
+const CtraderLogTradeTabs = safeLazy(() =>
+  import('./CtraderLogTradeTabs').then((m) => ({ default: m.CtraderLogTradeTabs }))
+);
+const EASetup = safeLazy(() => import('../EASetup'));
+const Settings = safeLazy(() => import('../Settings'));
+const QuickLogModal = safeLazy(() => import('../QuickLogModal'));
+const ChecklistBuilder = safeLazy(() =>
+  import('../discipline/ChecklistBuilder').then((m) => ({ default: m.ChecklistBuilder }))
+);
+const TradingLocks = safeLazy(() =>
+  import('../discipline/TradingLocks').then((m) => ({ default: m.TradingLocks }))
+);
 
 interface MobileLayoutProps {
   currentView: string;
@@ -360,6 +368,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         }}
         className={`flex-1 overflow-y-auto overflow-x-hidden no-scrollbar overscroll-y-contain ${isAiChatView || isLogTradeView ? 'overflow-hidden' : isBacktestLabView ? 'overflow-hidden flex flex-col' : ''}`}
       >
+        <Suspense fallback={<BrandedLoader />}>
         {/* HOME VIEW */}
         {isHomeView && (
           <>
@@ -699,6 +708,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
             style={{ height: showBottomNav ? 'calc(var(--jfx-nav-h, 9.5rem) + 1rem)' : 'calc(1.5rem + env(safe-area-inset-bottom))' }}
           />
         )}
+        </Suspense>
       </main>
 
       {/* 3. Bottom Navigation Bar — hidden on AI chat, while a Backtest chart is open (replay dock replaces it), while an analytics fullscreen overlay is open, and while the cTrader trade detail owns the screen */}
@@ -776,6 +786,8 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
       />
 
       {/* 7. Quick Log Modal */}
+      {isQuickLogOpen && (
+      <Suspense fallback={null}>
       <QuickLogModal
         isOpen={isQuickLogOpen}
         onClose={() => setIsQuickLogOpen(false)}
@@ -793,6 +805,8 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         tradesUsedThisMonth={tradesThisMonth}
         maxTradesThisMonth={maxTradesPerMonth}
       />
+      </Suspense>
+      )}
 
     </div>
   );

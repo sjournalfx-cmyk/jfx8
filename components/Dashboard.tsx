@@ -31,7 +31,6 @@ const CtraderAccountPanel = lazy(() =>
     import('./desktop/CtraderAccountPanel').then((m) => ({ default: m.CtraderAccountPanel }))
 );
 import { EquityCurveWidget } from './analytics/EquityCurveWidget';
-import { PerformanceBySession } from './analytics/PerformanceBySession';
 import { Skeleton, EmptyState } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { getSASTDateTime } from '../lib/timeUtils';
