@@ -19,9 +19,12 @@ import { EA_BRIDGE_URL } from '../lib/constants';
 import { getSASTDateTime } from '../lib/timeUtils';
 import { normalizeTrade } from '../lib/trade-normalization';
 import { parseMTTradeCSV } from '../lib/trade-import';
+import { buildCtraderDealTrade, ctraderDealSymbolName } from '../lib/ctraderDealTrade';
+import { clearCtraderOauthPending, markCtraderOauthPending } from '../lib/ctraderOauthReturn';
 import { hasActiveSession as hasCtraderSession } from '../services/ctraderService';
 import { isNative } from '../lib/capacitor';
 import { persistentGetSync, persistentSet } from '../lib/persistentStore';
+import { setCtraderAutoSyncEnabled } from '../hooks/useCtraderAutoSync';
 import { useToast } from './ui/Toast';
 import ConfirmationModal from './ConfirmationModal';
 import { PhasedLoader } from './ui/PhasedLoader';
@@ -86,9 +89,11 @@ interface BridgeProps {
     activePortfolioId?: string | null;
     defaultPortfolioId?: string | null;
     activePortfolioName?: string;
+    /** Full disconnect (clears links + cached balance in App) when cTrader logs out. */
+    onCtraderDisconnect?: () => Promise<void> | void;
 }
 
-const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, isDemoMode = false, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, onTradesAddedBatch, onTradesDeletedBatch, trades, userId, onNavigateToJournal, linkPortfolio, onLinkAccount, linkCollisionCheck, onDoneLink, activePortfolioId, defaultPortfolioId, activePortfolioName }) => {
+const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfile, eaSession, isDemoMode = false, onTradeAdded, onEditTrade, onAddOffline, onImportTrades, onTradesAddedBatch, onTradesDeletedBatch, trades, userId, onNavigateToJournal, linkPortfolio, onLinkAccount, linkCollisionCheck, onDoneLink, activePortfolioId, defaultPortfolioId, activePortfolioName, onCtraderDisconnect }) => {
     const [isInternalConnected, setIsInternalConnected] = useState(userProfile.eaConnected);
     const [syncKey, setSyncKey] = useState(userProfile.syncKey || '');
     const { connectionMode, updateConnectionMode } = useConnectionMode(userId, userProfile);
@@ -167,16 +172,18 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
         }
     }, [eaSession]);
 
-    // A saved bridge mode must never restart setup while the feature is off.
+    // cTrader goes straight to the account picker. With the Desktop Bridge
+    // disabled there is no method-choice step at all; a saved/unconnected
+    // bridge mode falls through here too instead of showing a dead option.
     // Existing connected bridges still fall through to the live monitor.
-    if (!DESKTOP_BRIDGE_ENABLED && connectionMode === 'bridge' && !isInternalConnected && !isDemoMode) {
-        return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} isDemoMode={isDemoMode} />;
-    }
+    const directCtrader = connectionMode === 'ctrader'
+        || linkPortfolio?.source === 'ctrader'
+        || (!DESKTOP_BRIDGE_ENABLED && !isInternalConnected);
 
-    if (connectionMode === 'ctrader') {
+    if (directCtrader) {
         return <CtraderConnect
             isDarkMode={isDarkMode}
-            onBack={() => updateConnectionMode(null)}
+            onBack={DESKTOP_BRIDGE_ENABLED ? () => updateConnectionMode(null) : undefined}
             userProfile={userProfile}
             userId={userId}
             onTradeAdded={onTradeAdded}
@@ -192,6 +199,7 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             activePortfolioName={activePortfolioName || linkPortfolio?.name}
             onTradesAddedBatch={onTradesAddedBatch}
             onTradesDeletedBatch={onTradesDeletedBatch}
+            onCtraderDisconnect={onCtraderDisconnect}
         />;
     }
 
@@ -369,14 +377,13 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
         return CTRADER_BROKERS.filter(b => b.name.toLowerCase().includes(q));
     }, [brokerQuery]);
     const options = [
-        // Desktop Bridge is always rendered while disabled so the entry point
-        // is visibly unavailable, but never selectable. Demo mode keeps the
-        // old behaviour (hidden) when the feature is enabled.
-        ...((!isDemoMode || !DESKTOP_BRIDGE_ENABLED) ? [{
+        // The Desktop Bridge option only exists when the feature is enabled;
+        // a disabled "coming later" card is just noise for new users.
+        ...((DESKTOP_BRIDGE_ENABLED && !isDemoMode) ? [{
             id: 'bridge' as const,
             title: 'Desktop Bridge',
             subtitle: 'EA Terminal Bridge',
-            disabled: !DESKTOP_BRIDGE_ENABLED,
+            disabled: false,
             icon: (
                 <img src="/icon2.png" alt="Desktop Bridge" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
             ),
@@ -657,7 +664,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                                 onClick={() => { setShowCtraderBrokers(false); onSelect('ctrader'); }}
                                 className="w-full h-11 rounded-xl bg-[#FF4F00] hover:bg-[#ff5a0f] text-white text-sm font-bold tracking-wide flex items-center justify-center gap-2"
                             >
-                                Connect with cTrader
+                                Connect cTrader
                                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
                             </button>
                             <p className="text-[10px] text-zinc-600 text-center mt-2">Secure OAuth via Spotware cTrader ID. No password stored.</p>
@@ -1592,7 +1599,7 @@ const WindowsLogoIcon: React.FC<{ className?: string; size?: number }> = ({ clas
 /* --- SUB-COMPONENT: CTRADER CONNECT --- */
 interface CtraderConnectProps {
     isDarkMode: boolean;
-    onBack: () => void;
+    onBack?: () => void;
     userProfile?: UserProfile;
     userId?: string;
     onTradeAdded?: (trade: Trade) => void;
@@ -1610,9 +1617,10 @@ interface CtraderConnectProps {
     activePortfolioId?: string | null;
     defaultPortfolioId?: string | null;
     activePortfolioName?: string;
+    onCtraderDisconnect?: () => Promise<void> | void;
 }
 
-const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, userProfile, userId, onTradeAdded, onAddOffline, onTradesAddedBatch, onTradesDeletedBatch, trades, onNavigateToJournal, linkPortfolio, onLinkAccount, linkCollisionCheck, onDoneLink, activePortfolioId, defaultPortfolioId, activePortfolioName }) => {
+const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, userProfile, userId, onTradeAdded, onAddOffline, onTradesAddedBatch, onTradesDeletedBatch, trades, onNavigateToJournal, linkPortfolio, onLinkAccount, linkCollisionCheck, onDoneLink, activePortfolioId, defaultPortfolioId, activePortfolioName, onCtraderDisconnect }) => {
     const [linkMsg, setLinkMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [isLinking, setIsLinking] = useState(false);
     // Start from the persisted session flag so switching views (or reloading)
@@ -1669,12 +1677,11 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     const toggleAutoSync = () => {
         const next = !autoSync;
         setAutoSync(next);
-        try { localStorage.setItem('jfx_ctrader_autosync', next ? 'on' : 'off'); } catch { /* blocked */ }
+        // The app-wide sync hook (mounted in App) owns the actual timer.
+        setCtraderAutoSyncEnabled(next);
     };
     const promptShownForRef = useRef<number | null>(null);
     const guidedCancelRef = useRef(false);
-    const knownDealIdsRef = useRef<Set<number>>(new Set());
-    const knownSeededForRef = useRef<number | null>(null);
     const THIRTY_DAYS_MS = 30 * 24 * 3600 * 1000;
     const targetPortfolioId = activePortfolioId || linkPortfolio?.id || defaultPortfolioId || undefined;
 
@@ -1786,19 +1793,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         }
     }, [selectedAccountId, targetPortfolioId]);
 
-    const getSymbolName = (d: any) => {
-        if (d.symbol && isNaN(Number(d.symbol))) {
-            return d.symbol;
-        }
-        const targetId = d.symbolId !== undefined ? d.symbolId : d.symbol;
-        if (targetId !== undefined && targetId !== null) {
-            const found = symbolsList.find(s => s.symbolId.toString() === targetId.toString());
-            if (found && found.symbolName) {
-                return found.symbolName;
-            }
-        }
-        return d.symbol || 'EURUSD';
-    };
+    const getSymbolName = (deal: any): string => ctraderDealSymbolName(deal, symbolsList);
 
     const isDealInJournal = useCallback((deal: any): boolean => {
         if (!deal) return false;
@@ -1817,41 +1812,8 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         return false;
     }, [savedDealIds, selectedAccountId, trades, targetPortfolioId, defaultPortfolioId]);
 
-    const buildDealTrade = (deal: any): Trade => {
-        const pairName = getSymbolName(deal);
-        const netPnL = Number(((deal.profit ?? 0) + (deal.swap || 0) + (deal.commission || 0)).toFixed(2));
-        const closeDate = deal.closeTimestamp ? new Date(deal.closeTimestamp) : new Date();
-        const openDate = deal.openTimestamp ? new Date(deal.openTimestamp) : closeDate;
-
-        const sastClose = getSASTDateTime(closeDate);
-
-        return normalizeTrade({
-            id: '',
-            ticketId: String(deal.dealId || deal.orderId || Date.now()),
-            portfolio_id: targetPortfolioId,
-            pair: pairName,
-            assetType: 'Forex',
-            date: sastClose.date,
-            time: sastClose.fullTime,
-            openTime: openDate.toISOString(),
-            closeTime: closeDate.toISOString(),
-            direction: deal.tradeSide === 'buy' ? 'Long' : 'Short',
-            entryPrice: deal.entryPrice || deal.price || 0,
-            exitPrice: deal.price || 0,
-            stopLoss: deal.stopLoss || 0,
-            takeProfit: deal.takeProfit || 0,
-            lots: deal.volume || 0.01,
-            result: netPnL > 0 ? 'Win' : netPnL < 0 ? 'Loss' : 'BE',
-            pnl: netPnL,
-            rr: 0,
-            rating: 0,
-            tags: ['cTrader'],
-            notes: `Synced from cTrader. Deal #${deal.dealId} | Order #${deal.orderId}`,
-            planAdherence: 'No Plan',
-            tradingMistake: 'None',
-            mindset: 'Neutral',
-        });
-    };
+    const buildDealTrade = (deal: any): Trade =>
+        buildCtraderDealTrade(deal, { portfolioId: targetPortfolioId, symbolsList });
 
     const persistDealTrade = async (newTrade: Trade) => {
         const stamped: Trade = targetPortfolioId && !(newTrade as Trade).portfolio_id
@@ -2248,44 +2210,6 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [authState, selectedAccountId, isLoadingDetails, detailsError, accountDeals, trades]);
 
-    // Auto-sync: append only brand-new closes (never backfill).
-    useEffect(() => {
-        if (!autoSync || selectedAccountId == null || isLoadingDetails || !!detailsError) return;
-        if (isBulkAdding) return;
-        if (accountDeals.length === 0) return;
-        const ctid = selectedAccountId;
-        if (knownSeededForRef.current !== ctid) {
-            knownSeededForRef.current = ctid;
-            knownDealIdsRef.current = new Set(accountDeals.map(d => Number(d.dealId)));
-            return;
-        }
-        const known = knownDealIdsRef.current;
-        const fresh = accountDeals.filter(d => !known.has(Number(d.dealId)) && !isDealInJournal(d));
-        accountDeals.forEach(d => known.add(Number(d.dealId)));
-        if (fresh.length === 0) return;
-        // Only closes from the last 24h — older unseen rows are backfill,
-        // left for the guided import / History tab on purpose.
-        const cutoff = Date.now() - 24 * 3600 * 1000;
-        const recent = fresh.filter(d => dealCloseMs(d) >= cutoff).slice(0, 10);
-        if (recent.length === 0) return;
-        (async () => {
-            let added = 0;
-            for (const deal of recent) {
-                try {
-                    await persistDealTrade(buildDealTrade(deal));
-                    markDealSaved(deal.dealId);
-                    added++;
-                } catch (e) {
-                    console.error('Auto-sync failed for deal:', deal.dealId, e);
-                }
-            }
-            if (added > 0) {
-                flashBulkResult(`Synced ${added} new close${added === 1 ? '' : 's'} into ${destPortfolioName}.`, 4000);
-            }
-        })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [accountDeals, selectedAccountId, isLoadingDetails, detailsError, autoSync, isBulkAdding]);
-
     const handleRefreshDetails = async (acc: any) => {
         const id = acc.ctidTraderAccountId;
         setIsLoadingDetails(true);
@@ -2520,15 +2444,26 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     };
 
     const handleDisconnect = async () => {
+        let failure = '';
         try {
-            const { logout } = await import('../services/ctraderService');
-            await logout();
-            try { if (userId) localStorage.setItem(`jfx_connection_mode_${userId}`, 'none'); } catch { /* blocked */ }
+            if (onCtraderDisconnect) {
+                await onCtraderDisconnect();
+            } else {
+                const { logout } = await import('../services/ctraderService');
+                await logout();
+                try { if (userId) localStorage.setItem(`jfx_connection_mode_${userId}`, 'none'); } catch { /* blocked */ }
+            }
+        } catch (e: any) {
+            console.error('Failed to log out from cTrader', e);
+            failure = e?.message || 'Failed to disconnect cTrader. Please try again.';
+        } finally {
             manualBackToListRef.current = false;
             promptShownForRef.current = null;
-            knownSeededForRef.current = null;
             setShowImportPrompt(false);
             setLinkMsg(null);
+            setErrorMsg(failure);
+            setDetailsError('');
+            setBulkResult(null);
             setAuthState('idle');
             setAccounts([]);
             setSelectedAccountId(null);
@@ -2539,8 +2474,6 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             setSymbolsList([]);
             setProfile(null);
             fetchCalledRef.current = false;
-        } catch (e: any) {
-            console.error('Failed to log out from cTrader', e);
         }
     };
 
@@ -2821,46 +2754,14 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             // New explicit consent intent — drop any stale connection-mode
             // preference so the OAuth return lands on the cTrader terminal.
             try { if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`); } catch { /* blocked */ }
+            // If cTrader denies/cancels, callback.ts redirects without a code.
+            // App reads this marker on return to distinguish cancel from silence.
+            markCtraderOauthPending();
             window.location.href = getAuthorizeUrl();
         } catch (e: any) {
+            clearCtraderOauthPending();
             setErrorMsg(e.message || 'Failed to initiate cTrader connection');
             setAuthState('error');
-        }
-    };
-
-    const [manualCode, setManualCode] = useState('');
-    const [isExchangingManual, setIsExchangingManual] = useState(false);
-
-    // Manual code paste: on web the OAuth hop is a full page redirect, so this
-    // is the escape hatch when the browser never comes back (popup/redirect
-    // blocked, wrong tab). Accepts a bare code or a whole redirect URL.
-    const handleManualCodeSubmit = async () => {
-        const raw = manualCode.trim();
-        if (!raw) return;
-        setIsExchangingManual(true);
-        setErrorMsg('');
-        try {
-            let extractedCode = raw;
-            if (raw.includes('code=')) {
-                try {
-                    const query = raw.includes('?') ? raw.split('?').slice(1).join('?') : raw;
-                    extractedCode = new URLSearchParams(query).get('code') || raw;
-                } catch {}
-            }
-            const { exchangeCode } = await import('../services/ctraderService');
-            const res = await exchangeCode(extractedCode, null);
-            if (res && res.ok) {
-                try { localStorage.setItem('ctrader_just_authorized', 'true'); } catch {}
-                setAuthState('connected');
-                setManualCode('');
-                handleFetchAccounts();
-            } else {
-                setErrorMsg(res?.error || 'Failed to exchange authorization code. Make sure the code is fresh and valid.');
-            }
-        } catch (e: any) {
-            setErrorMsg(e?.message || 'Error exchanging authorization code');
-        } finally {
-            setIsExchangingManual(false);
         }
     };
 
@@ -2871,15 +2772,17 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
 
     return (
         <div className="space-y-6">
-            <div className="relative mb-6 flex items-center gap-3">
-                <button
-                    onClick={onBack}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
-                >
-                    <ArrowRight size={12} className="rotate-180" />
-                    Back to methods
-                </button>
-            </div>
+            {onBack && (
+                <div className="relative mb-6 flex items-center gap-3">
+                    <button
+                        onClick={onBack}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 transition-all flex items-center gap-1.5"
+                    >
+                        <ArrowRight size={12} className="rotate-180" />
+                        Back to methods
+                    </button>
+                </div>
+            )}
 
             {linkPortfolio && linkPortfolio.source === 'ctrader' && (isScopeLinked ? (
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 flex items-center gap-2">
@@ -2910,13 +2813,18 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                 <div className="p-5 space-y-5">
                     {authState === 'idle' && (
                         <div className="space-y-4">
+                            {errorMsg && (
+                                <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-rose-500/10 text-rose-400 text-xs">
+                                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                                    <p className="leading-relaxed">{errorMsg}</p>
+                                </div>
+                            )}
                             <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-white/5 bg-white/[0.02]">
                                 <svg className="w-4 h-4 text-zinc-500 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                                 </svg>
                                 <p className="text-xs text-zinc-500 leading-relaxed">
                                     You will be redirected to cTrader ID to authorize access to your trading accounts.
-                                    Only view permissions are requested — no trading will be performed.
                                 </p>
                             </div>
                             <button
@@ -2928,39 +2836,8 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                     <polyline points="10 17 15 12 10 7" />
                                     <line x1="15" y1="12" x2="3" y2="12" />
                                 </svg>
-                                Connect with cTrader ID
+                                Connect cTrader
                             </button>
-
-                            <div className="p-3 rounded-xl border border-white/10 bg-white/[0.02] space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] font-medium text-zinc-300">Browser never came back?</span>
-                                    <button
-                                        type="button"
-                                        onClick={handleConnect}
-                                        className="text-[11px] text-[#FF4F00] hover:underline flex items-center gap-1"
-                                    >
-                                        Reopen login
-                                    </button>
-                                </div>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={manualCode}
-                                        onChange={(e) => setManualCode(e.target.value)}
-                                        placeholder="Paste code or redirect URL…"
-                                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs rounded-lg border border-white/10 bg-black text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#FF4F00]"
-                                    />
-                                    <button
-                                        type="button"
-                                        disabled={!manualCode.trim() || isExchangingManual}
-                                        onClick={() => handleManualCodeSubmit()}
-                                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#FF4F00] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#FF4F00]/90 transition-all flex items-center gap-1.5 shrink-0"
-                                    >
-                                        {isExchangingManual ? <Loader2 size={12} className="animate-spin" /> : null}
-                                        Connect
-                                    </button>
-                                </div>
-                            </div>
                         </div>
                     )}
 
@@ -2991,7 +2868,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                     {authState === 'connected' && (
                         <div className="space-y-4">
                             {/* Auth success banner with Log Out button */}
-                            <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#FF4F00]/10 border border-[#FF4F00]/20">
+                            {!errorMsg && <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#FF4F00]/10 border border-[#FF4F00]/20">
                                 <div className="flex items-center gap-2 text-[#FF4F00] text-xs">
                                     <CheckCircle2 size={14} />
                                     <span>Successfully authenticated with cTrader</span>
@@ -3003,7 +2880,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                 >
                                     <LogOut size={14} />
                                 </button>
-                            </div>
+                            </div>}
 
                             {/* Guided first-import prompt — unimported closed deals */}
                             {showImportPrompt && selectedAccount && (() => {
@@ -3195,7 +3072,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                                         type="button"
                                                         onClick={toggleAutoSync}
                                                         className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
-                                                        title="New closes sync automatically when open"
+                                                        title="New closes sync automatically while the app is open"
                                                     >
                                                         Auto-sync: <span className={autoSync ? 'text-emerald-400 font-semibold' : 'font-semibold'}>{autoSync ? 'On' : 'Off'}</span>
                                                     </button>
@@ -3878,7 +3755,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                         onClick={handleConnect}
                                         className="w-full py-2.5 rounded-xl border border-[#FF4F00]/40 text-[#FF4F00] text-sm font-medium hover:bg-[#FF4F00]/10 flex items-center justify-center gap-2 transition-all"
                                     >
-                                        Connect with cTrader ID
+                                        Connect cTrader
                                     </button>
                                 </div>
                             )}
@@ -3890,9 +3767,14 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                     <div>
                                         <p className="font-semibold">Could not load accounts</p>
                                         <p className="mt-0.5 text-rose-400/70">{errorMsg}</p>
-                                        <button onClick={handleFetchAccounts} className="mt-2 underline text-rose-400 hover:text-rose-300">
-                                            Try again
-                                        </button>
+                                        <div className="mt-2 flex items-center gap-3">
+                                            <button onClick={handleFetchAccounts} className="underline text-rose-400 hover:text-rose-300">
+                                                Try again
+                                            </button>
+                                            <button onClick={handleDisconnect} className="text-zinc-400 hover:text-white transition-colors">
+                                                Disconnect
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             )}

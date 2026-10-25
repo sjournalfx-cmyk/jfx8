@@ -19,6 +19,16 @@ export const CTRADER_BALANCE_MAX_AGE_MS = 7 * 86400000; // 7 days, mirrors bridg
 
 const cacheKey = (accountId: string | number) => `jfx_ctrader_last_balance_${accountId}`;
 
+/** Drop the cached broker snapshot for an account (used by disconnect). */
+export const clearCachedCtraderBalance = (accountId: string | number | null | undefined): void => {
+  if (accountId === null || accountId === undefined || accountId === '') return;
+  try {
+    localStorage.removeItem(cacheKey(accountId));
+  } catch {
+    /* storage blocked */
+  }
+};
+
 export const readCachedCtraderBalance = (
   accountId: string | number | null | undefined,
 ): { balance: number; equity: number | null; ageMs: number } | null => {

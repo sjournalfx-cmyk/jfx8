@@ -104,8 +104,9 @@ interface MobileLayoutProps {
   currentBalance?: number;
   liveBalanceSource?: 'bridge' | 'ctrader' | null;
   isLiveBalance?: boolean;
-  /** Linked/selected cTrader account id (App resolves link -> selected fallback). */
+  /** cTrader account id linked to the active portfolio. */
   ctraderAccountId?: string | null;
+  onCtraderDisconnect?: () => Promise<void> | void;
 }
 
 export const MobileLayout: React.FC<MobileLayoutProps> = ({
@@ -172,6 +173,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   liveBalanceSource = null,
   isLiveBalance = false,
   ctraderAccountId = null,
+  onCtraderDisconnect,
 }) => {
   // Sub-tabs
   const [homeSubTab, setHomeSubTab] = useState<HomeSubTab>('dashboard');
@@ -599,6 +601,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
               activePortfolioName={activePortfolio?.name || displayPortfolioName}
               onTradesAddedBatch={onTradesAddedBatch}
               onTradesDeletedBatch={onTradesDeletedBatch}
+              onCtraderDisconnect={onCtraderDisconnect}
             />
           </div>
         )}

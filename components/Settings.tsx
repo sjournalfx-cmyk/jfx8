@@ -95,6 +95,8 @@ interface SettingsProps {
   onSelectPortfolioId?: (id: string) => void;
   onAddPortfolio?: (input: { name: string; description?: string; purpose?: Portfolio['purpose']; source?: Portfolio['source']; startingBalance?: number; currency?: string }) => Promise<Portfolio>;
   onRemovePortfolio?: (id: string) => Promise<void>;
+  hasCtraderConnection?: boolean;
+  onDisconnectCtrader?: () => Promise<void> | void;
 }
 
 const tabs: Array<{ id: SettingsTab; label: string; shortLabel: string; icon: React.ElementType; desc: string }> = [
@@ -156,6 +158,8 @@ const Settings: React.FC<SettingsProps> = ({
   onSelectPortfolioId,
   onAddPortfolio,
   onRemovePortfolio,
+  hasCtraderConnection = false,
+  onDisconnectCtrader,
   userId = null,
   offlineQueueCount = 0,
 }) => {
@@ -183,6 +187,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [saveMessage, setSaveStatus] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [showRegenSyncKeyConfirm, setShowRegenSyncKeyConfirm] = useState(false);
+  const [showDisconnectCtraderConfirm, setShowDisconnectCtraderConfirm] = useState(false);
+  const [isDisconnectingCtrader, setIsDisconnectingCtrader] = useState(false);
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
   const [feedbackCategory, setFeedbackCategory] = useState('Bug Report');
@@ -268,6 +274,17 @@ const Settings: React.FC<SettingsProps> = ({
     };
     setFormData({ ...formData, syncKey: `JFX-${rand()}-${rand()}` });
     setShowRegenSyncKeyConfirm(false);
+  };
+
+  const handleDisconnectCtrader = async () => {
+    if (!onDisconnectCtrader || isDisconnectingCtrader) return;
+    setIsDisconnectingCtrader(true);
+    try {
+      await onDisconnectCtrader();
+      setShowDisconnectCtraderConfirm(false);
+    } finally {
+      setIsDisconnectingCtrader(false);
+    }
   };
 
   const handleFeedbackSubmit = async () => {
@@ -622,6 +639,27 @@ const Settings: React.FC<SettingsProps> = ({
                     onRemove={onRemovePortfolio || (async () => { throw new Error('Portfolios unavailable right now.'); })}
                   />
                 </section>
+                {hasCtraderConnection && onDisconnectCtrader && (
+                  <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div className="flex items-start gap-3">
+                        <LogOut size={18} className="mt-0.5 shrink-0 text-[#FF4F01]" />
+                        <div>
+                          <h3 className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>cTrader Connection</h3>
+                          <p className={`mt-1 text-xs ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
+                            Disconnecting unlinks cTrader from every portfolio and clears cached broker balances. Your journal trades stay untouched.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowDisconnectCtraderConfirm(true)}
+                        className="shrink-0 rounded-xl border border-rose-500/30 px-3 py-2 text-xs font-black uppercase tracking-[0.16em] text-rose-500 transition-all hover:bg-rose-500/10"
+                      >
+                        Disconnect cTrader
+                      </button>
+                    </div>
+                  </section>
+                )}
                 <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-slate-50'}`}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
@@ -1331,6 +1369,16 @@ const Settings: React.FC<SettingsProps> = ({
         variant="warning"
         onConfirm={handleRegenerateSyncKey}
         onCancel={() => setShowRegenSyncKeyConfirm(false)}
+        isDarkMode={isDarkMode}
+      />
+      <ConfirmationModal
+        isOpen={showDisconnectCtraderConfirm}
+        title="Disconnect cTrader?"
+        description="This unlinks cTrader from every portfolio and clears cached broker balances. Your journal trades stay untouched."
+        confirmText={isDisconnectingCtrader ? 'Disconnecting...' : 'Disconnect'}
+        variant="danger"
+        onConfirm={handleDisconnectCtrader}
+        onCancel={() => setShowDisconnectCtraderConfirm(false)}
         isDarkMode={isDarkMode}
       />
     </div>

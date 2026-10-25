@@ -22,7 +22,9 @@ import { buildAnalyticsAiSnapshot } from './lib/analyticsAiSnapshot';
 import { buildPsychologyInsightsPrompt, extractSectionBody, getPsychologyInsightsDayKey, getPsychologyInsightsScopeKey, PSYCHOLOGY_INSIGHTS_STORAGE_KEY, type PsychologyInsightsCache } from './lib/psychologyInsights';
 import { dataService, isTradeInPortfolio, removeTradePortfolioOverlays, writeTradePortfolioOverlays, writeTradePortfolioOverlay } from './services/dataService';
 import { usePortfolios } from './hooks/usePortfolios';
-import { useCtraderLiveBalance } from './hooks/useCtraderLiveBalance';
+import { clearCachedCtraderBalance, useCtraderLiveBalance } from './hooks/useCtraderLiveBalance';
+import { useCtraderAutoSync } from './hooks/useCtraderAutoSync';
+import { clearCtraderOauthPending, consumeCtraderOauthCancellation } from './lib/ctraderOauthReturn';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { OfflineBanner, useNetworkStatus } from './components/OfflineBlocker';
 import { BrandedLoader } from './components/ui/BrandedLoader';
@@ -135,13 +137,34 @@ const AppContent: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const state = params.get('state');
-    if (!code || params.has('ctrader_ready')) return;
+
+    // cTrader cancels/denies redirect to '/' with no code. The pending marker
+    // lets us show the failure instead of silently landing on the dashboard.
+    if (!code) {
+      if (consumeCtraderOauthCancellation()) {
+        addToast({
+          type: 'error',
+          title: 'cTrader connection cancelled',
+          message: 'Authorization was cancelled or denied. Connect cTrader to try again.',
+          duration: 8000,
+        });
+        setCurrentView('ea-setup');
+      }
+      return;
+    }
+    if (params.has('ctrader_ready')) {
+      clearCtraderOauthPending();
+      return;
+    }
 
     // ─── CRITICAL: clear the URL synchronously BEFORE the async import ───────
     // React 18 StrictMode runs effects twice in dev (mount → unmount → mount).
     // Clearing the URL here means the second invocation finds no ?code= and
     // exits via the guard above, so the single-use OAuth code is only sent once.
     window.history.replaceState({}, '', window.location.pathname);
+    // Consume the pending marker now: StrictMode's second effect run sees no
+    // code and must not misreport the in-flight exchange as a cancellation.
+    clearCtraderOauthPending();
 
     // Ensure splash is hidden immediately
     setShowBetaSplash(false);
@@ -282,6 +305,58 @@ const {
     await updatePortfolio(portfolioId, { accounts: [{ provider: account.provider, externalAccountId: account.externalAccountId }] });
   }, [updatePortfolio]);
 
+  // Full cTrader disconnect: revoke the session, unlink every portfolio, and
+  // drop broker balance snapshots so a stale account cannot keep powering the
+  // dashboard or auto-sync after logout.
+  const handleCtraderDisconnect = useCallback(async () => {
+    const linkedAccountIds = new Set<string>();
+    portfolios.forEach((portfolio) => {
+      (portfolio.accounts || []).forEach((account) => {
+        if (account.provider === 'ctrader' && account.externalAccountId) {
+          linkedAccountIds.add(String(account.externalAccountId));
+        }
+      });
+    });
+
+    try {
+      const { logout } = await import('./services/ctraderService');
+      await logout();
+    } catch (e) {
+      console.error('cTrader logout failed', e);
+    }
+
+    try {
+      if (userId) localStorage.removeItem(`jfx_connection_mode_${userId}`);
+      localStorage.removeItem('jfx_ctrader_selected_account');
+      localStorage.removeItem('ctrader_just_authorized');
+      sessionStorage.removeItem('ctrader_just_authorized');
+    } catch { /* storage blocked */ }
+    clearCtraderOauthPending();
+    linkedAccountIds.forEach((accountId) => clearCachedCtraderBalance(accountId));
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('jfx_ctrader_last_balance_')) localStorage.removeItem(key);
+      }
+    } catch { /* storage blocked */ }
+
+    const linkedPortfolios = portfolios.filter((portfolio) =>
+      (portfolio.accounts || []).some((account) => account.provider === 'ctrader'),
+    );
+    await Promise.all(linkedPortfolios.map((portfolio) =>
+      updatePortfolio(portfolio.id, {
+        accounts: (portfolio.accounts || []).filter((account) => account.provider !== 'ctrader'),
+      }),
+    ));
+
+    addToast({
+      type: 'success',
+      title: 'cTrader disconnected',
+      message: 'Broker links and cached balances were cleared.',
+      duration: 5000,
+    });
+  }, [addToast, portfolios, updatePortfolio, userId]);
+
   // Create -> cTrader jumps straight to Log Trade (its empty state opens the
   // connector); bridge keeps the legacy connector jump while it is enabled.
   const handleAddPortfolioAndConnect = useCallback(async (input: { name: string; description?: string; purpose?: Portfolio['purpose']; source?: Portfolio['source']; startingBalance?: number; currency?: string }) => {
@@ -299,17 +374,11 @@ const {
   const activeDailyBias = isDemoMode ? demoDailyBias : dailyBias;
   const activeEaSession = isDemoMode ? demoEASession : eaSession;
 
-  // Live cTrader broker balance for the dashboard card. Prefers the cTrader
-  // account linked to the active portfolio; falls back to the account picked
-  // in Connect & Import so a connected broker still matches the card even
-  // before linking. Disabled in demo mode (demo shows demo-session math).
+  // Live cTrader broker balance for the dashboard card. Only the account
+  // linked to the active portfolio counts; a globally selected account must
+  // never leak a broker balance into a manual portfolio.
   const linkedCtraderAccountId = activePortfolio?.accounts?.find(a => a.provider === 'ctrader')?.externalAccountId ?? null;
-  const selectedCtraderAccountId = useMemo(() => {
-    try { return localStorage.getItem('jfx_ctrader_selected_account'); } catch { return null; }
-    // Re-read when the portfolio or view changes (e.g. back from ea-setup).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePortfolio?.id, currentView]);
-  const ctraderAccountId = !isDemoMode ? (linkedCtraderAccountId ?? selectedCtraderAccountId) : null;
+  const ctraderAccountId = !isDemoMode ? linkedCtraderAccountId : null;
   const ctraderLive = useCtraderLiveBalance(ctraderAccountId);
 
   useEffect(() => {
@@ -710,11 +779,12 @@ const {
       portfolio_id: t.portfolio_id || targetPid,
     }));
 
-    if (userId && targetPid) {
+    if (userId) {
       const overlayEntries: Record<string, string> = {};
       for (const t of stamped) {
-        if (t.id && !String(t.id).startsWith('dupe-')) {
-          overlayEntries[t.id] = targetPid;
+        const pid = t.portfolio_id || targetPid;
+        if (t.id && pid && !String(t.id).startsWith('dupe-')) {
+          overlayEntries[t.id] = pid;
         }
       }
       if (Object.keys(overlayEntries).length > 0) {
@@ -736,6 +806,24 @@ const {
       return [...brandNew, ...updated];
     });
   };
+
+  // Keep new cTrader closes flowing into linked portfolios even when the
+  // Connect view is closed. This is deliberately app-wide, not view-scoped.
+  useCtraderAutoSync({
+    userId: isAuthenticated && !isDemoMode ? userId : null,
+    enabled: isAuthenticated && !isDemoMode,
+    portfolios,
+    trades,
+    onTradesAddedBatch: handleTradesAddedBatch,
+    onSynced: (count, portfolioName) => {
+      addToast({
+        type: 'success',
+        title: 'cTrader auto-sync',
+        message: `${count} new close${count === 1 ? '' : 's'} added to ${portfolioName}.`,
+        duration: 5000,
+      });
+    },
+  });
 
   // Bulk delete sync: ONE state update + overlay cleanup for many rows.
   const handleTradesDeletedBatch = (tradeIds: string[]) => {
@@ -1439,10 +1527,9 @@ const onLogout = async () => {
   //  1. Portfolio source === 'bridge' (or Default while the EA is connected)
   //     → resolveBridgeBackedBalance: live eaSession balance, else the last
   //       synced snapshot, else initialBalance + PnL.
-  //  2. Else if a cTrader broker account is connected (linked to this
-  //     portfolio, or the account picked in Connect & Import): show the live
-  //     broker balance (cached snapshot while offline) so the card matches
-  //     cTrader.
+  //  2. Else if a cTrader broker account is linked to this portfolio: show
+  //     the live broker balance (cached snapshot while offline) so the card
+  //     matches cTrader.
   //  3. Otherwise: portfolio startingBalance + journaled PnL.
   const activeInitialBalance = activePortfolio?.startingBalance ?? (
     (activePortfolio?.isDefault || activePortfolio?.id === defaultPortfolioId)
@@ -1597,6 +1684,7 @@ const onLogout = async () => {
           liveBalanceSource={balanceSource}
           isLiveBalance={isLiveBalance}
           ctraderAccountId={ctraderAccountId}
+          onCtraderDisconnect={handleCtraderDisconnect}
           tradesThisMonth={tradesThisMonth}
           maxTradesPerMonth={currentPlanFeatures.maxTradesPerMonth}
           totalNotes={totalNotes}
@@ -1871,12 +1959,22 @@ const onLogout = async () => {
                   addToOfflineQueue(trade);
                 }}
                 onImportTrades={handleBatchAddTrades}
+                onTradesAddedBatch={handleTradesAddedBatch}
+                onTradesDeletedBatch={handleTradesDeletedBatch}
                 trades={activeTrades}
                 userId={userId}
                 onNavigateToJournal={() => {
                   setEditingTrade(null);
                   setCurrentView('history');
                 }}
+                linkPortfolio={linkPortfolio}
+                onLinkAccount={handleLinkPortfolioAccount}
+                linkCollisionCheck={findLinkCollision}
+                onDoneLink={() => setCurrentView('dashboard')}
+                activePortfolioId={activePortfolioId}
+                defaultPortfolioId={defaultPortfolioId}
+                activePortfolioName={activePortfolio?.name}
+                onCtraderDisconnect={handleCtraderDisconnect}
               />
             )}
             {currentView === 'settings' && activeUserProfile && (
@@ -1904,6 +2002,10 @@ const onLogout = async () => {
                 onSelectPortfolioId={setActivePortfolioId}
                 onAddPortfolio={handleAddPortfolioAndConnect}
                 onRemovePortfolio={handleRemovePortfolio}
+                hasCtraderConnection={portfolios.some((portfolio) =>
+                  (portfolio.accounts || []).some((account) => account.provider === 'ctrader'),
+                )}
+                onDisconnectCtrader={handleCtraderDisconnect}
               />
             )}
           </Suspense>
