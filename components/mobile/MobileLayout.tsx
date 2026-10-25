@@ -26,6 +26,9 @@ const LogTrade = safeLazy(() => import('../LogTrade'));
 const CtraderLogTradeTabs = safeLazy(() =>
   import('./CtraderLogTradeTabs').then((m) => ({ default: m.CtraderLogTradeTabs }))
 );
+const NoConnectionState = safeLazy(() =>
+  import('../log-trade/NoConnectionState').then((m) => ({ default: m.NoConnectionState }))
+);
 const EASetup = safeLazy(() => import('../EASetup'));
 const Settings = safeLazy(() => import('../Settings'));
 const QuickLogModal = safeLazy(() => import('../QuickLogModal'));
@@ -446,15 +449,21 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         {(currentView === 'log-trade' || currentView === 'add-trade') && (
           <div className="flex-1 min-h-0 flex flex-col">
             {isCtraderPortfolio ? (
-              <CtraderLogTradeTabs
-                ctidAccountId={ctraderAccountId}
-                isDemoMode={isDemoMode}
-                onGoConnect={() => onViewChange('ea-setup')}
-                currencySymbol={userProfile?.currencySymbol || '$'}
-                onDetailOpenChange={setIsTradeDetailOpen}
-                portfolioId={activePortfolioId}
-                timezone={userProfile?.timezone}
-              />
+              ctraderAccountId ? (
+                <CtraderLogTradeTabs
+                  ctidAccountId={ctraderAccountId}
+                  isDemoMode={isDemoMode}
+                  onGoConnect={() => onViewChange('ea-setup')}
+                  currencySymbol={userProfile?.currencySymbol || '$'}
+                  onDetailOpenChange={setIsTradeDetailOpen}
+                  portfolioId={activePortfolioId}
+                  timezone={userProfile?.timezone}
+                />
+              ) : (
+                <Suspense fallback={<BrandedLoader />}>
+                  <NoConnectionState onConnect={() => onViewChange('ea-setup')} />
+                </Suspense>
+              )
             ) : (
               <LogTrade
                 key={editingTrade?.id || 'new-trade'}
@@ -481,6 +490,9 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
                 portfolioName={activePortfolio?.name}
                 tradesUsedThisMonth={tradesThisMonth}
                 maxTradesThisMonth={maxTradesPerMonth}
+                portfolios={portfolios}
+                ctraderAccountId={ctraderAccountId}
+                onConnectBroker={() => onViewChange('ea-setup')}
                 onCancel={() => {
                   const wasEditing = !!editingTrade?.id;
                   onClearEditingTrade?.();

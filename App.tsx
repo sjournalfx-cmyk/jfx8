@@ -1704,6 +1704,9 @@ const onLogout = async () => {
                   isReadOnly={isDemoMode}
                   tradesUsedThisMonth={tradesThisMonth}
                   maxTradesThisMonth={currentPlanFeatures.maxTradesPerMonth}
+                  portfolios={portfolios}
+                  ctraderAccountId={ctraderAccountId}
+                  onConnectBroker={() => setCurrentView('ea-setup')}
                 />
               )
             )}

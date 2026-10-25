@@ -1,6 +1,6 @@
 import React from 'react';
 import { CtraderLogTradeTabs } from '../mobile/CtraderLogTradeTabs';
-import { CtraderConnectPrompt } from './CtraderConnectPrompt';
+import { NoConnectionState } from '../log-trade/NoConnectionState';
 import { useTradingNotifications } from '../../hooks/useTradingNotifications';
 
 interface DesktopCtraderLogTradeProps {
@@ -38,8 +38,8 @@ const DesktopCtraderLogTrade: React.FC<DesktopCtraderLogTradeProps> = ({
             onTradingEvent={notify}
           />
         ) : (
-          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-            <CtraderConnectPrompt onGoConnect={onGoConnect} />
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <NoConnectionState onConnect={onGoConnect} />
           </div>
         )}
       </div>

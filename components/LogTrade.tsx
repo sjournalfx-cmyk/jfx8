@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Calendar, Clock, Target, Hash, Image as ImageIcon, Save, ChevronRight, ChevronLeft, TrendingUp, TrendingDown, Layout, Type, CheckCircle2, XCircle, MinusCircle, Upload, FileText, ArrowRight, Brain, AlertTriangle, ShieldCheck, Check, ChevronDown, X, Star, Eye, Trash2, Square, Lock } from 'lucide-react';
-import { Trade, AssetType, UserProfile } from '../types';
+import { Trade, AssetType, UserProfile, Portfolio } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { getSASTDateTime } from '../lib/timeUtils';
 import RichTextEditor from './RichTextEditor';
@@ -23,6 +23,8 @@ import { cn } from '../lib/utils';
 import { normalizeTrade } from '../lib/trade-normalization';
 import { useChecklistTemplates } from '../lib/useChecklistTemplates';
 import { computeAdherence, derivePlanAdherence, gradeFor } from '../lib/disciplineChecklist';
+import { useBrokerConnection } from '../hooks/useBrokerConnection';
+import { NoConnectionState } from './log-trade/NoConnectionState';
 
 interface LogTradeProps {
     isDarkMode: boolean;
@@ -38,6 +40,14 @@ interface LogTradeProps {
     /** Free-tier monthly usage badge (hidden when the limit is unlimited). */
     tradesUsedThisMonth?: number;
     maxTradesThisMonth?: number;
+    /** Explicit broker/prop connection state. Inferred from the profile and portfolios when omitted. */
+    brokerConnected?: boolean;
+    /** Opens the existing Connect & Import flow from the no-connection state. */
+    onConnectBroker?: () => void;
+    /** Portfolios used to infer a linked Deriv, cTrader or bridge account. */
+    portfolios?: Portfolio[];
+    /** Linked/selected cTrader account used to infer an active connection. */
+    ctraderAccountId?: string | null;
 }
 
 const STEPS = [
@@ -100,7 +110,7 @@ const StepIndicator = ({ current, total, isDarkMode, onSelect }: { current: numb
     </div>
 );
 
-const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, initialTrade, onCancel, currencySymbol, userProfile, trades, isReadOnly = false, portfolioName, tradesUsedThisMonth, maxTradesThisMonth }) => {
+const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, initialTrade, onCancel, currencySymbol, userProfile, trades, isReadOnly = false, portfolioName, tradesUsedThisMonth, maxTradesThisMonth, brokerConnected, onConnectBroker, portfolios, ctraderAccountId }) => {
     const [step, setStep] = useState(1);
     const [isSaving, setIsSaving] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
@@ -158,6 +168,12 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
 
     // Discipline engine: active checklist template (single template, P1).
     const { activeTemplate: checklistTemplate } = useChecklistTemplates();
+
+    // Log Trade is the place-trade surface: without a broker, prop firm or
+    // desktop bridge there is nothing to execute against. Manual journaling
+    // through Quick Log and the Journal stays available.
+    const detectedBrokerConnection = useBrokerConnection({ userProfile, portfolios, ctraderAccountId });
+    const hasBrokerConnection = brokerConnected ?? Boolean(detectedBrokerConnection);
     // Soft-warning bypass: set when the user confirms "Save anyway" on a
     // sub-100% checklist; reset whenever the checklist changes.
     //
@@ -465,6 +481,12 @@ const LogTrade: React.FC<LogTradeProps> = ({ isDarkMode, onSave, onBatchSave, in
       setIsSaving(false);
     }
   };
+
+    // Editing an existing trade and read-only demo mode keep the form, so a
+    // missing live connection can never trap an edit or blank the demo.
+    if (!initialTrade && !isReadOnly && !hasBrokerConnection) {
+        return <NoConnectionState onConnect={onConnectBroker} />;
+    }
 
     const isLong = formData.direction === 'Long';
     const themeColor = isLong ? 'text-teal-500' : 'text-rose-500';
