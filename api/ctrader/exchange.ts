@@ -1,9 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { persistRotatedCtraderToken } from '../_lib/jfxApiKey.js';
 import { requireUser } from '../_lib/auth.js';
+import { createNativeOAuthState, isNativeOAuthState, verifyNativeOAuthState } from '../_lib/ctraderOAuthState.js';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
+const CTRADER_AUTHORIZE_URL = 'https://id.ctrader.com/my/settings/openapi/grantingaccess/';
 const REFRESH_COOKIE = 'jfx_ctrader_refresh';
+const OAUTH_SCOPE = 'accounts';
 function getCredentials() {
   // Client ID is a public OAuth identifier: accept the VITE_ copy as a
   // fallback so deployments that only set VITE_CTRADER_CLIENT_ID still work.
@@ -41,8 +44,25 @@ function isAllowedRedirectUri(redirectUri: string): boolean {
   return parsed.pathname === '/api/ctrader/callback';
 }
 
+function defaultRedirectUri(req: VercelRequest): string {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'www.jfxjournal.site').split(',')[0].trim();
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+  return `${proto}://${host}/api/ctrader/callback`;
+}
+
+function buildAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
+  const url = new URL(CTRADER_AUTHORIZE_URL);
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('scope', OAUTH_SCOPE);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('state', state);
+  return url.toString();
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
@@ -50,13 +70,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  if (req.method !== 'GET') {
+  if (req.method !== 'GET' && req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
 
-  const code = req.query.code as string;
-  const redirectUri = req.query.redirect_uri as string;
+  const body = (typeof req.body === 'object' && req.body !== null) ? req.body as Record<string, any> : {};
+  const action = String(body.action || req.query.action || '').toLowerCase();
+  const redirectUri = String(body.redirect_uri || req.query.redirect_uri || '') || defaultRedirectUri(req);
+  const code = String(body.code || req.query.code || '');
+  const state = String(body.state || req.query.state || '');
+
+  if (action === 'start' || action === 'authorize' || action === 'begin') {
+    if (!isAllowedRedirectUri(redirectUri)) {
+      console.error(`[cTrader] Rejected start redirect_uri: ${redirectUri}`);
+      res.status(400).json({ error: 'Invalid redirect_uri' });
+      return;
+    }
+    const auth = await requireUser(req.headers);
+    if (!auth.ok || !auth.userId) {
+      res.status(auth.status).json({ error: auth.error });
+      return;
+    }
+    const { clientId, clientSecret } = getCredentials();
+    if (!clientId || !clientSecret) {
+      const missing = [!clientId && 'CTRADER_CLIENT_ID', !clientSecret && 'CTRADER_CLIENT_SECRET'].filter(Boolean);
+      res.status(503).json({
+        error: 'cTrader OAuth is not configured for this deployment',
+        code: 'ctrader_oauth_not_configured',
+        missing,
+      });
+      return;
+    }
+    try {
+      const stateValue = createNativeOAuthState(auth.userId);
+      res.status(200).json({
+        ok: true,
+        state: stateValue,
+        redirectUri,
+        authorizeUrl: buildAuthorizeUrl(clientId, redirectUri, stateValue),
+      });
+    } catch (err) {
+      console.error('[cTrader] OAuth start failed:', err);
+      res.status(503).json({
+        error: 'cTrader OAuth state is not configured on this deployment',
+        code: 'ctrader_oauth_state_not_configured',
+      });
+    }
+    return;
+  }
+
   if (!code || !redirectUri) {
     res.status(400).json({ error: 'Missing code or redirect_uri' });
     return;
@@ -71,6 +134,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireUser(req.headers);
   if (!auth.ok || !auth.userId) {
     res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  // Native clients use a server-issued, user-bound state. Verify it before the
+  // single-use code is burned; legacy fixed `jfx-native` is no longer accepted.
+  if (state === 'jfx-native' || (isNativeOAuthState(state) && !verifyNativeOAuthState(state, auth.userId))) {
+    res.status(400).json({ error: 'invalid_oauth_state', code: 'invalid_oauth_state' });
     return;
   }
 

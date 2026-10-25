@@ -1,20 +1,22 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { verifyNativeOAuthState } from '../_lib/ctraderOAuthState.js';
 
 /**
  * /api/ctrader/callback
  *
  * cTrader ID redirects back to this URL after the user authorises.
- * We simply forward the ?code= to the SPA root so the React app
- * (App.tsx) can intercept it and call /api/ctrader/exchange.
+ * Web: forward ?code= to the SPA root so App.tsx can exchange it.
+ * Native: only a server-signed, unexpired state may redirect to the app's
+ * deep link. The old fixed `jfx-native` value is rejected so an attacker
+ * cannot replay an authorization code into the app.
  */
-const NATIVE_STATE = 'jfx-native';
 const NATIVE_DEEP_LINK = 'site.jfxjournal.app://ctrader';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const code = req.query.code as string | undefined;
   const state = req.query.state as string | undefined;
 
-  if (state === NATIVE_STATE && code) {
+  if (state && state !== 'jfx-native' && verifyNativeOAuthState(state) && code) {
     res.setHeader('Location', `${NATIVE_DEEP_LINK}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`);
     res.status(302).end();
     return;
