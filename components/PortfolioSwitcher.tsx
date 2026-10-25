@@ -55,6 +55,7 @@ export const PortfolioSwitcher: React.FC<PortfolioSwitcherProps> = ({
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const dark = variant === 'drawer' ? true : !!isDarkMode;
+  const availableSources = SOURCES.filter((s) => s.id !== 'bridge' || DESKTOP_BRIDGE_ENABLED);
 
   useEffect(() => {
     if (startCreatingSignal > 0 && canAdd) {
@@ -184,7 +185,7 @@ export const PortfolioSwitcher: React.FC<PortfolioSwitcherProps> = ({
                     {isDefault && <span className={`ml-1.5 text-[9px] font-black uppercase tracking-widest ${isSelected ? 'text-[#FF4F01]' : 'opacity-50'}`}>Default</span>}
                   </p>
                   <p className="text-[10px] text-zinc-400 truncate">
-                    {needsLink ? 'Not linked — tap to connect' : ((p.source || 'manual') !== 'manual' ? 'Tap to open connection' : (p.description || 'Trading Journal'))}
+                    {needsLink ? 'No account linked' : ((p.source || 'manual') !== 'manual' ? 'Account linked' : (p.description || 'Trading Journal'))}
                     {typeof count === 'number' ? ` · ${count} trade${count === 1 ? '' : 's'}` : ''}
                   </p>
                 </div>
@@ -251,35 +252,27 @@ export const PortfolioSwitcher: React.FC<PortfolioSwitcherProps> = ({
           <div>
             <label className={labelClass}>Connection</label>
             <div className="space-y-1.5">
-              {SOURCES.map(s => {
-                const isBridgeDisabled = s.id === 'bridge' && !DESKTOP_BRIDGE_ENABLED;
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      if (isBridgeDisabled) return;
-                      setSource(s.id);
-                      if (s.id !== 'manual') setStartingBalance('');
-                    }}
-                    disabled={isBridgeDisabled}
-                    aria-disabled={isBridgeDisabled}
-                    className={`w-full p-2 rounded-xl border flex items-center gap-2.5 text-left transition-all ${
-                      isBridgeDisabled
-                        ? `opacity-50 cursor-not-allowed ${dark ? 'border-white/10' : 'border-slate-200'}`
-                        : source === s.id
-                          ? 'border-[#FF4F01]/70 bg-[#FF4F01]/[0.08]'
-                          : dark ? 'border-white/10 hover:border-white/25' : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <s.icon size={15} className={source === s.id && !isBridgeDisabled ? 'text-[#FF4F01]' : 'opacity-50'} />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-bold ${dark ? 'text-white' : 'text-slate-900'}`}>{s.label}</p>
-                      <p className="text-[10px] opacity-60">{s.hint}</p>
-                    </div>
-                    {source === s.id && !isBridgeDisabled && <CheckCircle2 size={14} className="text-[#FF4F01] shrink-0" />}
-                  </button>
-                );
-              })}
+              {availableSources.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSource(s.id);
+                    if (s.id !== 'manual') setStartingBalance('');
+                  }}
+                  className={`w-full p-2 rounded-xl border flex items-center gap-2.5 text-left transition-all ${
+                    source === s.id
+                      ? 'border-[#FF4F01]/70 bg-[#FF4F01]/[0.08]'
+                      : dark ? 'border-white/10 hover:border-white/25' : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <s.icon size={15} className={source === s.id ? 'text-[#FF4F01]' : 'opacity-50'} />
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs font-bold ${dark ? 'text-white' : 'text-slate-900'}`}>{s.label}</p>
+                    <p className="text-[10px] opacity-60">{s.hint}</p>
+                  </div>
+                  {source === s.id && <CheckCircle2 size={14} className="text-[#FF4F01] shrink-0" />}
+                </button>
+              ))}
             </div>
             {source !== 'manual' && (
               <p className="mt-1.5 text-[10px] opacity-60 leading-snug">

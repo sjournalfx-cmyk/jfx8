@@ -247,8 +247,8 @@ curl -sS -H "X-API-Key: $JFX_KEY" \
 - \`400 idempotency_key_required\` — an \`open\` via API key needs a fresh \`Idempotency-Key\`; generate a UUID and send again
 - \`409 idempotency_conflict\` — that key was already used for a different order; generate a fresh key for new orders
 - \`400 unknown_account\` — the supplied \`ctidTraderAccountId\` does not exist; the response carries \`suggestions\` (or a hint to flip \`isDemo\` when the account lives on the other host)
-- \`400 ctrader_not_connected\` — key valid but cTrader not linked; ask user to connect cTrader once on the **Connect & Import** page
-- \`502 ctrader_auth_failed\` — stored cTrader grant expired/revoked; ask user to reconnect cTrader on the **Connect & Import** page, then retry
+- \`400 ctrader_not_connected\`: key valid but cTrader not linked; ask user to connect cTrader once on the **Connect cTrader** page
+- \`502 ctrader_auth_failed\`: stored cTrader grant expired/revoked; ask user to reconnect cTrader on the **Connect cTrader** page, then retry
 - \`429 rate_limited\` — too many requests; retry after \`Retry-After\` seconds. \`503 rate_limiter_unavailable\` means the server limiter is down — retry shortly, do not recreate the key.
 - \`503 ctrader_refresh_in_progress\` — another request is rotating this account's cTrader token; retry after \`Retry-After\` (1s).
 - \`503 server_not_configured / service_unavailable\` — backend is not configured or temporarily down; retry shortly and report it if it persists. Do not recreate the key.

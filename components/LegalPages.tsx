@@ -82,7 +82,7 @@ export const PrivacyPolicy: React.FC = () => (
       <p className={p}>We use encryption in transit, encrypted storage for tokens and keys, access controls and row-level security. Keep your password, Desktop Bridge and API keys private.</p>
 
       <h2 className={h2}>9. Your rights</h2>
-      <p className={p}>You can ask to see, correct, export or delete your information, object to processing, or withdraw consent at any time. You can disconnect brokers and revoke API keys in Settings, and remove Google access in your Google Account. You may complain to the Information Regulator of South Africa.</p>
+      <p className={p}>You can ask to see, correct, export or delete your information, object to processing, or withdraw consent at any time. You can disconnect cTrader and revoke API keys in Settings, and remove Google access in your Google Account. You may complain to the Information Regulator of South Africa.</p>
 
       <h2 className={h2}>10. Children</h2>
       <p className={p}>JFX is for people aged 18 and older.</p>

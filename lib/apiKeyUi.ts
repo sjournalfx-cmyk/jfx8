@@ -53,7 +53,7 @@ const ERROR_HINTS: Record<string, string> = {
   locked_by_rule: 'A portfolio trading lock blocked the order. Do not retry; review the rule context.',
   idempotency_key_required: 'Open orders need a fresh Idempotency-Key UUID.',
   idempotency_conflict: 'That Idempotency-Key was already used with different parameters. Use a fresh UUID.',
-  ctrader_not_connected: 'The key is valid, but cTrader is not connected. Connect it once on Connect & Import.',
+  ctrader_not_connected: 'The key is valid, but cTrader is not connected. Connect it once on Connect cTrader.',
   ctrader_refresh_in_progress: 'cTrader is refreshing this account. Retry in a moment.',
   ctrader_auth_failed: 'The stored cTrader grant expired or was revoked. Reconnect cTrader, then retry.',
   unknown_account: 'That ctidTraderAccountId is unknown. Call get_accounts and retry with a valid id.',

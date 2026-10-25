@@ -32,6 +32,7 @@ import { UserProfile, Trade } from '../types';
 import { useToast } from './ui/Toast';
 import { APP_CONSTANTS, PLAN_FEATURES, normalizePlan } from '../lib/constants';
 import { desktopTradingNavItems } from '../lib/desktopTradingRoutes';
+import { DESKTOP_BRIDGE_ENABLED } from '../config/features';
 import { FloatingDock } from './ui/floating-dock';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -49,7 +50,7 @@ interface SidebarProps {
   onToggleDemoMode?: () => void;
   /**
    * Source of the active portfolio. Broker/bridge connections belong to a
-   * cTrader or Desktop Bridge portfolio, so Connect & Import is disabled on
+   * cTrader or Desktop Bridge portfolio, so Connect cTrader is disabled on
    * Manual portfolios. Omitted (undefined) leaves the item enabled so the
    * sidebar still works in any context that has no portfolio store wired.
    */
@@ -120,7 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const menuItems = [
     { id: 'dashboard', icon: <IconLayoutDashboard size={18} />, label: 'Dashboard', description: 'Overview of your trading performance' },
-    { id: 'ea-setup', icon: <IconLink size={18} />, label: 'Connect & Import', restricted: true, description: 'Connect accounts or import trades' },
+    { id: 'ea-setup', icon: <IconLink size={18} />, label: 'Connect cTrader', restricted: true, description: 'Connect your cTrader account' },
     { id: 'log-trade', icon: <IconPlus size={18} />, label: 'Log Trade', description: 'Record a new trade entry' },
     { 
       id: 'history', 
@@ -330,7 +331,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   isLocked: isBasicTier && item.restricted,
                   isDisabled: item.id === 'ea-setup' && connectionsDisabled,
                   disabledReason: item.id === 'ea-setup' && connectionsDisabled
-                    ? 'Needs a cTrader or Desktop Bridge portfolio'
+                    ? (DESKTOP_BRIDGE_ENABLED ? 'Needs a cTrader or Desktop Bridge portfolio' : 'Select a cTrader portfolio to connect')
                     : undefined,
                   type: 'item' as const
                 }))}

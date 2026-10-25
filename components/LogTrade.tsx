@@ -42,7 +42,7 @@ interface LogTradeProps {
     maxTradesThisMonth?: number;
     /** Explicit broker/prop connection state. Inferred from the profile and portfolios when omitted. */
     brokerConnected?: boolean;
-    /** Opens the existing Connect & Import flow from the no-connection state. */
+    /** Opens the existing Connect cTrader flow from the no-connection state. */
     onConnectBroker?: () => void;
     /** Portfolios used to infer a linked Deriv, cTrader or bridge account. */
     portfolios?: Portfolio[];

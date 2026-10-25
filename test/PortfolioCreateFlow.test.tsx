@@ -161,7 +161,7 @@ describe('portfolio creation flow', () => {
     expect(viewAfterPortfolioCreate(created.source)).toBeNull();
   });
 
-  it('shows the Desktop Bridge option disabled and unselectable while the flag is false', async () => {
+  it('hides the Desktop Bridge option entirely while the flag is false', async () => {
     expect(DESKTOP_BRIDGE_ENABLED).toBe(false);
     const created: Portfolio = {
       ...defaultPortfolio,
@@ -174,13 +174,8 @@ describe('portfolio creation flow', () => {
     renderSwitcher(onAdd);
     openCreateForm();
 
-    const bridgeOption = screen.getByRole('button', { name: /desktop bridge/i });
-    expect(bridgeOption).toBeDisabled();
-    expect(bridgeOption).toHaveAttribute('aria-disabled', 'true');
-    expect(bridgeOption.className).toContain('opacity-50');
-    expect(screen.queryByText(/coming soon|disabled|soon/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /desktop bridge/i })).not.toBeInTheDocument();
 
-    fireEvent.click(bridgeOption);
     fireEvent.click(screen.getByRole('button', { name: /create portfolio/i }));
 
     await waitFor(() => {
@@ -188,7 +183,7 @@ describe('portfolio creation flow', () => {
     });
   });
 
-  it('uses the shortened connect copy while the bridge is off', () => {
+  it('uses the cTrader-only connect copy while the bridge is off', () => {
     render(
       <LogTrade
         isDarkMode
@@ -200,9 +195,10 @@ describe('portfolio creation flow', () => {
       />,
     );
 
+    expect(screen.getByRole('button', { name: /connect ctrader/i })).toBeInTheDocument();
     expect(
-      screen.getByText('Already have a Deriv or cTrader account? Connect it to log trades from here.'),
+      screen.getByText('Connect your cTrader account to log trades from here.'),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/or MT5 account/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/MT5 account/i)).not.toBeInTheDocument();
   });
 });

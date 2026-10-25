@@ -183,11 +183,11 @@ export const NoConnectionState: React.FC<NoConnectionStateProps> = ({ onConnect 
 
             <ConnectionCard
               icon={<SquarePlus size={40} strokeWidth={1.5} aria-hidden />}
-              title="Connect broker / prop"
+              title={DESKTOP_BRIDGE_ENABLED ? 'Connect broker / prop' : 'Connect cTrader'}
               description={
                 DESKTOP_BRIDGE_ENABLED
                   ? 'Already have a Deriv, cTrader or MT5 account? Connect it to log trades from here.'
-                  : 'Already have a Deriv or cTrader account? Connect it to log trades from here.'
+                  : 'Connect your cTrader account to log trades from here.'
               }
               glow={NEUTRAL_GLOW}
               onClick={() => onConnect?.()}

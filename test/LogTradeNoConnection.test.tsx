@@ -44,7 +44,7 @@ describe('NoConnectionState', () => {
     expect(screen.getByRole('heading', { name: 'Ready for the next step?' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /pick a broker/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /pick a prop firm/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /connect broker \/ prop/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /connect ctrader/i })).toBeInTheDocument();
     expect(screen.getByText('OR')).toBeInTheDocument();
   });
 
@@ -83,7 +83,7 @@ describe('NoConnectionState', () => {
     const onConnect = vi.fn();
     render(<NoConnectionState onConnect={onConnect} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /connect broker \/ prop/i }));
+    fireEvent.click(screen.getByRole('button', { name: /connect ctrader/i }));
 
     expect(onConnect).toHaveBeenCalledTimes(1);
   });
