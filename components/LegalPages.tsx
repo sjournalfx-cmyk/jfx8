@@ -20,6 +20,7 @@ const LegalFooter: React.FC = () => (
   <footer className="mt-14 border-t border-white/10 pt-6 flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-zinc-500">
     <span>&copy; 2026 JFX-JOURNAL</span>
     <a href="/" className="font-bold hover:text-zinc-200">Home</a>
+    <a href="/features" className="font-bold hover:text-zinc-200">Features</a>
     <a href="/privacy" className="font-bold hover:text-zinc-200">Privacy Policy</a>
     <a href="/terms" className="font-bold hover:text-zinc-200">Terms of Service</a>
     <a href="mailto:sjournalfx@gmail.com" className="font-bold hover:text-zinc-200">sjournalfx@gmail.com</a>

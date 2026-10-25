@@ -118,6 +118,7 @@ const supportLinks = [
   { title: 'Documentation', icon: HelpCircle, desc: 'Setup guides, workflows, and feature notes.', href: '/DOCUMENTATION.md' },
   { title: 'Telegram Community', icon: MessageSquare, desc: 'Share feedback and get release updates.', href: 'https://t.me/+w_KvKM5HESYyMTdk' },
   { title: 'Video Tutorials', icon: Video, desc: 'Short walkthroughs for common setup tasks.', href: null },
+  { title: 'Features', icon: Zap, desc: 'See everything JFX Journal can do.', href: '/features' },
   { title: 'Privacy Policy', icon: Shield, desc: 'How we collect, use and protect your data.', href: '/privacy' },
   { title: 'Terms of Service', icon: FileText, desc: 'The rules that govern your use of JFX.', href: '/terms' },
 ];

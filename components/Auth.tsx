@@ -231,6 +231,11 @@ const Auth: React.FC<AuthProps> = ({ isDarkMode, onLogin, onRegister }) => {
             <a href="/privacy" className="font-bold text-zinc-400 hover:text-zinc-200 underline underline-offset-2">Privacy Policy</a>.
           </p>
 
+          <p className="mt-2 text-center text-[11px] text-zinc-500">
+            Not sure where to start?{' '}
+            <a href="/features" className="font-bold text-zinc-400 hover:text-zinc-200 underline underline-offset-2">See what JFX can do</a>.
+          </p>
+
           <p className="mt-10 text-center text-xs font-bold text-zinc-500">
             {isLoginView ? "Don't have an account? " : "Already have an account? "}
             <button 
