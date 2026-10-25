@@ -2,8 +2,6 @@ import { Candle, EADeal, EAPosition } from '../types';
 import { supabase } from '../lib/supabase';
 
 const CTRADER_ID_BASE = 'https://id.ctrader.com';
-const WS_DEMO = 'wss://demo.ctraderapi.com:5036';
-const WS_LIVE = 'wss://live.ctraderapi.com:5036';
 
 // OAuth client IDs are public identifiers. The cTrader client secret is kept
 // exclusively in server environment variables; browser requests use the
@@ -224,23 +222,6 @@ export async function getActiveAccessToken(): Promise<string | null> {
   return null;
 }
 
-let wsDemo: WebSocket | null = null;
-let wsLive: WebSocket | null = null;
-let pendingReqs: Map<string, { resolve: (v: any) => void; reject: (e: any) => void; payloadType: number }> = new Map();
-let msgCounter = 0;
-let heartbeatIntervalDemo: ReturnType<typeof setInterval> | null = null;
-let heartbeatIntervalLive: ReturnType<typeof setInterval> | null = null;
-const appAuthDone = new Set<WebSocket>();
-const appAuthPromises = new Map<WebSocket, Promise<void>>();
-const accountAuthPromises = new Map<WebSocket, Map<number, Promise<void>>>();
-let connectPromiseDemo: Promise<WebSocket> | null = null;
-let connectPromiseLive: Promise<WebSocket> | null = null;
-
-function nextMsgId(): string {
-  msgCounter++;
-  return `jfx_${msgCounter}_${Date.now()}`;
-}
-
 // Payload types from cTrader ProtoOAPayloadType — official proto values
 // Source: https://github.com/spotware/openapi-proto-messages/blob/main/OpenApiModelMessages.proto
 export const PT = {
@@ -395,186 +376,6 @@ async function startSpotStream(accountId: number, isDemo: boolean): Promise<void
   })();
 }
 
-async function ensureConnected(isDemo: boolean = true): Promise<WebSocket> {
-  const existingWs = isDemo ? wsDemo : wsLive;
-  if (existingWs && existingWs.readyState === WebSocket.OPEN) return existingWs;
-
-  // If a connection is already being established, piggyback on that promise
-  // This prevents concurrent callers from each opening (and closing) their own socket
-  const activePromise = isDemo ? connectPromiseDemo : connectPromiseLive;
-  if (activePromise) return activePromise;
-
-  const newPromise: Promise<WebSocket> = (async () => {
-    const tokens = await getTokens();
-    if (!tokens) throw new Error('Not authenticated with cTrader');
-
-    // Close any stale socket before creating a new one
-    if (existingWs) {
-      try { existingWs.close(); } catch { /* ignore */ }
-      appAuthDone.delete(existingWs);
-      appAuthPromises.delete(existingWs);
-      accountAuthPromises.delete(existingWs);
-      if (isDemo) wsDemo = null;
-      else wsLive = null;
-    }
-
-    const url = isDemo ? WS_DEMO : WS_LIVE;
-    const socket = new WebSocket(url);
-    socket.binaryType = 'blob';
-    if (isDemo) wsDemo = socket;
-    else wsLive = socket;
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (isDemo) connectPromiseDemo = null;
-        else connectPromiseLive = null;
-        reject(new Error(`WebSocket connection timeout (30s) - ${isDemo ? 'Demo' : 'Live'}`));
-      }, 30000);
-
-      socket.onopen = () => {
-        clearTimeout(timeout);
-        resolve();
-      };
-      socket.onerror = () => {
-        clearTimeout(timeout);
-        if (isDemo) connectPromiseDemo = null;
-        else connectPromiseLive = null;
-        reject(new Error(`WebSocket connection failed - ${isDemo ? 'Demo' : 'Live'}`));
-      };
-      socket.onclose = () => {
-        clearTimeout(timeout);
-        stopHeartbeat(isDemo);
-        appAuthDone.delete(socket);
-        appAuthPromises.delete(socket);
-        accountAuthPromises.delete(socket);
-        if (isDemo) connectPromiseDemo = null;
-        else connectPromiseLive = null;
-        if (isDemo && wsDemo === socket) wsDemo = null;
-        if (!isDemo && wsLive === socket) wsLive = null;
-        reject(new Error(`WebSocket closed before open - ${isDemo ? 'Demo' : 'Live'}`));
-      };
-    });
-
-    // Connection succeeded — clear the cached promise so future reconnects work
-    if (isDemo) connectPromiseDemo = null;
-    else connectPromiseLive = null;
-
-    // Keep the connection alive. cTrader drops sockets that stop exchanging
-    // heartbeats, which used to leave a dead cached socket behind by the time
-    // the user returned to the terminal (surfacing as CANT_ROUTE_REQUEST).
-    startHeartbeat(socket, isDemo);
-
-    socket.onmessage = async (event) => {
-      try {
-        let dataStr: string;
-        if (typeof event.data === 'string') {
-          dataStr = event.data;
-        } else if (event.data instanceof Blob) {
-          if (typeof event.data.text === 'function') {
-            dataStr = await event.data.text();
-          } else {
-            dataStr = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result as string);
-              reader.onerror = () => reject(reader.error || new Error('Blob read error'));
-              reader.readAsText(event.data);
-            });
-          }
-        } else if (event.data instanceof ArrayBuffer) {
-          dataStr = new TextDecoder().decode(event.data);
-        } else {
-          dataStr = String(event.data);
-        }
-
-        const msg = JSON.parse(dataStr);
-        const clientId = msg.clientMsgId;
-        if (clientId && pendingReqs.has(clientId)) {
-          const pending = pendingReqs.get(clientId)!;
-          pendingReqs.delete(clientId);
-          if (msg.payloadType === PT.ERROR_RES) {
-            const errorCode = msg.payload?.errorCode || 'cTrader error';
-            // ProtoOAErrorRes carries a human-readable description alongside
-            // the machine code — surface both for diagnosability.
-            const description = msg.payload?.description;
-            pending.reject(new Error(description ? `${errorCode}: ${description}` : String(errorCode)));
-          } else {
-            pending.resolve(msg.payload);
-          }
-        }
-
-        broadcastCtraderEvent(msg.payloadType, msg.payload, isDemo);
-      } catch { /* ignore parse errors */ }
-    };
-
-    return socket;
-  })();
-
-  if (isDemo) connectPromiseDemo = newPromise;
-  else connectPromiseLive = newPromise;
-
-  return newPromise;
-}
-
-
-function sendWsMessage(socket: WebSocket, payloadType: number, payload: Record<string, any>, timeoutMs: number = 20000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const clientMsgId = nextMsgId();
-    // Without a timeout a request sent into a dead/zombie socket would hang
-    // forever (the server is gone, so no response ever arrives).
-    const timer = setTimeout(() => {
-      pendingReqs.delete(clientMsgId);
-      reject(new Error(`Request timed out (payloadType ${payloadType})`));
-    }, timeoutMs);
-    pendingReqs.set(clientMsgId, {
-      resolve: (value: any) => { clearTimeout(timer); resolve(value); },
-      reject: (reason: any) => { clearTimeout(timer); reject(reason); },
-      payloadType,
-    });
-    try {
-      socket.send(JSON.stringify({
-        clientMsgId,
-        payloadType,
-        payload,
-      }));
-    } catch (e) {
-      clearTimeout(timer);
-      pendingReqs.delete(clientMsgId);
-      reject(new Error(`WebSocket send failed: ${String((e as any)?.message || e)}`));
-    }
-  });
-}
-
-function startHeartbeat(socket: WebSocket, isDemo: boolean) {
-  stopHeartbeat(isDemo);
-  const interval = setInterval(() => {
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        clientMsgId: nextMsgId(),
-        payloadType: PT.HEARTBEAT_EVENT,
-        payload: {},
-      }));
-    }
-  }, 10000);
-
-  if (isDemo) heartbeatIntervalDemo = interval;
-  else heartbeatIntervalLive = interval;
-}
-
-function stopHeartbeat(isDemo?: boolean) {
-  if (isDemo === undefined || isDemo === true) {
-    if (heartbeatIntervalDemo) {
-      clearInterval(heartbeatIntervalDemo);
-      heartbeatIntervalDemo = null;
-    }
-  }
-  if (isDemo === undefined || isDemo === false) {
-    if (heartbeatIntervalLive) {
-      clearInterval(heartbeatIntervalLive);
-      heartbeatIntervalLive = null;
-    }
-  }
-}
-
 export function getAuthorizeUrl(): string {
   if (!CLIENT_ID) throw new Error('cTrader client ID is not configured (VITE_CTRADER_CLIENT_ID).');
   const redirectUri = `${window.location.origin}/api/ctrader/callback`;
@@ -597,10 +398,11 @@ export async function exchangeCode(code: string, state: string | null): Promise<
   const redirectUri = `${window.location.origin}/api/ctrader/callback`;
   try {
     const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
-    // The installed native app uses its registered deep-link state. Browser
-    // authorizations must always match the one-time state generated above.
-    const isNativeCallback = state === 'jfx-native';
-    if (!isNativeCallback && (!state || !expectedState || state !== expectedState)) {
+    // Native authorizations carry a server-signed state (jfxn1...), which the
+    // exchange endpoint verifies and binds to the signed-in user. Browser
+    // authorizations must match the one-time state generated above.
+    const isServerIssuedState = /^jfxn1\./.test(String(state || ''));
+    if (!isServerIssuedState && (!state || !expectedState || state !== expectedState)) {
       return { ok: false, error: 'Invalid or expired cTrader authorization state. Please try connecting again.' };
     }
     if (expectedState) sessionStorage.removeItem(OAUTH_STATE_KEY);
@@ -612,6 +414,7 @@ export async function exchangeCode(code: string, state: string | null): Promise<
     const queryParams = new URLSearchParams({
       code,
       redirect_uri: redirectUri,
+      ...(state ? { state } : {}),
     });
     const res = await fetch(`/api/ctrader/exchange?${queryParams.toString()}`, { headers });
     const data = await res.json().catch(() => ({}));
@@ -644,6 +447,10 @@ const SELECTED_ACCOUNT_KEY = 'jfx_ctrader_selected_account';
 /** Persist the user's preferred cTrader account so it survives redirects. */
 export function setSelectedAccountId(id: number) {
   try { localStorage.setItem(SELECTED_ACCOUNT_KEY, String(id)); } catch { /* blocked */ }
+  // Server-side default matters for API-key orders, which have no localStorage.
+  void ctraderApiRequest({ action: 'set_default_account', accountId: id }).catch(() => {
+    /* best-effort: local selection still works for this browser */
+  });
 }
 
 /** Read the previously selected cTrader account id, or null. */
@@ -668,32 +475,26 @@ export function clearStaleCtraderFlags() {
   try { localStorage.removeItem(SESSION_FLAG_KEY); } catch { /* blocked */ }
 }
 
-export function logout() {
+export async function logout(): Promise<void> {
   memoryTokens = null;
   clearSelectedAccountId();
   try { localStorage.removeItem(SESSION_FLAG_KEY); } catch { /* blocked */ }
-  // Clear the server-side refresh cookie (best-effort).
-  // Shares the trade route with an `action=logout` flag: Vercel Hobby caps a
-  // deployment at 12 Serverless Functions, so a standalone
-  // api/ctrader/logout.ts pushed the build over that limit.
-  try { void fetch('/api/ctrader/trade?action=logout', { method: 'POST' }); } catch { /* ignore */ }
-  appAuthDone.clear();
-  appAuthPromises.clear();
-  accountAuthPromises.clear();
-  connectPromiseDemo = null;
-  connectPromiseLive = null;
   for (const controller of spotStreamControllers.values()) controller.abort();
   spotStreamControllers.clear();
   spotSubscriptions.clear();
-  if (wsDemo) {
-    wsDemo.close();
-    wsDemo = null;
-  }
-  if (wsLive) {
-    wsLive.close();
-    wsLive = null;
-  }
-  stopHeartbeat();
+
+  // Revoke the server-side grant, not just the local flag. The server verifies
+  // this Supabase JWT before deleting the stored refresh token, so a logout
+  // from one device cannot race an unauthenticated cookie-only request.
+  try {
+    const session = await getOrWaitForSession();
+    if (session?.jwt) {
+      await fetch('/api/ctrader/trade?action=logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.jwt}` },
+      });
+    }
+  } catch { /* best-effort: local session is already cleared */ }
 }
 
 export async function getAccounts(): Promise<CtraderAccount[]> {
@@ -714,46 +515,13 @@ export async function getAccounts(): Promise<CtraderAccount[]> {
   }));
   return dedupeAccountsByTraderId(accounts as CtraderAccount[]);
 }
-export async function authAccount(ctidTraderAccountId: number, isDemo: boolean = true): Promise<void> {
-  void ctidTraderAccountId;
-  void isDemo;
-  const session = await getOrWaitForSession();
-  if (!session?.jwt) throw new Error('Sign in again before using cTrader.');
-}
-
-const isCantRouteError = (e: any) => String(e?.message || e).includes('CANT_ROUTE_REQUEST');
 const isRefreshInProgressError = (e: any) => String(e?.message || e).includes('ctrader_refresh_in_progress');
+const isCantRouteError = (e: any) => String(e?.message || e).includes('CANT_ROUTE_REQUEST');
 
-const isRecoverableConnectionError = (e: any) => {
-  const msg = String(e?.message || e);
-  return msg.includes('timed out')
-    || msg.includes('WebSocket closed')
-    || msg.includes('WebSocket send failed')
-    || msg.includes('WebSocket connection');
-};
-
-// Tears down a cached socket and its auth state so the next request
-// reconnects from scratch (used to self-heal stale/zombie connections).
-function forceReconnect(isDemo: boolean) {
-  const socket = isDemo ? wsDemo : wsLive;
-  if (socket) {
-    appAuthDone.delete(socket);
-    appAuthPromises.delete(socket);
-    accountAuthPromises.delete(socket);
-    try { socket.close(); } catch { /* ignore */ }
-  }
-  if (isDemo) { wsDemo = null; connectPromiseDemo = null; }
-  else { wsLive = null; connectPromiseLive = null; }
-  stopHeartbeat(isDemo);
-}
-
-// ensureConnected → authAccount → send, with self-healing: a stale socket
-// (connection died while the user was away — the usual cause of
-// CANT_ROUTE_REQUEST when returning to the terminal) triggers one clean
-// reconnect + retry. Read-only callers may also allow a final retry on the
-// opposite environment, since CANT_ROUTE almost always means the account
-// lives on the other cTrader host (demo vs live). Trading mutations never
-// fall back — silently switching environments there would be dangerous.
+// Read-only callers may retry once on the opposite environment, since
+// CANT_ROUTE almost always means the account lives on the other cTrader host
+// (demo vs live). Trading mutations never fall back, because silently
+// switching environments there would be dangerous.
 async function authenticatedRequest(
   ctidTraderAccountId: number,
   payloadType: number,
@@ -1094,20 +862,9 @@ export async function getCashFlowHistory(
 }
 
 export function disconnect() {
-  appAuthDone.clear();
-  appAuthPromises.clear();
-  accountAuthPromises.clear();
-  connectPromiseDemo = null;
-  connectPromiseLive = null;
-  if (wsDemo) {
-    wsDemo.close();
-    wsDemo = null;
-  }
-  if (wsLive) {
-    wsLive.close();
-    wsLive = null;
-  }
-  stopHeartbeat();
+  for (const controller of spotStreamControllers.values()) controller.abort();
+  spotStreamControllers.clear();
+  spotSubscriptions.clear();
 }
 
 // Maps a cTrader position to the app's EAPosition shape.

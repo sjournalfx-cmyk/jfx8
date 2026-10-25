@@ -258,3 +258,43 @@ describe('ctraderService - WebSocket API integration', () => {
     expect(MockWebSocket.lastInstance).toBeNull();
   });
 });
+
+describe('ctraderService - account lifecycle', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, accounts: [] }),
+    })));
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    ctraderService.__setTokensForTesting(null);
+  });
+
+  it('logs out with the verified Supabase JWT', async () => {
+    await ctraderService.logout();
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes('action=logout'));
+    expect(call).toBeTruthy();
+    expect((call![1]?.headers as any).Authorization).toBe('Bearer mock_session_jwt');
+    expect(call![1]?.method).toBe('POST');
+  });
+
+  it('persists the selected account as the server-side default', async () => {
+    ctraderService.setSelectedAccountId(4242);
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    await vi.waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/ctrader/trade'));
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call![1]?.body))).toEqual({ action: 'set_default_account', accountId: 4242 });
+    });
+  });
+});
