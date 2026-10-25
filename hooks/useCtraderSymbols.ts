@@ -53,7 +53,7 @@ export const useCtraderSymbols = (ctidAccountId?: string | null): UseCtraderSymb
         }
         if (cancelled) return;
         setIsDemo(demo);
-        const list = await svc.getCachedSymbolsList(validAccountId, demo).catch(() => [] as any[]);
+        const list = await svc.getCachedSymbolsList(validAccountId, demo);
         if (cancelled) return;
         const normalized: CtraderQuoteSymbol[] = (list || [])
           .map((s: any) => ({
