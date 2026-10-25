@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evaluateAccountBinding,
   evaluateLocks,
   LOCK_UNLOCK_COOLDOWN_MS,
   matchPortfoliosForAccount,
   normalizeLocks,
+  pickLinkedCtraderAccount,
+  type PortfolioContext,
 } from './tradingLocks';
 
 const acct = (id: string | number) => [{ provider: 'ctrader', externalAccountId: String(id) }];
@@ -114,5 +117,71 @@ describe('server trading lock evaluation', () => {
       expect(verdict.message).toBe("Couldn't confirm today's trade count. Try again in a moment.");
     }
     expect(evaluateLocks({}, { symbolId: null, volumeLots: 0.01, fillsToday: null }).allowed).toBe(true);
+  });
+});
+
+describe('account binding enforcement', () => {
+  const ctx = (over: Partial<PortfolioContext> = {}): PortfolioContext => ({
+    portfolioId: 'p1',
+    portfolioName: 'Main',
+    portfolioIds: ['p1'],
+    locksUnchecked: false,
+    bindingsUnchecked: false,
+    locks: null,
+    ...over,
+  });
+
+  it('allows exactly one live portfolio', () => {
+    expect(evaluateAccountBinding(ctx())).toEqual({ allowed: true });
+  });
+
+  it('rejects an unlinked account', () => {
+    const verdict = evaluateAccountBinding(ctx({ portfolioId: null, portfolioIds: [] }));
+    expect(verdict.allowed).toBe(false);
+    if (verdict.allowed === false) expect(verdict.error).toBe('account_not_linked');
+  });
+
+  it('rejects a collision across portfolios', () => {
+    const verdict = evaluateAccountBinding(ctx({ portfolioIds: ['p1', 'p2'] }));
+    expect(verdict.allowed).toBe(false);
+    if (verdict.allowed === false) expect(verdict.error).toBe('account_linked_to_multiple_portfolios');
+  });
+
+  it('fails open when portfolio rows were unreachable', () => {
+    const verdict = evaluateAccountBinding(ctx({
+      portfolioId: null,
+      portfolioIds: [],
+      bindingsUnchecked: true,
+      locksUnchecked: true,
+    }));
+    expect(verdict.allowed).toBe(true);
+  });
+});
+
+describe('pickLinkedCtraderAccount', () => {
+  const row = (id: string, extra: Record<string, any> = {}) => ({
+    id,
+    name: id,
+    accounts: [{ provider: 'ctrader', externalAccountId: '777' }],
+    ...extra,
+  });
+
+  it('prefers the default live portfolio with a cTrader account', () => {
+    const picked = pickLinkedCtraderAccount([
+      row('old', { created_at: '2025-01-01' }),
+      row('def', { is_default: true, created_at: '2026-01-01' }),
+      { ...row('other'), accounts: [{ provider: 'mt5', externalAccountId: '777' }] },
+      row('arch', { is_archived: true }),
+    ]);
+    expect(picked).toEqual({ accountId: 777, portfolioId: 'def', portfolioName: 'def' });
+  });
+
+  it('honours an explicit portfolio id and ignores malformed links', () => {
+    const picked = pickLinkedCtraderAccount([
+      row('p1'),
+      { ...row('p2'), accounts: [{ provider: 'ctrader', externalAccountId: 'not-a-number' }] },
+    ], 'p2');
+    expect(picked).toBeNull();
+    expect(pickLinkedCtraderAccount([row('p1')], 'p1')?.accountId).toBe(777);
   });
 });

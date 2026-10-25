@@ -12,10 +12,12 @@ import {
 } from '../_lib/apiKeys.js';
 import {
   countOpensToday,
+  evaluateAccountBinding,
   evaluateLocks,
   getUserTimezone,
   isRuleActive,
   normalizeLocks,
+  resolveLinkedCtraderAccount,
   resolvePortfolioContext,
   toLots,
   unlockMsRemaining,
@@ -32,6 +34,7 @@ import {
   apiKeyError,
   persistRotatedCtraderToken,
 } from '../_lib/jfxApiKey.js';
+import { persistDefaultCtraderAccount } from '../_lib/ctraderDefaults.js';
 
 const CTRADER_TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
 
@@ -541,6 +544,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     accessToken = connected.accessToken;
     defaultAccountId = connected.defaultAccountId;
     defaultIsDemo = connected.defaultIsDemo;
+
+    // API-key orders with no explicit account must trade the account linked to
+    // a portfolio, otherwise they silently hit the first demo account and
+    // bypass that portfolio's locks.
+    const explicitAccount = body.ctidTraderAccountId || req.query.ctidTraderAccountId;
+    if (!explicitAccount) {
+      const linked = await resolveLinkedCtraderAccount(
+        { supabaseUrl, serviceKey },
+        authenticatedUserId,
+        String(body.portfolioId || req.query.portfolioId || '') || null,
+      );
+      if (linked) {
+        defaultAccountId = linked.accountId;
+      }
+    }
   } else if (rawKey) {
     // Direct cTrader access token (backward compat for callers not on JFX keys)
     accessToken = rawKey;
@@ -559,11 +577,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const requestedAccountId = Number(body.ctidTraderAccountId || req.query.ctidTraderAccountId || defaultAccountId) || null;
+  const explicitAccountId = Number(body.ctidTraderAccountId || req.query.ctidTraderAccountId) || null;
+  const requestedAccountId = explicitAccountId || defaultAccountId;
   // NB: parseIsDemo handles string "false" correctly (Boolean("false") === true bug fix).
-  const isDemo = parseIsDemo(body.isDemo !== undefined ? body.isDemo : req.query.isDemo, defaultIsDemo);
-  const host = isDemo ? 'demo.ctraderapi.com' : 'live.ctraderapi.com';
-  let accountId: number | null = requestedAccountId;
+  const isDemoExplicit = body.isDemo !== undefined || req.query.isDemo !== undefined;
+  let isDemo = parseIsDemo(body.isDemo !== undefined ? body.isDemo : req.query.isDemo, defaultIsDemo);
+  let host = isDemo ? 'demo.ctraderapi.com' : 'live.ctraderapi.com';
+  let accountId: number | null = Number(requestedAccountId) || null;
 
   let session: WsSession | null = null;
 
@@ -683,8 +703,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         const target = accounts.find((a) => Number(a.ctidTraderAccountId) === Number(accountId));
         if (target && typeof target.isLive === 'boolean' && (isDemo ? target.isLive : !target.isLive)) {
-          const alt = findAltAccountForHost(accounts, isDemo, Number(accountId));
-          if (alt) accountId = Number(alt.ctidTraderAccountId);
+          if (!isDemoExplicit && !explicitAccountId) {
+            // A stored/portfolio account id is authoritative; trust its live
+            // flag instead of silently switching to a different account.
+            isDemo = !target.isLive;
+            host = isDemo ? 'demo.ctraderapi.com' : 'live.ctraderapi.com';
+          } else {
+            const alt = findAltAccountForHost(accounts, isDemo, Number(accountId));
+            if (alt) accountId = Number(alt.ctidTraderAccountId);
+          }
         }
       }
     } catch {
@@ -717,6 +744,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         isDemo,
         userId: authenticatedUserId,
       });
+      return;
+    }
+
+    if (action === 'set_default_account' || action === 'save_default_account') {
+      if (!authenticatedUserId || !supabaseUrl || !serviceKey) {
+        await auditLog(401);
+        res.status(401).json({ error: 'set_default_account_requires_user', message: 'Sign in to save a default cTrader account.' });
+        return;
+      }
+      const requested = Number(body.accountId || body.ctidTraderAccountId || req.query.accountId || accountId) || null;
+      const target = accounts.find((a) => Number(a.ctidTraderAccountId) === Number(requested));
+      if (!requested || !target) {
+        await auditLog(400);
+        res.status(400).json({ error: 'account_not_found', message: 'That cTrader account was not found on this login.' });
+        return;
+      }
+      const targetIsDemo = body.isDemo !== undefined || req.query.isDemo !== undefined
+        ? parseIsDemo(body.isDemo !== undefined ? body.isDemo : req.query.isDemo, isDemo)
+        : (typeof target.isLive === 'boolean' ? !target.isLive : isDemo);
+      try {
+        await persistDefaultCtraderAccount({
+          supabaseUrl,
+          serviceKey,
+          userId: authenticatedUserId,
+          accountId: Number(requested),
+          isDemo: targetIsDemo,
+        });
+      } catch (e: any) {
+        console.error('[trade] set_default_account failed:', e?.message);
+        await auditLog(500);
+        res.status(500).json({ error: 'default_account_not_saved', message: e?.message || 'Could not save the default cTrader account.' });
+        return;
+      }
+      await auditLog(200);
+      res.status(200).json({ ok: true, accountId: Number(requested), isDemo: targetIsDemo });
       return;
     }
 
@@ -895,13 +957,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Trading locks: portfolio hard limits bind every new-risk order path
       // (agents, PATs, apps). Closes/modifies are never gated. Unlinked
-      // accounts warn-but-allow; unreachable lock rows warn-but-allow;
+      // accounts are rejected so their orders cannot bypass portfolio locks;
+      // unreachable portfolio/lock rows warn-but-allow (infra failure);
       // skipped entirely for raw-token calls (no user).
       let portfolioCtx: PortfolioContext | null = null;
       if (authenticatedUserId && supabaseUrl && serviceKey) {
         try {
           const deps = { supabaseUrl, serviceKey };
           portfolioCtx = await resolvePortfolioContext(deps, authenticatedUserId, accountId!);
+          const binding = evaluateAccountBinding(portfolioCtx);
+          if (binding.allowed === false) {
+            session.close();
+            await auditLog(binding.error === 'account_not_linked' ? 403 : 409);
+            res.status(binding.error === 'account_not_linked' ? 403 : 409).json({
+              ok: false,
+              error: binding.error,
+              message: binding.message,
+              accountId,
+              isDemo,
+              ...(portfolioCtx.portfolioIds.length > 0 ? { portfolioIds: portfolioCtx.portfolioIds } : {}),
+            });
+            return;
+          }
           const locks = normalizeLocks(portfolioCtx.locks);
           if (portfolioCtx.portfolioId && locks) {
             const volumeLotsForLocks = toLots(body.volume ?? body.volumeLots ?? 0.01);
@@ -960,6 +1037,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             portfolioName: null,
             portfolioIds: [],
             locksUnchecked: true,
+            bindingsUnchecked: true,
             locks: null,
           };
         }

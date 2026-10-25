@@ -331,7 +331,7 @@ export function matchPortfoliosForAccount(rows: any[], accountId: number): Portf
   return out;
 }
 
-async function fetchPortfolioRows(deps: RestDeps, userId: string): Promise<any[] | null> {
+async function fetchPortfolioRowsStrict(deps: RestDeps, userId: string): Promise<any[]> {
   // Prefer the full select; fall back to the minimal one when the
   // dashboard-era table predates is_default/is_archived/created_at.
   try {
@@ -341,9 +341,14 @@ async function fetchPortfolioRows(deps: RestDeps, userId: string): Promise<any[]
     );
     if (Array.isArray(rows)) return rows;
   } catch { /* fall through to minimal select */ }
+  const rows = await restGet(deps, `portfolios?user_id=eq.${encodeURIComponent(userId)}&select=id,accounts`);
+  if (!Array.isArray(rows)) throw new Error('portfolio_rows_unavailable');
+  return rows;
+}
+
+async function fetchPortfolioRows(deps: RestDeps, userId: string): Promise<any[] | null> {
   try {
-    const rows = await restGet(deps, `portfolios?user_id=eq.${encodeURIComponent(userId)}&select=id,accounts`);
-    return Array.isArray(rows) ? rows : null;
+    return await fetchPortfolioRowsStrict(deps, userId);
   } catch (e) {
     console.warn('[locks] portfolio resolve failed (fail-open):', (e as Error)?.message);
     return null;
@@ -399,6 +404,8 @@ export interface PortfolioContext {
   portfolioIds: string[];
   /** True when a portfolio binds but its locks row could not be read. */
   locksUnchecked: boolean;
+  /** True when the portfolio rows themselves could not be read. */
+  bindingsUnchecked: boolean;
   locks: PortfolioLocks | null;
 }
 
@@ -416,11 +423,13 @@ export async function resolvePortfolioContext(
     portfolioName: null,
     portfolioIds: [],
     locksUnchecked: false,
+    bindingsUnchecked: false,
     locks: null,
   };
   if (!userId) return empty;
   try {
-    const bindings = await findPortfoliosForAccount(deps, userId, accountId);
+    const rows = await fetchPortfolioRowsStrict(deps, userId);
+    const bindings = matchPortfoliosForAccount(rows, accountId).filter((b) => !b.isArchived);
     if (bindings.length === 0) return empty;
     try {
       const locks = await fetchPortfolioLocksStrict(deps, userId, bindings[0].id);
@@ -429,6 +438,7 @@ export async function resolvePortfolioContext(
         portfolioName: bindings[0].name,
         portfolioIds: bindings.map((b) => b.id),
         locksUnchecked: false,
+        bindingsUnchecked: false,
         locks,
       };
     } catch {
@@ -437,12 +447,102 @@ export async function resolvePortfolioContext(
         portfolioName: bindings[0].name,
         portfolioIds: bindings.map((b) => b.id),
         locksUnchecked: true,
+        bindingsUnchecked: false,
         locks: null,
       };
     }
   } catch {
-    return { ...empty, locksUnchecked: true };
+    return { ...empty, locksUnchecked: true, bindingsUnchecked: true };
   }
+}
+
+export interface LinkedCtraderAccount {
+  accountId: number;
+  portfolioId: string;
+  portfolioName: string | null;
+}
+
+/** Numeric cTrader account linked to a portfolio row, or null. */
+export function portfolioCtraderAccountId(row: any): number | null {
+  const accounts = Array.isArray(row?.accounts) ? row.accounts : [];
+  for (const account of accounts) {
+    if (account?.provider !== 'ctrader') continue;
+    const id = Number(account?.externalAccountId);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
+  return null;
+}
+
+/**
+ * Pick the linked cTrader account a user should trade by default. An explicit
+ * portfolioId narrows to that portfolio; otherwise the default live portfolio
+ * wins, then the oldest live portfolio with a linked account.
+ */
+export function pickLinkedCtraderAccount(
+  rows: any[],
+  portfolioId?: string | null
+): LinkedCtraderAccount | null {
+  const live = (rows || []).filter((r: any) => r?.id && r?.is_archived !== true);
+  const wanted = portfolioId ? String(portfolioId) : null;
+  const candidates = live
+    .filter((r: any) => !wanted || String(r.id) === wanted)
+    .map((r: any) => ({ row: r, accountId: portfolioCtraderAccountId(r) }))
+    .filter((c): c is { row: any; accountId: number } => Boolean(c.accountId));
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => {
+    if (a.row.is_default !== b.row.is_default) return a.row.is_default === true ? -1 : 1;
+    return String(a.row.created_at || '').localeCompare(String(b.row.created_at || ''));
+  });
+  const chosen = candidates[0];
+  return {
+    accountId: chosen.accountId,
+    portfolioId: String(chosen.row.id),
+    portfolioName: typeof chosen.row.name === 'string' ? chosen.row.name : null,
+  };
+}
+
+/** Resolve the linked account for a user, or null when none is linked. */
+export async function resolveLinkedCtraderAccount(
+  deps: RestDeps,
+  userId: string,
+  portfolioId?: string | null
+): Promise<LinkedCtraderAccount | null> {
+  const rows = await fetchPortfolioRows(deps, userId);
+  if (!rows) return null;
+  return pickLinkedCtraderAccount(rows, portfolioId);
+}
+
+export type AccountBindingVerdict =
+  | { allowed: true }
+  | {
+      allowed: false;
+      error: 'account_not_linked' | 'account_linked_to_multiple_portfolios';
+      message: string;
+    };
+
+/**
+ * Trading requires exactly one live portfolio binding. Unlinked accounts are
+ * rejected so their trades cannot bypass portfolio locks. If the portfolio
+ * rows were unreachable, keep the existing fail-open behaviour rather than
+ * blocking trading on an infrastructure blip.
+ */
+export function evaluateAccountBinding(ctx: PortfolioContext): AccountBindingVerdict {
+  if (ctx.bindingsUnchecked) return { allowed: true };
+  if (ctx.portfolioIds.length === 0) {
+    return {
+      allowed: false,
+      error: 'account_not_linked',
+      message: 'This cTrader account is not linked to a portfolio. Link it to one portfolio before trading.',
+    };
+  }
+  if (ctx.portfolioIds.length > 1) {
+    return {
+      allowed: false,
+      error: 'account_linked_to_multiple_portfolios',
+      message: 'This cTrader account is linked to more than one portfolio. Keep one account per portfolio, then retry.',
+    };
+  }
+  return { allowed: true };
 }
 
 export interface PortfolioLockSummary {
