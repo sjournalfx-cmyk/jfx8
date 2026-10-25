@@ -122,18 +122,18 @@ const Auth: React.FC<AuthProps> = ({ isDarkMode, onLogin, onRegister }) => {
                 type="button"
                 onClick={handleGoogleSignIn}
                 disabled={isGoogleLoading || isLoading}
-                className={`w-full flex items-center justify-center gap-3 py-2 rounded-2xl border-2 font-black text-[13px] transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 disabled:cursor-wait ${isDarkMode ? 'bg-[#000000] border-white/10 hover:bg-[#050505] text-white' : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-900 shadow-sm'}`}>
+                className={`w-full h-14 flex items-center justify-center gap-3 rounded-[22px] bg-white text-[#0f172a] font-black text-[15px] sm:text-[16px] uppercase tracking-tight transition-all hover:scale-[1.01] hover:bg-zinc-100 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4F01] focus-visible:ring-offset-2 disabled:opacity-70 disabled:cursor-wait ${isDarkMode ? 'focus-visible:ring-offset-black' : 'ring-1 ring-slate-200 shadow-sm focus-visible:ring-offset-slate-50'}`}>
                  {isGoogleLoading ? (
-                   <div className="w-[18px] h-[18px] border-2 border-zinc-500/30 border-t-zinc-400 rounded-full animate-spin" />
+                   <div className="w-[22px] h-[22px] border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
                  ) : (
-                 <svg viewBox="0 0 24 24" aria-hidden="true" className="w-[18px] h-[18px] shrink-0" fill="none">
+                 <svg viewBox="0 0 24 24" aria-hidden="true" className="w-[22px] h-[22px] shrink-0" fill="none">
                    <path d="M21.35 11.1H12v2.95h5.35c-.23 1.22-.94 2.25-2 2.94v2.44h3.24c1.9-1.75 2.99-4.34 2.99-7.43 0-.72-.07-1.41-.23-1.98Z" fill="#4285F4" />
                    <path d="M12 22c2.7 0 4.97-.9 6.63-2.57l-3.24-2.44c-.9.6-2.06.96-3.39.96-2.6 0-4.81-1.75-5.6-4.1H2.99v2.56A10 10 0 0 0 12 22Z" fill="#34A853" />
                    <path d="M6.4 13.85A6 6 0 0 1 6.4 10.15V7.59H2.99a10 10 0 0 0 0 8.82l3.41-2.56Z" fill="#FBBC05" />
                    <path d="M12 5.96c1.47 0 2.79.51 3.84 1.5l2.88-2.88C16.96 2.78 14.7 1.75 12 1.75A10 10 0 0 0 2.99 7.59l3.41 2.56C7.19 7.71 9.4 5.96 12 5.96Z" fill="#EA4335" />
                  </svg>
                  )}
-                 <span>{isGoogleLoading ? 'Connecting to Google…' : 'Continue with Google'}</span>
+                 <span>{isGoogleLoading ? 'CONNECTING TO GOOGLE…' : 'CONTINUE WITH GOOGLE'}</span>
               </button>
           </div>
 
