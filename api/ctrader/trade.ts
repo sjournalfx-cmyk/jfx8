@@ -44,7 +44,7 @@ function getCredentials() {
   };
 }
 
-const PT = {
+export const PT = {
   APPLICATION_AUTH_REQ: 2100,
   ACCOUNT_AUTH_REQ: 2102,
   NEW_ORDER_REQ: 2106,
@@ -52,24 +52,57 @@ const PT = {
   AMEND_ORDER_REQ: 2109,
   AMEND_POSITION_SLTP_REQ: 2110,
   CLOSE_POSITION_REQ: 2111,
+  ASSET_LIST_REQ: 2112,
   SYMBOLS_LIST_REQ: 2114,
+  SYMBOL_BY_ID_REQ: 2116,
+  SYMBOLS_FOR_CONVERSION_REQ: 2118,
   TRADER_REQ: 2121,
   RECONCILE_REQ: 2124,
   SUBSCRIBE_SPOTS_REQ: 2127,
   UNSUBSCRIBE_SPOTS_REQ: 2129,
+  DEAL_LIST_REQ: 2133,
   GET_TRENDBARS_REQ: 2137,
   EXPECTED_MARGIN_REQ: 2139,
   CASH_FLOW_HISTORY_LIST_REQ: 2143,
+  GET_TICKDATA_REQ: 2145,
   GET_ACCOUNTS_BY_TOKEN_REQ: 2149,
   GET_CTID_PROFILE_BY_TOKEN_REQ: 2151,
+  ASSET_CLASS_LIST_REQ: 2153,
+  SYMBOL_CATEGORY_REQ: 2160,
+  MARGIN_CALL_LIST_REQ: 2167,
+  ORDER_LIST_REQ: 2175,
+  GET_DYNAMIC_LEVERAGE_REQ: 2177,
+  DEAL_LIST_BY_POSITION_ID_REQ: 2179,
+  ORDER_DETAILS_REQ: 2181,
+  ORDER_LIST_BY_POSITION_ID_REQ: 2183,
+  DEAL_OFFSET_LIST_REQ: 2185,
+  GET_POSITION_UNREALIZED_PNL_REQ: 2187,
   ERROR_RES: 2142,
 };
 
-const BROWSER_PROXY_PAYLOAD_TYPES = new Set<number>([
+// One-shot reads the web terminal may request through the `proxy` action. The
+// server still supplies credentials and forcibly overwrites
+// ctidTraderAccountId below, so these cannot target another account.
+export const BROWSER_PROXY_PAYLOAD_TYPES = new Set<number>([
   PT.SYMBOLS_LIST_REQ,
+  PT.SYMBOL_BY_ID_REQ,
+  PT.SYMBOLS_FOR_CONVERSION_REQ,
+  PT.ASSET_LIST_REQ,
+  PT.ASSET_CLASS_LIST_REQ,
+  PT.SYMBOL_CATEGORY_REQ,
   PT.TRADER_REQ,
   PT.RECONCILE_REQ,
+  PT.DEAL_LIST_REQ,
+  PT.ORDER_LIST_REQ,
+  PT.DEAL_LIST_BY_POSITION_ID_REQ,
+  PT.ORDER_LIST_BY_POSITION_ID_REQ,
+  PT.ORDER_DETAILS_REQ,
+  PT.DEAL_OFFSET_LIST_REQ,
+  PT.MARGIN_CALL_LIST_REQ,
+  PT.GET_DYNAMIC_LEVERAGE_REQ,
+  PT.GET_POSITION_UNREALIZED_PNL_REQ,
   PT.GET_TRENDBARS_REQ,
+  PT.GET_TICKDATA_REQ,
   PT.EXPECTED_MARGIN_REQ,
   PT.CASH_FLOW_HISTORY_LIST_REQ,
   PT.GET_CTID_PROFILE_BY_TOKEN_REQ,
@@ -749,7 +782,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!BROWSER_PROXY_PAYLOAD_TYPES.has(payloadType)) {
         session.close();
         await auditLog(400);
-        res.status(400).json({ error: 'Unsupported cTrader browser operation.' });
+        res.status(400).json({
+          error: 'unsupported_browser_operation',
+          message: 'This cTrader view is not available in the web terminal yet. Your account is still connected.',
+          reason: 'Unsupported cTrader browser operation.',
+          payloadType,
+        });
         return;
       }
       if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {

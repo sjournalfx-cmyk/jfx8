@@ -1046,7 +1046,20 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
         if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
 
         const TOKEN_PATTERN = /^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/;
-        const PT_DEV = { APPLICATION_AUTH_REQ: 2100, ACCOUNT_AUTH_REQ: 2102, NEW_ORDER_REQ: 2106, CANCEL_ORDER_REQ: 2108, AMEND_ORDER_REQ: 2109, AMEND_POSITION_SLTP_REQ: 2110, CLOSE_POSITION_REQ: 2111, SYMBOLS_LIST_REQ: 2114, TRADER_REQ: 2121, RECONCILE_REQ: 2124, SUBSCRIBE_SPOTS_REQ: 2127, UNSUBSCRIBE_SPOTS_REQ: 2129, SPOT_EVENT: 2131, GET_TRENDBARS_REQ: 2137, EXPECTED_MARGIN_REQ: 2139, CASH_FLOW_HISTORY_LIST_REQ: 2143, GET_ACCOUNTS_BY_TOKEN_REQ: 2149, GET_CTID_PROFILE_BY_TOKEN_REQ: 2151, HEARTBEAT_EVENT: 51, ERROR_RES: 2142 };
+        const PT_DEV = {
+          APPLICATION_AUTH_REQ: 2100, ACCOUNT_AUTH_REQ: 2102, NEW_ORDER_REQ: 2106,
+          CANCEL_ORDER_REQ: 2108, AMEND_ORDER_REQ: 2109, AMEND_POSITION_SLTP_REQ: 2110,
+          CLOSE_POSITION_REQ: 2111, ASSET_LIST_REQ: 2112, SYMBOLS_LIST_REQ: 2114,
+          SYMBOL_BY_ID_REQ: 2116, SYMBOLS_FOR_CONVERSION_REQ: 2118, TRADER_REQ: 2121,
+          RECONCILE_REQ: 2124, SUBSCRIBE_SPOTS_REQ: 2127, UNSUBSCRIBE_SPOTS_REQ: 2129,
+          SPOT_EVENT: 2131, DEAL_LIST_REQ: 2133, GET_TRENDBARS_REQ: 2137,
+          EXPECTED_MARGIN_REQ: 2139, CASH_FLOW_HISTORY_LIST_REQ: 2143, GET_TICKDATA_REQ: 2145,
+          GET_ACCOUNTS_BY_TOKEN_REQ: 2149, GET_CTID_PROFILE_BY_TOKEN_REQ: 2151,
+          ASSET_CLASS_LIST_REQ: 2153, SYMBOL_CATEGORY_REQ: 2160, MARGIN_CALL_LIST_REQ: 2167,
+          ORDER_LIST_REQ: 2175, GET_DYNAMIC_LEVERAGE_REQ: 2177, DEAL_LIST_BY_POSITION_ID_REQ: 2179,
+          ORDER_DETAILS_REQ: 2181, ORDER_LIST_BY_POSITION_ID_REQ: 2183, DEAL_OFFSET_LIST_REQ: 2185,
+          GET_POSITION_UNREALIZED_PNL_REQ: 2187, HEARTBEAT_EVENT: 51, ERROR_RES: 2142,
+        };
         const toVolumeCentsDev = (v) => v >= 500 ? Math.round(v * 100) : Math.round(v * 10000000);
         const hashTokenDev = (raw) => { try { const c = _require('crypto'); return c.createHash('sha256').update(raw).digest('hex'); } catch { return raw; } };
         const openCtraderSessionDev = (host, clientId, clientSecret, ctidTraderAccountId, accessToken, timeoutMs = 25000) => new Promise((resolve, reject) => {
@@ -1322,17 +1335,37 @@ const readCtraderEnvScoped = (key) => readCtraderEnv(key);
           }
           if (action === 'proxy') {
             const allowedPayloadTypes = new Set([
-              PT_DEV.SYMBOLS_LIST_REQ, PT_DEV.TRADER_REQ, PT_DEV.RECONCILE_REQ,
-              PT_DEV.GET_TRENDBARS_REQ, PT_DEV.EXPECTED_MARGIN_REQ,
-              PT_DEV.CASH_FLOW_HISTORY_LIST_REQ, PT_DEV.GET_CTID_PROFILE_BY_TOKEN_REQ,
+              PT_DEV.SYMBOLS_LIST_REQ, PT_DEV.SYMBOL_BY_ID_REQ,
+              PT_DEV.SYMBOLS_FOR_CONVERSION_REQ, PT_DEV.ASSET_LIST_REQ,
+              PT_DEV.ASSET_CLASS_LIST_REQ, PT_DEV.SYMBOL_CATEGORY_REQ,
+              PT_DEV.TRADER_REQ, PT_DEV.RECONCILE_REQ,
+              PT_DEV.DEAL_LIST_REQ, PT_DEV.ORDER_LIST_REQ,
+              PT_DEV.DEAL_LIST_BY_POSITION_ID_REQ, PT_DEV.ORDER_LIST_BY_POSITION_ID_REQ,
+              PT_DEV.ORDER_DETAILS_REQ, PT_DEV.DEAL_OFFSET_LIST_REQ,
+              PT_DEV.MARGIN_CALL_LIST_REQ, PT_DEV.GET_DYNAMIC_LEVERAGE_REQ,
+              PT_DEV.GET_POSITION_UNREALIZED_PNL_REQ,
+              PT_DEV.GET_TRENDBARS_REQ, PT_DEV.GET_TICKDATA_REQ,
+              PT_DEV.EXPECTED_MARGIN_REQ, PT_DEV.CASH_FLOW_HISTORY_LIST_REQ,
+              PT_DEV.GET_CTID_PROFILE_BY_TOKEN_REQ,
               PT_DEV.NEW_ORDER_REQ, PT_DEV.CANCEL_ORDER_REQ, PT_DEV.AMEND_ORDER_REQ,
               PT_DEV.AMEND_POSITION_SLTP_REQ, PT_DEV.CLOSE_POSITION_REQ,
             ]);
             const payloadType = Number(body.payloadType);
-            if (!isBrowserSession || !allowedPayloadTypes.has(payloadType)) {
+            if (!isBrowserSession) {
               session.close();
               res.statusCode = 403;
-              res.end(JSON.stringify({ error: 'A signed-in web session and supported browser operation are required.' }));
+              res.end(JSON.stringify({ error: 'A signed-in web session is required for proxy requests.' }));
+              return;
+            }
+            if (!allowedPayloadTypes.has(payloadType)) {
+              session.close();
+              res.statusCode = 400;
+              res.end(JSON.stringify({
+                error: 'unsupported_browser_operation',
+                message: 'This cTrader view is not available in the web terminal yet. Your account is still connected.',
+                reason: 'Unsupported cTrader browser operation.',
+                payloadType,
+              }));
               return;
             }
             if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {

@@ -1635,6 +1635,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     const [traderDetails, setTraderDetails] = useState<any>(null);
     const [symbolsList, setSymbolsList] = useState<any[]>([]);
     const [detailsError, setDetailsError] = useState('');
+    const [detailsErrorSoft, setDetailsErrorSoft] = useState(false);
     
     // Tab state
     const [activeTab, setActiveTab] = useState<'overview' | 'positions' | 'history' | 'market' | 'logs'>('overview');
@@ -2270,6 +2271,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
         const id = acc.ctidTraderAccountId;
         setIsLoadingDetails(true);
         setDetailsError('');
+        setDetailsErrorSoft(false);
         try {
             const { getPositions, getClosedDeals, getPendingOrders, getTrader, getSymbolsList } = await import('../services/ctraderService');
             const isDemo = !!acc.isDemo;
@@ -2303,7 +2305,16 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                 setMarginCalcSymbolId(prev => prev || sortedSymbols[0].symbolId.toString());
             }
         } catch (e: any) {
-            setDetailsError(e.message || 'Failed to load account details');
+            const raw = String(e?.message || 'Failed to load account details');
+            const unsupported = e?.code === 'unsupported_browser_operation'
+                || /unsupported ctrader browser operation/i.test(raw);
+            if (unsupported) {
+                const reason = String(e?.data?.reason || raw).replace(/\.$/, '');
+                setDetailsError(`${reason}. This view isn't available in the web terminal yet — your cTrader connection is still active.`);
+                setDetailsErrorSoft(true);
+            } else {
+                setDetailsError(raw);
+            }
         } finally {
             setIsLoadingDetails(false);
         }
@@ -3371,7 +3382,9 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
                                             )}
 
                                             {detailsError && (
-                                                <div className="flex items-start gap-2.5 px-4 py-4 bg-rose-500/5 text-rose-400 text-xs border-b border-white/5">
+                                                <div className={`flex items-start gap-2.5 px-4 py-4 text-xs border-b border-white/5 ${
+                                                    detailsErrorSoft ? 'bg-amber-500/5 text-amber-300' : 'bg-rose-500/5 text-rose-400'
+                                                }`}>
                                                     <AlertCircle size={14} className="mt-0.5 shrink-0" />
                                                     <span>{detailsError}</span>
                                                 </div>
