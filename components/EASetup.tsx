@@ -25,6 +25,7 @@ import { persistentGetSync, persistentSet } from '../lib/persistentStore';
 import { useToast } from './ui/Toast';
 import ConfirmationModal from './ConfirmationModal';
 import { PhasedLoader } from './ui/PhasedLoader';
+import { DESKTOP_BRIDGE_ENABLED } from '../config/features';
 
 /** Phases shown while the cTrader account details load after connect/sync. */
 const CTRADER_SYNC_PHASES = [
@@ -165,6 +166,12 @@ const Bridge: React.FC<BridgeProps> = ({ isDarkMode, userProfile, onUpdateProfil
             }
         }
     }, [eaSession]);
+
+    // A saved bridge mode must never restart setup while the feature is off.
+    // Existing connected bridges still fall through to the live monitor.
+    if (!DESKTOP_BRIDGE_ENABLED && connectionMode === 'bridge' && !isInternalConnected && !isDemoMode) {
+        return <MethodChoice onSelect={updateConnectionMode} onImportTrades={onImportTrades} isDarkMode={isDarkMode} isDemoMode={isDemoMode} />;
+    }
 
     if (connectionMode === 'ctrader') {
         return <CtraderConnect
@@ -362,11 +369,14 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
         return CTRADER_BROKERS.filter(b => b.name.toLowerCase().includes(q));
     }, [brokerQuery]);
     const options = [
-        // Desktop Bridge omitted in demo mode — demo needs no terminal connection.
-        ...(!isDemoMode ? [{
+        // Desktop Bridge is always rendered while disabled so the entry point
+        // is visibly unavailable, but never selectable. Demo mode keeps the
+        // old behaviour (hidden) when the feature is enabled.
+        ...((!isDemoMode || !DESKTOP_BRIDGE_ENABLED) ? [{
             id: 'bridge' as const,
             title: 'Desktop Bridge',
             subtitle: 'EA Terminal Bridge',
+            disabled: !DESKTOP_BRIDGE_ENABLED,
             icon: (
                 <img src="/icon2.png" alt="Desktop Bridge" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
             ),
@@ -384,6 +394,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             id: 'ctrader' as const,
             title: 'cTrader',
             subtitle: 'Open API Sync',
+            disabled: false,
             icon: (
                 <img src="/icon3.jpeg" alt="cTrader" className="w-10 h-10 lg:w-11 lg:h-11 object-contain" />
             ),
@@ -401,6 +412,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
             id: 'csv' as const,
             title: 'Import CSV',
             subtitle: 'Trade Journal File',
+            disabled: false,
             icon: (
                 <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M8 3h8l4 4v14H4V3h4z" />
@@ -422,6 +434,7 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
     ];
 
     const handleCardClick = async (opt: typeof options[number]) => {
+        if (opt.disabled) return;
         if (opt.id === 'csv') {
             csvInputRef.current?.click();
             return;
@@ -465,19 +478,25 @@ const MethodChoice: React.FC<MethodChoiceProps> = ({ onSelect, onImportTrades, i
                         <div
                             key={opt.id}
                             role="button"
-                            tabIndex={0}
+                            tabIndex={opt.disabled ? -1 : 0}
+                            aria-disabled={opt.disabled}
                             onClick={() => void handleCardClick(opt)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void handleCardClick(opt); } }}
+                            onKeyDown={(e) => {
+                                if (opt.disabled) return;
+                                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void handleCardClick(opt); }
+                            }}
                             style={{
                                 animationDelay: `${idx * 150}ms`,
                                 animationFillMode: 'both'
                             } as React.CSSProperties}
-                            className={`group relative text-left w-full rounded-3xl border bg-[#000000] p-6 lg:p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 cursor-pointer ${
-                                opt.id === 'bridge'
-                                    ? 'border-white/10 hover:border-[#FF4F01]/40'
-                                    : opt.id === 'ctrader'
-                                    ? 'border-white/10 hover:border-[#FF4F00]/40'
-                                    : 'border-white/10 hover:border-[#8B5CF6]/40'
+                            className={`group relative text-left w-full rounded-3xl border bg-[#000000] p-6 lg:p-8 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 ${
+                                opt.disabled
+                                    ? 'opacity-50 cursor-not-allowed border-white/10'
+                                    : opt.id === 'bridge'
+                                        ? 'cursor-pointer border-white/10 hover:border-[#FF4F01]/40'
+                                        : opt.id === 'ctrader'
+                                            ? 'cursor-pointer border-white/10 hover:border-[#FF4F00]/40'
+                                            : 'cursor-pointer border-white/10 hover:border-[#8B5CF6]/40'
                             }`}
                         >
                             {/* Content */}

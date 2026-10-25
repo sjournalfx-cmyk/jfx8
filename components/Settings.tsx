@@ -33,6 +33,7 @@ import { normalizeThemePreference } from '../lib/theme';
 import { getDefaultTimezone } from '../lib/timeUtils';
 import { ApiKeysPanel } from './ApiKeysPanel';
 import ConfirmationModal from './ConfirmationModal';
+import { DESKTOP_BRIDGE_ENABLED } from '../config/features';
 
 const freeAvatars = [
   'https://api.dicebear.com/7.x/bottts/svg?seed=1&backgroundColor=f1f5f9',
@@ -316,6 +317,7 @@ const Settings: React.FC<SettingsProps> = ({
   const compactLabelClass = 'text-[10px] font-black uppercase tracking-[0.2em] opacity-50 block mb-1.5';
 
   const currentTab = tabs.find((tab) => tab.id === effectiveTab) ?? visibleTabs[0] ?? tabs[0];
+  const bridgeEntryDisabled = !DESKTOP_BRIDGE_ENABLED;
 
   const renderPlanProgress = (value: number, limit: number) => (
     <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDarkMode ? 'bg-white/[0.08]' : 'bg-slate-200'}`}>
@@ -720,7 +722,10 @@ const Settings: React.FC<SettingsProps> = ({
                 </section>
 
                 {formData.syncMethod === 'EA_CONNECT' && (
-                  <section className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'}`}>
+                  <section
+                    aria-disabled={bridgeEntryDisabled}
+                    className={`rounded-3xl border p-5 ${isDarkMode ? 'border-white/[0.08] bg-black/20' : 'border-slate-200 bg-white'} ${bridgeEntryDisabled ? 'opacity-50' : ''}`}
+                  >
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-[0.22em] opacity-40">Sync Key</p>
@@ -730,12 +735,16 @@ const Settings: React.FC<SettingsProps> = ({
                           </code>
                           <button
                             onClick={handleCopyKey}
+                            disabled={bridgeEntryDisabled}
+                            aria-disabled={bridgeEntryDisabled}
                             className={`rounded-xl border px-2.5 py-2.5 transition-all ${
-                              copiedKey
-                                ? 'border-emerald-500 bg-emerald-500 text-white'
-                                : isDarkMode
-                                  ? 'border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06]'
-                                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
+                              bridgeEntryDisabled
+                                ? 'cursor-not-allowed'
+                                : copiedKey
+                                  ? 'border-emerald-500 bg-emerald-500 text-white'
+                                  : isDarkMode
+                                    ? 'border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06]'
+                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
                             }`}
                             title="Copy sync key"
                           >
@@ -743,10 +752,14 @@ const Settings: React.FC<SettingsProps> = ({
                           </button>
                           <button
                             onClick={() => setShowRegenSyncKeyConfirm(true)}
+                            disabled={bridgeEntryDisabled}
+                            aria-disabled={bridgeEntryDisabled}
                             className={`rounded-xl border px-2.5 py-2.5 transition-all ${
-                              isDarkMode
-                                ? 'border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06]'
-                                : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
+                              bridgeEntryDisabled
+                                ? 'cursor-not-allowed'
+                                : isDarkMode
+                                  ? 'border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06]'
+                                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
                             }`}
                             title="Regenerate sync key"
                           >
@@ -766,8 +779,12 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                         <button
                           onClick={() => setFormData({ ...formData, autoJournal: !formData.autoJournal })}
+                          disabled={bridgeEntryDisabled}
+                          aria-disabled={bridgeEntryDisabled}
                           className={`relative h-7 w-14 rounded-full transition-all ${
-                            formData.autoJournal ? 'bg-emerald-500' : 'bg-black'
+                            bridgeEntryDisabled
+                              ? 'cursor-not-allowed'
+                              : formData.autoJournal ? 'bg-emerald-500' : 'bg-black'
                           }`}
                         >
                           <span

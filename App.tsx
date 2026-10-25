@@ -38,6 +38,8 @@ import { getSafePnL } from './lib/trade-normalization';
 import { normalizeThemePreference } from './lib/theme';
 import { demoDailyBias, demoEASession, demoNotes, demoTrades, getDemoProfile } from './lib/demoData';
 import { resolveBridgeBackedBalance } from './lib/bridgeBalance';
+import { DESKTOP_BRIDGE_ENABLED } from './config/features';
+import { viewAfterPortfolioCreate } from './lib/portfolioCreation';
 
 // Lazy load heavy components for performance. These views pull in tiptap,
 // lightweight-charts, EASetup's broker stack, and the mobile shell's own
@@ -280,14 +282,15 @@ const {
     await updatePortfolio(portfolioId, { accounts: [{ provider: account.provider, externalAccountId: account.externalAccountId }] });
   }, [updatePortfolio]);
 
-  // Create -> if cTrader/bridge, jump straight to its connector (less confusion).
+  // Create -> cTrader jumps straight to Log Trade (its empty state opens the
+  // connector); bridge keeps the legacy connector jump while it is enabled.
   const handleAddPortfolioAndConnect = useCallback(async (input: { name: string; description?: string; purpose?: Portfolio['purpose']; source?: Portfolio['source']; startingBalance?: number; currency?: string }) => {
     const created = await addPortfolio(input);
-    if ((created.source || 'manual') !== 'manual') {
-      setCurrentView('ea-setup');
-    }
+    setActivePortfolioId(created.id);
+    const nextView = viewAfterPortfolioCreate(created.source || 'manual');
+    if (nextView) setCurrentView(nextView);
     return created;
-  }, [addPortfolio]);
+  }, [addPortfolio, setActivePortfolioId]);
 
   const linkPortfolio = activePortfolio && (activePortfolio.source || 'manual') !== 'manual' ? activePortfolio : null;
   const isCtraderPortfolio = (activePortfolio?.source || 'manual') === 'ctrader';
@@ -1391,7 +1394,7 @@ const onLogout = async () => {
   if (!userProfile || !userProfile.onboarded) {
     return <Onboarding isDarkMode={isDarkMode} onComplete={async (profile) => {
       await handleOnboardingComplete(profile);
-      setCurrentView(profile.syncMethod === 'EA_CONNECT' ? 'ea-setup' : 'dashboard');
+      setCurrentView(profile.syncMethod === 'EA_CONNECT' && DESKTOP_BRIDGE_ENABLED ? 'ea-setup' : 'dashboard');
       setTrades([]);
     }} onExploreDemo={() => {
       // Enter demo immediately; a real profile gets created when the user

@@ -11,6 +11,7 @@ import { MobileFilterModal, MobileFilterState } from './MobileFilterModal';
 import { ChevronLeft } from 'lucide-react';
 import { BrandedLoader } from '../ui/BrandedLoader';
 import { safeLazy } from '../../lib/safeLazy';
+import { viewAfterPortfolioCreate } from '../../lib/portfolioCreation';
 
 const BacktestLab = safeLazy(() => import('../BacktestLab'));
 // Code-split: the AI chat (and its markdown + generative-UI deps) loads only
@@ -261,13 +262,13 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   const isCtraderPortfolio = activeSource === 'ctrader';
   // The portfolio we are currently linking (only non-manual actives need a connect screen).
   const linkPortfolio = activePortfolio && activeSource !== 'manual' ? activePortfolio : null;
-  // Create → immediately open the connector so users never wonder "now what?".
+  // Create -> cTrader lands on Log Trade (its empty state opens the connector);
+  // bridge keeps the legacy connector jump while it is enabled.
   const handleCreatePortfolio: typeof onAddPortfolio = async (input) => {
     if (!onAddPortfolio) throw new Error('Portfolios unavailable right now.');
     const created = await onAddPortfolio(input);
-    if ((created.source || 'manual') !== 'manual') {
-      onViewChange('ea-setup');
-    }
+    const nextView = viewAfterPortfolioCreate(created.source || 'manual');
+    if (nextView) onViewChange(nextView);
     return created;
   };
 

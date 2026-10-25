@@ -6,6 +6,7 @@ import {
   PROP_FIRM_PARTNERS,
   type PartnerLink,
 } from '../../config/partnerLinks';
+import { DESKTOP_BRIDGE_ENABLED } from '../../config/features';
 
 interface NoConnectionStateProps {
   /** Opens the existing connect flow used by the rest of the app. */
@@ -183,7 +184,11 @@ export const NoConnectionState: React.FC<NoConnectionStateProps> = ({ onConnect 
             <ConnectionCard
               icon={<SquarePlus size={40} strokeWidth={1.5} aria-hidden />}
               title="Connect broker / prop"
-              description="Already have a Deriv, cTrader or MT5 account? Connect it to log trades from here."
+              description={
+                DESKTOP_BRIDGE_ENABLED
+                  ? 'Already have a Deriv, cTrader or MT5 account? Connect it to log trades from here.'
+                  : 'Already have a Deriv or cTrader account? Connect it to log trades from here.'
+              }
               glow={NEUTRAL_GLOW}
               onClick={() => onConnect?.()}
             />

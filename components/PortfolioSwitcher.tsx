@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Layers, CheckCircle2, Plus, Trash2, X, Pencil, Link2, Radio, Wallet } from 'lucide-react';
 import { Portfolio, PortfolioSource, PortfolioPurpose, MAX_PORTFOLIOS } from '../types';
 import { haptic } from '../lib/haptics';
+import { DESKTOP_BRIDGE_ENABLED } from '../config/features';
 
 const SOURCES: { id: PortfolioSource; label: string; hint: string; icon: React.ElementType }[] = [
   { id: 'manual', label: 'Manual + Imports', hint: 'Hand-log & CSV files', icon: Pencil },
@@ -250,30 +251,39 @@ export const PortfolioSwitcher: React.FC<PortfolioSwitcherProps> = ({
           <div>
             <label className={labelClass}>Connection</label>
             <div className="space-y-1.5">
-              {SOURCES.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => { setSource(s.id); if (s.id !== 'manual') setStartingBalance(''); }}
-                  className={`w-full p-2 rounded-xl border flex items-center gap-2.5 text-left transition-all ${
-                    source === s.id
-                      ? 'border-[#FF4F01]/70 bg-[#FF4F01]/[0.08]'
-                      : dark ? 'border-white/10 hover:border-white/25' : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <s.icon size={15} className={source === s.id ? 'text-[#FF4F01]' : 'opacity-50'} />
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-bold ${dark ? 'text-white' : 'text-slate-900'}`}>{s.label}</p>
-                    <p className="text-[10px] opacity-60">{s.hint}</p>
-                  </div>
-                  {source === s.id && <CheckCircle2 size={14} className="text-[#FF4F01] shrink-0" />}
-                </button>
-              ))}
+              {SOURCES.map(s => {
+                const isBridgeDisabled = s.id === 'bridge' && !DESKTOP_BRIDGE_ENABLED;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      if (isBridgeDisabled) return;
+                      setSource(s.id);
+                      if (s.id !== 'manual') setStartingBalance('');
+                    }}
+                    disabled={isBridgeDisabled}
+                    aria-disabled={isBridgeDisabled}
+                    className={`w-full p-2 rounded-xl border flex items-center gap-2.5 text-left transition-all ${
+                      isBridgeDisabled
+                        ? `opacity-50 cursor-not-allowed ${dark ? 'border-white/10' : 'border-slate-200'}`
+                        : source === s.id
+                          ? 'border-[#FF4F01]/70 bg-[#FF4F01]/[0.08]'
+                          : dark ? 'border-white/10 hover:border-white/25' : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <s.icon size={15} className={source === s.id && !isBridgeDisabled ? 'text-[#FF4F01]' : 'opacity-50'} />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-bold ${dark ? 'text-white' : 'text-slate-900'}`}>{s.label}</p>
+                      <p className="text-[10px] opacity-60">{s.hint}</p>
+                    </div>
+                    {source === s.id && !isBridgeDisabled && <CheckCircle2 size={14} className="text-[#FF4F01] shrink-0" />}
+                  </button>
+                );
+              })}
             </div>
             {source !== 'manual' && (
               <p className="mt-1.5 text-[10px] opacity-60 leading-snug">
-                {source === 'ctrader'
-                  ? 'After creating, link your cTrader account from Sync settings. One account per portfolio.'
-                  : 'After creating, pair this portfolio with your Bridge sync key from EA Setup.'}
+                After creating, you'll pick a broker or connect your cTrader account. One account per portfolio.
               </p>
             )}
           </div>

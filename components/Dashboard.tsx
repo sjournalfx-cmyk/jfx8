@@ -38,6 +38,7 @@ import { sortTradesChronologically } from '../lib/analyticsUtils';
 import { APP_CONSTANTS, normalizePlan } from '../lib/constants';
 import { haptic } from '../lib/haptics';
 import { fetchEconomicCalendar, getCalendarWindow } from '../lib/economicCalendarClient';
+import { DESKTOP_BRIDGE_ENABLED } from '../config/features';
 
 const safePnL = (value: unknown): number => {
     const n = typeof value === 'number' ? value : Number(value);
@@ -146,8 +147,18 @@ const EASetupPrompt = ({ isDarkMode, onSetupClick }: { isDarkMode: boolean, onSe
             </div>
         </div>
         <button
-            onClick={() => { try { haptic.light(); } catch {} onSetupClick(); }}
-            className="min-h-[44px] w-full md:w-auto justify-center px-6 sm:px-8 py-3 sm:py-4 bg-indigo-500 hover:bg-indigo-600 active:scale-[0.98] text-white rounded-2xl font-black text-sm transition-all hover:scale-[1.02] shadow-xl shadow-indigo-500/20 flex items-center gap-2 shrink-0 touch-manipulation"
+            onClick={() => {
+                if (!DESKTOP_BRIDGE_ENABLED) return;
+                try { haptic.light(); } catch {}
+                onSetupClick();
+            }}
+            disabled={!DESKTOP_BRIDGE_ENABLED}
+            aria-disabled={!DESKTOP_BRIDGE_ENABLED}
+            className={`min-h-[44px] w-full md:w-auto justify-center px-6 sm:px-8 py-3 sm:py-4 bg-indigo-500 text-white rounded-2xl font-black text-sm transition-all shadow-xl shadow-indigo-500/20 flex items-center gap-2 shrink-0 touch-manipulation ${
+                DESKTOP_BRIDGE_ENABLED
+                    ? 'hover:bg-indigo-600 active:scale-[0.98] hover:scale-[1.02]'
+                    : 'opacity-50 cursor-not-allowed'
+            }`}
         >
             Setup Guide <ArrowRight size={18} />
         </button>
