@@ -51,13 +51,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
     const userId = auth.ok ? auth.userId : undefined;
     if (userId && supabaseUrl && serviceKey) {
-      await fetch(
-        `${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${encodeURIComponent(userId)}`,
-        {
-          method: 'DELETE',
-          headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-        },
-      );
+      const headers = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+      const [tokenRow, legacyRow] = await Promise.all([
+        fetch(
+          `${supabaseUrl}/rest/v1/user_ctrader_tokens?user_id=eq.${encodeURIComponent(userId)}`,
+          { method: 'DELETE', headers, signal: AbortSignal.timeout(10000) },
+        ),
+        // The legacy per-user service_config mirror is still readable by the
+        // API-key mint path during migration. Revoke it too, otherwise a
+        // "disconnect" leaves a usable refresh token behind.
+        fetch(
+          `${supabaseUrl}/rest/v1/service_config?key=eq.${encodeURIComponent(`ctrader_refresh_${userId}`)}`,
+          { method: 'DELETE', headers, signal: AbortSignal.timeout(10000) },
+        ),
+      ]);
+      if (!tokenRow.ok || !legacyRow.ok) {
+        console.error('[cTrader] logout DB cleanup failed:', {
+          tokenRow: tokenRow.status,
+          legacyRow: legacyRow.status,
+        });
+      }
     }
   } catch (err) {
     console.error('[cTrader] logout DB cleanup failed:', err);
