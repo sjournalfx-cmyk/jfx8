@@ -173,9 +173,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const q = req.query;
   const rawSymbol = String(q.symbol || q.pair || q.instrument || q.ticker || '');
-  if (!rawSymbol) {
+  const rawSymbolId = Number(q.symbolId || q.symbol_id) || 0;
+  if (!rawSymbol && !rawSymbolId) {
     auditLog(400);
-    res.status(400).json({ error: "Query param 'symbol' is required, e.g. ?symbol=EURUSD&timeframe=H1" });
+    res.status(400).json({
+      error: "Query param 'symbol' (e.g. ?symbol=EURUSD) or 'symbolId' (e.g. ?symbolId=4) is required, plus ?timeframe=H1",
+    });
     return;
   }
   const resolvedTimeframe = resolveTimeframe(String(q.timeframe || 'H1'));
@@ -215,16 +218,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     session = await openCtraderSession(host, clientId, clientSecret, accountId, accessToken);
 
     const symbolsRes = await session.send(PT.SYMBOLS_LIST_REQ, { ctidTraderAccountId: accountId });
-    const resolved = resolveSymbolId(symbolsRes.symbol || [], rawSymbol);
-    if (!resolved) {
-      const suggestions = suggestSymbols(symbolsRes.symbol || [], rawSymbol);
-      session.close();
-      auditLog(400);
-      res.status(400).json({
-        error: `Symbol '${rawSymbol}' not found on account ${accountId}`,
-        ...(suggestions.length > 0 ? { suggestions } : {}),
-      });
-      return;
+    // Positions/orders return raw symbolIds, so agents may only know the id.
+    // Accept either param: a symbol name resolves via alias-aware
+    // resolveSymbolId; a bare numeric symbolId is matched directly.
+    let resolved: { symbolId: number; symbolName: string; digits: number } | null = null;
+    if (rawSymbol) {
+      resolved = resolveSymbolId(symbolsRes.symbol || [], rawSymbol);
+      if (!resolved) {
+        const suggestions = suggestSymbols(symbolsRes.symbol || [], rawSymbol);
+        session.close();
+        auditLog(400);
+        res.status(400).json({
+          error: `Symbol '${rawSymbol}' not found on account ${accountId}`,
+          ...(suggestions.length > 0 ? { suggestions } : {}),
+        });
+        return;
+      }
+    } else {
+      const byId = (symbolsRes.symbol || []).find((s: any) => Number((s as any).symbolId) === rawSymbolId);
+      if (!byId) {
+        session.close();
+        auditLog(400);
+        res.status(400).json({ error: `symbolId ${rawSymbolId} not found on account ${accountId}` });
+        return;
+      }
+      const name = String((byId as any).symbolName || (byId as any).name || rawSymbolId);
+      resolved = {
+        symbolId: rawSymbolId,
+        symbolName: name,
+        digits: Number.isFinite(Number((byId as any).digits))
+          ? Number((byId as any).digits)
+          : /JPY/.test(name) ? 3 : 5,
+      };
     }
 
     const payload: Record<string, any> = {
@@ -241,23 +266,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // cTrader trendbar prices are integers scaled by the symbol's digits —
     // use 10^digits (NOT a hardcoded 100000) so JPY pairs and synthetic
-    // indices decode correctly.
+    // indices decode correctly. The response emits real price units.
     const digits = resolved.digits;
     const divisor = Math.pow(10, digits);
-    const bars = ((barsRes.trendbar || []) as any[]).map((bar: any) => {
-      const low = Number(bar.low || 0) / divisor;
-      let time = 0;
-      if (bar.utcTimestampInMinutes) time = Number(bar.utcTimestampInMinutes) * 60;
-      else if (bar.utcTimestamp) time = Math.floor(Number(bar.utcTimestamp) / 1000);
-      else if (bar.timestamp) time = Math.floor(Number(bar.timestamp) / 1000);
-      return {
-        time,
-        open: Number((low + Number(bar.deltaOpen || 0) / divisor).toFixed(digits)),
-        high: Number((low + Number(bar.deltaHigh || 0) / divisor).toFixed(digits)),
-        low: Number(low.toFixed(digits)),
-        close: Number((low + Number(bar.deltaClose || 0) / divisor).toFixed(digits)),
-      };
-    }).sort((a, b) => a.time - b.time);
+    const decodeBars = (barsRes: any) =>
+      ((barsRes.trendbar || []) as any[]).map((bar: any) => {
+        const low = Number(bar.low || 0) / divisor;
+        let time = 0;
+        if (bar.utcTimestampInMinutes) time = Number(bar.utcTimestampInMinutes) * 60;
+        else if (bar.utcTimestamp) time = Math.floor(Number(bar.utcTimestamp) / 1000);
+        else if (bar.timestamp) time = Math.floor(Number(bar.timestamp) / 1000);
+        return {
+          time,
+          open: Number((low + Number(bar.deltaOpen || 0) / divisor).toFixed(digits)),
+          high: Number((low + Number(bar.deltaHigh || 0) / divisor).toFixed(digits)),
+          low: Number(low.toFixed(digits)),
+          close: Number((low + Number(bar.deltaClose || 0) / divisor).toFixed(digits)),
+        };
+      }).sort((a: any, b: any) => a.time - b.time);
+
+    let bars = decodeBars(barsRes);
+    // The feed intermittently answers "ok but empty" right after a period
+    // boundary or while its cache warms. One bounded retry has fixed real
+    // user reports of consecutive empty payloads; surface it if it repeats.
+    let retriedEmpty = false;
+    if (bars.length === 0 && !from && !to) {
+      await new Promise((r) => setTimeout(r, 400));
+      const retryRes = await session.send(PT.GET_TRENDBARS_REQ, payload);
+      bars = decodeBars(retryRes);
+      retriedEmpty = true;
+    }
 
     // Portfolio attribution so agents can tell which rule set (if any)
     // governs the account they just read candles from.
@@ -270,6 +308,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (ctx.locksUnchecked) warnings.push('locks_unchecked');
       if (ctx.portfolioIds.length > 1) warnings.push('multiple_portfolios_linked');
     }
+    if (bars.length === 0) warnings.push('no_bars_for_window');
+    else if (retriedEmpty) warnings.push('first_fetch_returned_no_bars_retried_ok');
 
     auditLog(200);
     res.status(200).json({
@@ -278,6 +318,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       symbolId: resolved.symbolId,
       timeframe,
       digits,
+      // All bar values are real price units (e.g. USDJPY close 157.217),
+      // NOT point-scaled integers. digits gives the display precision.
+      unit: 'price',
       accountId,
       isDemo,
       ...(ctx

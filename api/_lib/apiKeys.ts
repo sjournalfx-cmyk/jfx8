@@ -12,7 +12,35 @@ import { createHash } from 'crypto';
 
 export const JFX_PAT_PATTERN = /^jfx_pat_[a-z0-9]{8}_[A-Za-z0-9]{32}$/;
 
-export type ApiScope = 'trades:read' | 'trades:write';
+export type ApiScope =
+  | 'trades:read'
+  | 'trades:write'
+  | 'notes:read'
+  | 'notes:write'
+  | 'bridge:read'
+  | 'me:read'
+  | 'account:read'
+  | 'calendar:read'
+  | 'checklists:read'
+  | 'checklists:write'
+  | 'locks:read'
+  | 'locks:write';
+
+/** Every `*:write` scope implies its matching `*:read` — nothing else does. */
+const SCOPE_IMPLICATIONS: Record<ApiScope, ApiScope[]> = {
+  'trades:write': ['trades:read'],
+  'notes:write': ['notes:read'],
+  'checklists:write': ['checklists:read'],
+  'locks:write': ['locks:read'],
+  'trades:read': [],
+  'notes:read': [],
+  'bridge:read': [],
+  'me:read': [],
+  'account:read': [],
+  'calendar:read': [],
+  'checklists:read': [],
+  'locks:read': [],
+};
 
 export interface ApiKeyIdentity {
   keyId: string;
@@ -44,12 +72,14 @@ export function extractRawKey(
   return String(raw).replace(/^Bearer\s+/i, '').trim();
 }
 
-/** `trades:write` implies `trades:read`. */
+/** A held `*:write` satisfies the matching `*:read` (see SCOPE_IMPLICATIONS). */
 export function checkScopes(have: string[] | undefined | null, required: ApiScope): boolean {
   const scopes = Array.isArray(have) ? have : [];
   if (scopes.includes(required)) return true;
-  if (required === 'trades:read' && scopes.includes('trades:write')) return true;
-  return false;
+  // The required scope is satisfied when one of the HELD scopes implies it —
+  // not the other way around (holding the implied read scope must never
+  // satisfy the write scope itself).
+  return scopes.some((held) => (SCOPE_IMPLICATIONS as Record<string, ApiScope[]>)[held]?.includes(required));
 }
 
 /**
@@ -221,9 +251,9 @@ export async function verifyApiKey({
       need: requiredScope,
       have: scopes,
       hint:
-        requiredScope === 'trades:write'
-          ? 'Recreate the key in Settings → Developer Tools with trades:write enabled'
-          : 'Requires trades:read (or trades:write)',
+        requiredScope.endsWith(':write')
+          ? `Recreate the key in Settings → Developer Tools with ${requiredScope} enabled`
+          : `Requires ${requiredScope} (or the matching :write scope)`,
     };
   }
 

@@ -2,6 +2,7 @@
   "buildCommand": "vite build",
   "installCommand": "npm install",
   "rewrites": [
+    { "source": "/api/ctrader/candles", "destination": "/api/ctrader/trade?action=candles" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/features", "destination": "/features.html" },

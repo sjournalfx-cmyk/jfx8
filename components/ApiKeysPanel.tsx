@@ -6,7 +6,19 @@ import ConfirmationModal from './ConfirmationModal';
 import { describeApiError, formatRelativeTime, getApiKeyStatus } from '../lib/apiKeyUi';
 
 type ApiKey = { id: string; name: string; key_prefix: string; scopes: string[]; last_used_at: string | null; expires_at: string | null; created_at: string; status: 'active' | 'revoked'; revoked_at: string | null };
-type Scope = 'trades:read' | 'trades:write' | 'notes:read' | 'notes:write' | 'bridge:read' | 'me:read';
+type Scope =
+  | 'trades:read'
+  | 'trades:write'
+  | 'account:read'
+  | 'calendar:read'
+  | 'checklists:read'
+  | 'checklists:write'
+  | 'locks:read'
+  | 'locks:write'
+  | 'notes:read'
+  | 'notes:write'
+  | 'bridge:read'
+  | 'me:read';
 type CheckState = 'pass' | 'warn' | 'fail';
 type CheckKey = 'journal' | 'trading' | 'candles';
 type CheckResult = { state: CheckState; detail: string };
@@ -32,6 +44,27 @@ const scopeGroups: Array<{ label: string; items: Array<{ value: Scope; label: st
     items: [
       { value: 'trades:read', label: 'Read trades & analytics', desc: 'Query journal trades, metrics & win rates' },
       { value: 'trades:write', label: 'Trade execution & write trades', desc: 'Open, close & modify cTrader positions and log journal entries' },
+    ],
+  },
+  {
+    label: 'Account & Calendar',
+    items: [
+      { value: 'account:read', label: 'Read balance & equity', desc: 'Account balance, equity and margin from the connected cTrader account' },
+      { value: 'calendar:read', label: 'Read economic calendar', desc: 'Upcoming economic events with impact, forecast and previous values' },
+    ],
+  },
+  {
+    label: 'Checklists',
+    items: [
+      { value: 'checklists:read', label: 'Read checklists', desc: 'Read the strategy checklist templates and their items' },
+      { value: 'checklists:write', label: 'Write checklists', desc: 'Create and update checklist templates and items' },
+    ],
+  },
+  {
+    label: 'Trading Locks',
+    items: [
+      { value: 'locks:read', label: 'Read trading locks', desc: 'Inspect per-portfolio locks, cooldowns and pending changes' },
+      { value: 'locks:write', label: 'Write trading locks', desc: 'Enable, tighten or queue a change to the portfolio trading locks' },
     ],
   },
   {
@@ -106,18 +139,83 @@ Copy the FULL key (starts with \`jfx_pat_\`). Do not trim, wrap, or URL-encode i
 
 - Latest trade: \`GET /v1/trades?limit=1\`
 - Recent trades: \`GET /v1/trades?limit=20\`
+- Trades only open/live now: \`GET /v1/trades?status=open\` (alias \`?is_open=true\`; open trades have \`exit_price\` null)
+- Trades only closed: \`GET /v1/trades?status=closed\`
+- Slim response (drop embedded candles): \`GET /v1/trades?limit=20&include=candles:false\`; projection: \`&fields=id,pair,date,entry_price,exit_price,pnl,portfolio_id\`
+- Portfolio registry (canonical!): \`GET /v1/portfolios\` — \`id\`, \`name\`, linked accounts, trade counts; use these ids for \`/v1/locks/:portfolioId\`. The response also lists \`orphaned\` (portfolio ids referenced by trades but not in the registry) and \`unassigned\` (trades with \`portfolio_id\` null) so data drift is visible instead of silent
 - Trade summary: \`GET /v1/analytics/summary\`
 - Monthly summary: \`GET /v1/analytics/summary?from=YYYY-MM-DD&to=YYYY-MM-DD\`
 - Notes: \`GET /v1/notes?limit=20\` — requires \`notes:read\` (\`notes:write\` implies read)
-- Bridge health: \`GET /v1/bridge/status\` — requires \`bridge:read\`
+- Bridge health: \`GET /v1/bridge/status\` — requires \`bridge:read\`. A fresh state answers within \`stale: false\`; when \`stale: true\` treat the row as historical, not live — the bridge has not pushed for hours, or ever (\`stale_reason\`)
 - Open positions (MT5 bridge): \`GET /v1/positions\` — requires \`bridge:read\` or \`trades:read\`/\`trades:write\`
 - Me: \`GET /v1/me\` — requires \`me:read\`
 
-Scopes: \`trades:read\` for reads, \`trades:write\` for journal writes and cTrader execution (\`trades:write\` implies \`trades:read\`).
+Scopes: \`trades:read\` for reads, \`trades:write\` for journal writes and cTrader execution (\`trades:write\` implies \`trades:read\`). Optional scopes: \`account:read\` (balance/equity), \`calendar:read\` (economic calendar), \`checklists:read\`/\`checklists:write\` (strategy checklists), \`locks:read\`/\`locks:write\` (trading locks) — each \`:write\` implies its \`:read\`.
 
 Quick test (requires \`trades:read\`):
 \`\`\`bash
 curl -sS -H "X-API-Key: $JFX_KEY" "$JFX_BASE/v1/trades?limit=1"
+\`\`\`
+
+---
+
+## 1b. Economic Calendar (requires \`calendar:read\`)
+
+- This week: \`GET /v1/calendar\`
+- Date range: \`GET /v1/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD\`
+- Response: \`{ data: [{ event, currency, date, time, impact, forecast, previous, actual }] }\` — \`impact\` is \`High\`/\`Medium\`/\`Low\`/\`Holiday\`; \`actual\` is \`null\` until the event is released.
+
+\`\`\`bash
+curl -sS -H "X-API-Key: $JFX_KEY" "$JFX_BASE/v1/calendar"
+\`\`\`
+
+---
+
+## 1c. Checklists (requires \`checklists:read\` / \`checklists:write\`)
+
+The user's strategy checklists. Template shape:
+\`{ id, name, isActive, createdAt, updatedAt, items: [{ id, text, phase }] }\` — \`phase\` is \`pre-entry\`, \`in-trade\` or \`post-trade\`.
+
+- List all templates: \`GET /v1/checklists\`
+- One template: \`GET /v1/checklists/:templateId\`
+- Replace all templates: \`PUT /v1/checklists\` with \`{ "templates": [...] }\`
+- Create a template: \`POST /v1/checklists\` with \`{ "name": "...", "items": [...] }\`
+- Rename / activate: \`PATCH /v1/checklists/:templateId\` with \`{ "name": "...", "isActive": true }\`
+- Delete a template: \`DELETE /v1/checklists/:templateId\`
+- Add an item: \`POST /v1/checklists/:templateId/items\` with \`{ "text": "...", "phase": "pre-entry" }\`
+- Edit an item: \`PATCH /v1/checklists/:templateId/items/:itemId\` with \`{ "text": "...", "phase": "in-trade" }\`
+- Delete an item: \`DELETE /v1/checklists/:templateId/items/:itemId\`
+
+\`\`\`bash
+curl -sS -H "X-API-Key: $JFX_KEY" "$JFX_BASE/v1/checklists"
+\`\`\`
+
+---
+
+## 1d. Trading Locks (requires \`locks:read\` / \`locks:write\`)
+
+Per-portfolio hard limits: allowed pairs, max trades/day and lot-size range.
+Semantics (same as the app): tightening a live rule applies immediately; loosening a live rule is QUEUED for 24h (\`pendingChange\`); switching a rule off starts a 24h cooling countdown — the rule keeps enforcing until it elapses.
+
+- List every portfolio's locks: \`GET /v1/locks\`
+- One portfolio: \`GET /v1/locks/:portfolioId\`
+- Write rules: \`PUT /v1/locks/:portfolioId\` with any of \`pairWhitelist\`, \`maxTrades\`, \`lotGuard\`
+- Remove all locks: \`DELETE /v1/locks/:portfolioId\` (returns \`409 unlock_in_progress\` while a cooling countdown is running)
+
+\`\`\`json
+{
+  "pairWhitelist": { "enabled": true, "symbolIds": [12345, 12346] },
+  "maxTrades": { "enabled": true, "maxPerDay": 2 },
+  "lotGuard": { "enabled": true, "minLots": 0.01, "maxLots": 0.5 }
+}
+\`\`\`
+
+Each rule accepts \`enabled: false\` to request an unlock (24h cooling) — the response shows \`unlockRequestedAt\` and \`cooldownMsRemaining\`. A queued loosening shows up as \`pendingChange: { value, requestedAt }\`; it binds 24h after \`requestedAt\`.
+
+\`\`\`bash
+curl -sS -X PUT -H "X-API-Key: $JFX_KEY" -H "Content-Type: application/json" \\
+  -d '{"maxTrades":{"enabled":true,"maxPerDay":2}}' \\
+  "$JFX_BASE/v1/locks/PORTFOLIO_ID"
 \`\`\`
 
 ---
@@ -160,6 +258,7 @@ curl -sS -H "X-API-Key: $JFX_KEY" -H "Content-Type: application/json" \\
 curl -sS -H "X-API-Key: $JFX_KEY" -H "Content-Type: application/json" \\
   -d '{"action":"get_positions","isDemo":true}' "\${JFX_CTRADER_TRADE_URL:-${JFX_CTRADER_TRADE_URL}}"
 \`\`\`
+Response quality: \`symbol\` is the resolved broker name (raw symbolIds are translated via \`SYMBOLS_LIST\`; the full \`symbolNames\` map is echoed in the response). \`currentPrice\` is a live mid from the broker quote feed. \`profit\` is the broker-deposited value; when the feed hasn't supplied one yet it is a labelled estimate — \`profitEstimated: true\` + \`profitCurrency\` (quote currency), so convert or mark it as approximate.
 
 ### Step 4: Open Market / Limit / Stop Order
 Every \`open\` request from an API key MUST carry a fresh \`Idempotency-Key\` header (or \`idempotencyKey\` body field) — a UUID per order. Retrying the same request with the same key + identical params replays the stored result (\`deduplicated: true\`) instead of opening a second position. Same key + different params returns \`409 idempotency_conflict\`.
@@ -224,14 +323,25 @@ Symbol names resolve against the broker listing with exact match preferred (\`EU
 
 Only execute trading actions when explicitly requested or confirmed by the user.
 
-## 2b. cTrader Live Candles (OHLC)
+## 2a. Account Balance & Equity (requires \`account:read\`)
 
-Endpoint: \`GET \${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}?symbol=EURUSD&timeframe=H1&count=500\`
+Endpoint: \`POST \${JFX_CTRADER_TRADE_URL:-${JFX_CTRADER_TRADE_URL}}\` with \`{"action":"account_summary"}\` (alias \`get_trader\`).
+Reads the connected cTrader account: \`{ balance, equity, margin, depositAssetId, swapFree, traderLogin, broker }\` (amounts in the deposit currency). Pass \`ctidTraderAccountId\`/\`isDemo\` to target a specific account; otherwise the user's default account is used.
+
+\`\`\`bash
+curl -sS -H "X-API-Key: $JFX_KEY" -H "Content-Type: application/json" \\
+  -d '{"action":"account_summary"}' "\${JFX_CTRADER_TRADE_URL:-${JFX_CTRADER_TRADE_URL}}"
+\`\`\`
+
+## 2b. cTrader Live Candles (OHLC)
+Endpoint: \`GET \${JFX_CTRADER_CANDLES_URL:-${JFX_CTRADER_CANDLES_URL}}&symbol=EURUSD&timeframe=H1&count=500\` — **GET only**; a \`POST\` returns \`405 { error: "Method not allowed" }\` by design.
 Header: \`X-API-Key: $JFX_KEY\` — requires \`trades:read\` (or \`trades:write\`).
 Reads live trendbars from the user's own broker account (their cTrader must be connected), unlike the shared backtest store.
 
-Query params: \`symbol\` (required, e.g. \`EURUSD\`), \`timeframe\` (default \`H1\`; \`M1 M5 M15 M30 H1 H4 D1 W1 MN1\`), \`count\` (default 500, max 5000), optional \`from\`/\`to\` (unix seconds or ms; values < 1e12 are treated as seconds), \`ctidTraderAccountId\`, \`isDemo\` (default true).
-Response: \`{ ok, symbol, symbolId, timeframe, digits, accountId, isDemo, count, bars: [{ time, open, high, low, close }] }\` (\`time\` is unix seconds).
+Query params: \`symbol\` (e.g. \`EURUSD\`) **or \`symbolId\`** (e.g. the raw id that \`get_positions\` returns — both accepted; name wins when both are sent), \`timeframe\` (default \`H1\`; \`M1 M5 M15 M30 H1 H4 D1 W1 MN1\`), \`count\` (default 500, max 5000), optional \`from\`/\`to\` (ms), \`ctidTraderAccountId\`, \`isDemo\` (default true).
+Response: \`{ ok, symbol, symbolId, timeframe, digits, unit, accountId, isDemo, count, bars: [{ time, open, high, low, close }] }\` (\`time\` is unix seconds).
+Units: all bar values are **real price units already scaled by 10^digits** (\`digits: 3\` for USDJPY → bars read \`157.217\`, never \`157217\`); \`unit: "price"\` is echoed so no caller re-scales. \`openPrice\` and \`currentPrice\` from positions are in the same units.
+Feed quirk: moments after a period boundary the first fetch may return \`count: 0\`; the server retries once and adds the warning \`first_fetch_returned_no_bars_retried_ok\`. A persistent \`no_bars_for_window\` means the window itself has no data.
 
 \`\`\`bash
 curl -sS -H "X-API-Key: $JFX_KEY" \
@@ -242,11 +352,16 @@ curl -sS -H "X-API-Key: $JFX_KEY" \
 
 - \`401 missing_api_key / malformed_token / invalid_token / expired_token\` — key missing, truncated, revoked, or expired. Ask the user to press **Test connection** in Settings → Developer Tools, then recreate the key if needed.
 - \`403 insufficient_scope need trades:write\` — key lacks \`trades:write\`; ask user to recreate with trading scopes in Settings → Developer Tools
+- \`403 insufficient_scope need account:read | calendar:read | checklists:read | checklists:write | locks:read | locks:write\` — the key was created without that scope; scopes cannot be added to an existing key, so the user has to create a new one
+- \`409 unlock_in_progress\` — a trading-lock rule is still inside its 24h cooling countdown; the response carries \`unlock_available_at\`. Wait for it to elapse or tighten the rule instead
+- \`400 no_rules_provided | maxPerDay_required | maxPerDay_out_of_range | minLots_above_maxLots\` — the lock payload was malformed; send at least one of \`pairWhitelist\`, \`maxTrades\`, \`lotGuard\` with valid values
 - \`403 locked_by_rule\` — the portfolio's trading locks blocked this order. The response names \`portfolioId\`/\`portfolioName\`/\`accountId\` and includes \`context\` (allowed pairs, daily limit + fills so far, or lot range) plus \`cooldownMsRemaining\` when a rule is cooling down; do not retry, tell the user which rule fired and what is allowed
 - \`warnings\` on success — \`account_not_linked_to_portfolio\` (order executed with NO portfolio rules), \`locks_unchecked\` (locks unreachable, fail-open), \`multiple_portfolios_linked\` (account bound twice — first portfolio wins; ask user to fix linking in the app)
 - \`400 idempotency_key_required\` — an \`open\` via API key needs a fresh \`Idempotency-Key\`; generate a UUID and send again
 - \`409 idempotency_conflict\` — that key was already used for a different order; generate a fresh key for new orders
 - \`400 unknown_account\` — the supplied \`ctidTraderAccountId\` does not exist; the response carries \`suggestions\` (or a hint to flip \`isDemo\` when the account lives on the other host)
+- \`400 no_account_on_host\` — the chosen account id is not on the demo/live host this request targeted; \`get_accounts\` first, pass a matching id, or flip \`isDemo\`
+- \`400 no_live_account_connected\` — the request used \`isDemo: false\` but the user has no live cTrader account connected; ask them to connect a live account on the Connect cTrader page or retry with \`isDemo: true\`
 - \`400 ctrader_not_connected\` — key valid but cTrader not linked; ask user to connect cTrader once on the **Connect & Import** page
 - \`502 ctrader_auth_failed\` — stored cTrader grant expired/revoked; ask user to reconnect cTrader on the **Connect & Import** page, then retry
 - \`429 rate_limited\` — too many requests; retry after \`Retry-After\` seconds. \`503 rate_limiter_unavailable\` means the server limiter is down — retry shortly, do not recreate the key.

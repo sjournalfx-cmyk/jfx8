@@ -14,7 +14,9 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   const code = req.query.code as string | undefined;
   const state = req.query.state as string | undefined;
 
-  if (state === NATIVE_STATE && code) {
+  const isNativeState = state === NATIVE_STATE || state?.startsWith('jfx-native');
+
+  if (isNativeState && code) {
     res.setHeader('Location', `${NATIVE_DEEP_LINK}?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`);
     res.status(302).end();
     return;

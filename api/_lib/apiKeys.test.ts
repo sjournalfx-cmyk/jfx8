@@ -38,6 +38,18 @@ describe('checkScopes', () => {
     expect(checkScopes([], 'trades:read')).toBe(false);
     expect(checkScopes(undefined, 'trades:read')).toBe(false);
   });
+
+  it('each discipline :write implies its matching :read', () => {
+    expect(checkScopes(['checklists:write'], 'checklists:read')).toBe(true);
+    expect(checkScopes(['locks:write'], 'locks:read')).toBe(true);
+    expect(checkScopes(['account:read'], 'account:read')).toBe(true);
+    expect(checkScopes(['calendar:read'], 'calendar:read')).toBe(true);
+    // ...but read never implies write, and scopes stay siloed.
+    expect(checkScopes(['account:read'], 'locks:read')).toBe(false);
+    expect(checkScopes(['checklists:read'], 'checklists:write')).toBe(false);
+    expect(checkScopes(['locks:write'], 'trades:read')).toBe(false);
+    expect(checkScopes(['trades:write'], 'locks:write')).toBe(false);
+  });
 });
 
 describe('resolveSymbolId', () => {

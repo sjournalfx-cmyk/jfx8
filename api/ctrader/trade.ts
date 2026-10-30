@@ -10,11 +10,13 @@ import {
   resolveSymbolId,
   suggestSymbols,
 } from '../_lib/apiKeys.js';
+import { checkScopes } from '../_lib/apiKeys.js';
 import {
   countOpensToday,
   evaluateLocks,
   getUserTimezone,
   isRuleActive,
+  listPortfolioDetails,
   normalizeLocks,
   resolvePortfolioContext,
   toLots,
@@ -414,10 +416,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return candlesHandler(req, res);
   }
 
-  const isReadAction = action === 'get_positions' || action === 'positions' || action === 'get_accounts' || action === 'accounts' || action === 'check_auth' || action === 'auth_status' || req.method === 'GET';
+  const isReadAction = action === 'get_positions' || action === 'positions' || action === 'get_accounts' || action === 'accounts' || action === 'check_auth' || action === 'auth_status' || action === 'account_summary' || action === 'get_trader' || action === 'get_portfolios' || action === 'portfolios' || req.method === 'GET';
 
   let accessToken = '';
   let authenticatedUserId: string | null = null;
+  let apiKeyScopes: string[] | null = null;
   let keyId: string | null = null;
   let defaultAccountId: number | null = null;
   let defaultIsDemo = true;
@@ -480,14 +483,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const scopes: string[] = apiKey.scopes || [];
-    const requiredScope = isReadAction ? 'trades:read' : 'trades:write';
-    if (!hasTradeScope(scopes, requiredScope as 'trades:read' | 'trades:write')) {
+    // Balance/equity is broker-account data — gated behind its own scope so a
+    // journal-reading key never sees account levels by accident.
+    const requiredScope =
+      !isReadAction
+        ? 'trades:write'
+        : action === 'account_summary' || action === 'get_trader'
+        ? 'account:read'
+        : 'trades:read';
+    if (requiredScope === 'account:read') {
+      if (!checkScopes(scopes, 'account:read')) {
+        res.status(403).json(apiKeyError('insufficient_scope', 'This key lacks account:read. Recreate it in Settings → Developer Tools with account:read enabled.', { need: 'account:read', have: scopes, hint: 'Recreate the key in Settings → Developer Tools with account:read enabled' }));
+        return;
+      }
+    } else if (!hasTradeScope(scopes, requiredScope as 'trades:read' | 'trades:write')) {
       res.status(403).json(apiKeyError('insufficient_scope', requiredScope === 'trades:write' ? 'This key lacks trades:write. Recreate it in Settings → Developer Tools with trades:write enabled.' : 'This key lacks trades:read (or trades:write).', { need: requiredScope, have: scopes, hint: requiredScope === 'trades:write' ? 'Recreate the key in Settings → Developer Tools with trades:write enabled' : 'Requires trades:read (or trades:write)' }));
       return;
     }
 
     authenticatedUserId = apiKey.user_id;
     keyId = apiKey.id;
+    apiKeyScopes = scopes;
 
     // Rate limiting check via consume_api_key_rate_limit RPC.
     // 429 only when the limiter explicitly denies; transport/RPC errors are 503
@@ -691,6 +707,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Non-fatal: fall through and let the authenticated session surface the error.
     }
 
+    // Live requests need an actually-live account; a demo-only Broker Profile
+    // points at the demo host and otherwise fails deep in cTrader with an
+    // opaque "Cannot route request" 500.
+    if (!isDemo) {
+      const liveAccount = accounts.find((a: any) => Number.isFinite(Number(a.ctidTraderAccountId)) && Boolean(a.isLive));
+      if (!liveAccount) {
+        await auditLog(400);
+        res
+          .status(400)
+          .json(
+            apiKeyError(
+              'no_live_account_connected',
+              'isDemo:false but no live account is connected to this Broker Profile. Connect a live account on the Connect & Import page, or retry with isDemo:true.'
+            )
+          );
+        return;
+      }
+    }
+
+    if (action === 'get_portfolios' || action === 'portfolios') {
+      if (!authenticatedUserId || !supabaseUrl || !serviceKey) {
+        await auditLog(400);
+        res.status(400).json({
+          error: 'user_context_required',
+          message: 'Portfolio listing needs a JFX API key or app session, not a raw broker token.',
+        });
+        return;
+      }
+      // App sessions act as their user; API keys must hold locks:read to see
+      // lock details (ids/names/binding are visible without it).
+      const locksRead = isBrowserSession || checkScopes(apiKeyScopes ?? [], 'locks:read');
+      const details = await listPortfolioDetails({ supabaseUrl, serviceKey }, authenticatedUserId);
+      const portfolios = locksRead
+        ? details
+        : details.map((d: any) => ({ ...d, locks: null, locksRequired: 'locks:read' }));
+      await auditLog(200);
+      res.status(200).json({ ok: true, portfolios });
+      return;
+    }
+
     if (action === 'get_accounts' || action === 'accounts') {
       await auditLog(200);
       res.status(200).json({
@@ -721,6 +777,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     session = await openCtraderSession(host, clientId, clientSecret, accountId, accessToken);
+
+    // -------------------------------------------------------------------------
+    // ACCOUNT SUMMARY — live balance / equity / margin (scope: account:read).
+    // -------------------------------------------------------------------------
+    if (action === 'account_summary' || action === 'get_trader') {
+      const traderRes = await session.send(PT.TRADER_REQ, { ctidTraderAccountId: accountId });
+      const trader = traderRes?.trader || traderRes || {};
+      // ProtoOA monetary fields arrive in cents (deposit asset) — normalize
+      // once here so agents see account-currency units.
+      const toUnits = (v: unknown): number | null => {
+        const n = Number(v);
+        return v === undefined || v === null || !Number.isFinite(n) ? null : n / 100;
+      };
+      session.close();
+      await auditLog(200);
+      res.status(200).json({
+        ok: true,
+        accountId,
+        isDemo,
+        balance: toUnits(trader.balance),
+        equity: toUnits(trader.equity),
+        margin: toUnits(trader.margin),
+        depositAssetId: trader.depositAssetId !== undefined && trader.depositAssetId !== null ? Number(trader.depositAssetId) : null,
+        swapFree: trader.swapFree === true,
+        traderLogin: trader.traderLogin !== undefined && trader.traderLogin !== null ? Number(trader.traderLogin) : null,
+        broker: trader.brokerName || trader.brokerTitleShort || null,
+      });
+      return;
+    }
 
     if (action === 'stream_spots') {
       if (!isBrowserSession) {
@@ -836,6 +921,80 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       });
 
+      // Enrich positions with broker symbol names (RECONCILE only carries raw
+      // ctidTrader ids like "3") and a live currentPrice snapshot so agents do
+      // not have to parse ids, plus an estimated unrealized profit when the
+      // broker omits one.
+      const symbolIds = [
+        ...new Set(
+          [
+            ...rawPositions.map((pos: any) => Number((pos.tradeData || pos).symbolId)),
+            ...rawOrders.map((ord: any) => Number(ord.symbolId)),
+          ].filter((id) => Number.isSafeInteger(id) && id > 0)
+        ),
+      ];
+
+      const symbolNames: Record<string, string> = {};
+      let symbolMeta: any[] = [];
+      if (symbolIds.length > 0) {
+        try {
+          const symbolsRes = await session.send(PT.SYMBOLS_LIST_REQ, { ctidTraderAccountId: accountId });
+          symbolMeta = symbolMeta.concat(symbolsRes.symbol || []);
+        } catch {
+          // Non-fatal: fall back to symbolId keys already present.
+        }
+        for (const sym of symbolMeta) {
+          const id = Number(sym.symbolId);
+          if (symbolIds.includes(id)) {
+            symbolNames[String(id)] = String(sym.symbolName || sym.displayName || '');
+          }
+        }
+
+        // Scale prices by broker digits (spot payloads carry price × 10^digits).
+        const digitsById: Record<string, number> = {};
+        for (const sym of symbolMeta) {
+          const digits = Number(sym.digits);
+          if (Number.isFinite(digits) && digits > 0) digitsById[String(sym.symbolId)] = digits;
+        }
+        const midBySymbol: Record<string, number> = {};
+        try {
+          await session.send(PT.SUBSCRIBE_SPOTS_REQ, { ctidTraderAccountId: accountId, symbolId: symbolIds });
+          await new Promise<void>((resolve) => {
+            const remove = session.onEvent((payloadType: number, payload: Record<string, any>) => {
+              if (payloadType !== 2131) return;
+              const id = String(payload.symbolId);
+              const digits = digitsById[id] || (/(jpy|nzd|huf)$/i.test(String(symbolNames[id] || '')) ? 3 : 5);
+              const scale = Math.pow(10, digits);
+              const bid = Number(payload.bid);
+              const ask = Number(payload.ask);
+              if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+                midBySymbol[id] = (bid + ask) / (2 * scale);
+              }
+            });
+            setTimeout(() => {
+              remove();
+              resolve();
+            }, 1400);
+          });
+        } catch {
+          // Non-fatal: keep broker-provided currentPrice values.
+        }
+        for (const pos of positions) {
+          const liveMid = midBySymbol[String(pos.symbolId)];
+          if (liveMid && liveMid > 0) {
+            pos.currentPrice = liveMid;
+          }
+          if ((!pos.profit || Math.abs(pos.profit) < 1e-9) && pos.currentPrice > 0 && pos.openPrice > 0) {
+            const dir = pos.tradeSide === 'buy' ? 1 : -1;
+            const units = pos.volumeLots * 100000;
+            const name = String(symbolNames[String(pos.symbolId)] || pos.symbol || '');
+            pos.profit = (pos.currentPrice - pos.openPrice) * dir * units;
+            pos.profitEstimated = true;
+            if (name.length >= 6) pos.profitCurrency = name.slice(3, 6);
+          }
+        }
+      }
+
       const orders = rawOrders.map((ord: any) => ({
         orderId: Number(ord.orderId),
         symbol: ord.symbolName || ord.symbol || String(ord.symbolId || ''),
@@ -851,7 +1010,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       session.close();
       await auditLog(200);
-      res.status(200).json({ ok: true, accountId, isDemo, positions, orders });
+      res.status(200).json({
+        ok: true,
+        accountId,
+        isDemo,
+        positions,
+        orders,
+        ...(Object.keys(symbolNames).length > 0 ? { symbolNames } : {}),
+      });
       return;
     }
 
@@ -1204,7 +1370,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: `Unknown action '${action}'` });
   } catch (err: any) {
     if (session) session.close();
+    const msg = String(err?.message || err || '');
+    // cTrader's "route request" failure means the account id pointed at the
+    // other broker host; surface it as an agent-actionable 400 instead of a
+    // generic 500.
+    if (/route request|no account/i.test(msg)) {
+      await auditLog(400);
+      res
+        .status(400)
+        .json(
+          apiKeyError(
+            'no_account_on_host',
+            `cTrader rejected the account for this request: ${msg}. The requested account may live on the ${isDemo ? 'demo' : 'live'} host only — retry without an explicit accountId, or reconnect the account on the Connect & Import page.`
+          )
+        );
+      return;
+    }
     await auditLog(500);
-    res.status(500).json({ error: err?.message || 'Trading request failed' });
+    res.status(500).json({ error: msg || 'Trading request failed' });
   }
 }
