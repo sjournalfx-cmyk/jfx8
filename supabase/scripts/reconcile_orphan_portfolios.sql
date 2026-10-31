@@ -59,7 +59,7 @@ WITH def AS (
   ORDER BY p.user_id, p.created_at ASC
 )
 UPDATE public.trades t
-SET portfolio_id = def.default_pid, updated_at = now()
+SET portfolio_id = def.default_pid::uuid, updated_at = now()  -- column is uuid on the live DB
 FROM def
 WHERE t.user_id = def.user_id
   AND t.deleted_at IS NULL
