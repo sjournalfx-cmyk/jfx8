@@ -324,7 +324,7 @@ const putLockLotGuard = (current: any, desired: any, now: number): any => {
 const putLockPairWhitelist = (current: any, desired: any, now: number): any => {
   const base = lockBase(current, now)
   const wantOn = desired.enabled === true
-  const desiredIds = [...new Set((desired.symbolIds || []).map((v: unknown) => Number(v)).filter((n: number) => Number.isFinite(n) && n > 0))]
+  const desiredIds = [...new Set((desired.symbolIds as unknown[] || []).map((v: unknown) => Number(v)).filter((n: number) => Number.isFinite(n) && n > 0))] as number[]
 
   const restore = (symbolIds: number[], symbolNames: any, active: boolean): any => ({
     enabled: active ? true : false,
@@ -343,8 +343,8 @@ const putLockPairWhitelist = (current: any, desired: any, now: number): any => {
   }
 
   const currentIds = (base!.symbolIds || []).map((v: unknown) => Number(v)).filter((n: number) => Number.isFinite(n))
-  const currentIdsUnique = [...new Set(currentIds)]
-  const desiredSet = new Set(desiredIds)
+  const currentIdsUnique = [...new Set(currentIds)] as number[]
+  const desiredSet = new Set<number>(desiredIds)
   const retained = currentIdsUnique.filter((id) => desiredSet.has(id))
   // A live rule must never end up emptier than "no pairs left" — that would
   // silently block every symbol.
@@ -823,8 +823,8 @@ Deno.serve(async (req) => {
 
       // Items: POST /v1/checklists/:templateId/items
       if (templateId && itemId === undefined && req.method === 'POST') {
-        const phase = body.phase
-        if (!CHECKLIST_PHASES.has(phase)) return respond({ error: 'invalid_item_phase' }, 400)
+        const phase = String(body.phase ?? '')
+        if (!CHECKLIST_PHASES.has(phase as string)) return respond({ error: 'invalid_item_phase' }, 400)
         const text = asTrimmedString(body.text, MAX_ITEM_TEXT)
         if (!text) return respond({ error: 'invalid_item_text' }, 400)
         let templates = JSON.parse(JSON.stringify(doc.templates))
@@ -852,7 +852,7 @@ Deno.serve(async (req) => {
           tpl.items[idx].text = text
         }
         if (body.phase !== undefined) {
-          if (!CHECKLIST_PHASES.has(body.phase)) return respond({ error: 'invalid_item_phase' }, 400)
+          if (!CHECKLIST_PHASES.has(String(body.phase))) return respond({ error: 'invalid_item_phase' }, 400)
           tpl.items[idx].phase = body.phase
         }
         tpl.updatedAt = new Date().toISOString()
@@ -927,7 +927,7 @@ Deno.serve(async (req) => {
         if (JSON.stringify(body).length > MAX_DISCIPLINE_PAYLOAD) {
           return respond({ error: 'payload_too_large', message: `Locks payload must be <= ${MAX_DISCIPLINE_PAYLOAD} bytes.` }, 413)
         }
-        const doc = body?.locks && typeof body.locks === 'object' ? body.locks : body
+        const doc = (body?.locks && typeof body.locks === 'object' ? body.locks : body) as Record<string, any>
         const editors: Record<string, (cur: any, desired: any, t: number) => any> = {
           pairWhitelist: putLockPairWhitelist,
           maxTrades: putLockMaxTrades,
