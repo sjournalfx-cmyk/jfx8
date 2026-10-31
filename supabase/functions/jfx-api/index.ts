@@ -566,7 +566,11 @@ Deno.serve(async (req) => {
         }
       const body = cleanBody(await req.json().catch(() => ({})))
       if (req.method === 'POST') {
-        const { data, error } = await admin.from('trades').insert({ ...body, user_id: key.user_id }).select('*').single(); if (error) throw error
+        // Rows journalled directly by an agent get the 'Agent' tag at source so
+        // the app journal renders the robot badge without a deal-import match.
+        const bodyTags = Array.isArray(body.tags) ? body.tags : []
+        const tagged = { ...body, tags: Array.from(new Set((bodyTags as unknown[]).map(String).filter(Boolean).concat(['Agent']))) }
+        const { data, error } = await admin.from('trades').insert({ ...tagged, user_id: key.user_id }).select('*').single(); if (error) throw error
         void touch(); return respond(data, 201)
       }
       if (req.method === 'PATCH' && id) {

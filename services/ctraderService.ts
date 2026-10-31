@@ -57,6 +57,7 @@ function unitsToCtraderVolume(volumeUnits: number): number {
 export interface CtraderDeal {
   dealId: number;
   orderId: number;
+  positionId?: string;
   symbol: string;
   symbolId?: number;
   tradeSide: 'buy' | 'sell';
@@ -940,6 +941,7 @@ export async function getClosedDeals(ctidTraderAccountId: number, fromTimestamp?
     return {
       dealId: Number(deal.dealId),
       orderId: Number(deal.orderId ?? 0),
+      positionId: getPositionId(deal),
       symbol: deal.symbolName || deal.symbol || tradeData.symbolName || tradeData.symbol || '',
       symbolId: typeof symbolId === 'number' && Number.isFinite(symbolId) ? symbolId : undefined,
       tradeSide: deal.tradeSide === 1 ? 'buy' : 'sell',

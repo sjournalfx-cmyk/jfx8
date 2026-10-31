@@ -680,6 +680,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   };
 
+  // Agent provenance: the app's cTrader deal-import reads these rows (RLS:
+  // select own) and tags matching journal trades with the 'Agent' tag so the
+  // trade journal can render the robot badge. Fire-and-forget — a failed
+  // insert must never break the trade response.
+  const recordAgentMark = (row: {
+    action: 'open' | 'close' | 'close_all';
+    positionId?: number | string | null;
+    orderId?: number | string | null;
+    symbol?: string | null;
+    volumeCents?: number | null;
+  }) => {
+    if (!authenticatedUserId || !supabaseUrl || !serviceKey) return;
+    void fetch(`${supabaseUrl}/rest/v1/agent_trade_marks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': serviceKey,
+        'Authorization': `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({
+        user_id: authenticatedUserId,
+        action: row.action,
+        ...(row.positionId !== undefined && row.positionId !== null ? { position_id: String(row.positionId) } : {}),
+        ...(row.orderId !== undefined && row.orderId !== null ? { order_id: String(row.orderId) } : {}),
+        ...(row.symbol ? { symbol: String(row.symbol).toUpperCase() } : {}),
+        ...(row.volumeCents !== undefined && row.volumeCents !== null ? { volume_cents: Math.round(Number(row.volumeCents)) } : {}),
+      }),
+    }).catch(() => {});
+  };
+
   try {
     // Resolve the account demo/live-aware: prefer the requested/default id, but
     // self-heal when it lives on the other host (prevents "Cannot route request").
@@ -1201,6 +1231,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const result = await session.send(PT.NEW_ORDER_REQ, payload);
       session.close();
+      // Agent opened this position — stamp provenance for the journal badge.
+      recordAgentMark({
+        action: 'open',
+        orderId: (result as any)?.orderId ?? null,
+        symbol: rawSymbol || null,
+        volumeCents,
+      });
       const openWarnings = portfolioCtx ? contextWarnings(portfolioCtx) : [];
       const responseBody = {
         ok: true,
@@ -1243,12 +1280,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             positionId: pId,
             volume: vol,
           });
-          closed.push({ positionId: pId, result: closeRes });
+          closed.push({ positionId: pId, volume: vol, result: closeRes });
         } catch (err: any) {
           errors.push({ positionId: pId, error: err?.message || String(err) });
         }
       }
       session.close();
+      for (const c of closed) {
+        recordAgentMark({ action: 'close_all', positionId: c.positionId, volumeCents: c.volume ?? null });
+      }
       await auditLog(200);
       res.status(200).json({ ok: true, message: `Closed ${closed.length} position(s)`, closedCount: closed.length, closed, errors });
       return;
@@ -1279,6 +1319,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
       session.close();
+      recordAgentMark({ action: 'close', positionId, volumeCents });
       await auditLog(200);
       res.status(200).json({ ok: true, message: 'Position closed', result });
       return;

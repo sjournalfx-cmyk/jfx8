@@ -9,6 +9,7 @@ import {
     RefreshCw, Trash2, Edit3, Eye, EyeOff, LogOut, Monitor, Layers
 } from 'lucide-react';
 import { dataService, isTradeInPortfolio } from '../services/dataService';
+import { withAgentTag } from '../services/agentMarks';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Trade, EASession, EADeal, EAPosition, Portfolio } from '../types';
 import OpenPositions from './OpenPositions';
@@ -1912,12 +1913,12 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             if (opts?.isCancelled?.()) break;
             const chunk = pending.slice(i, i + CHUNK);
             try {
-                const built = chunk.map(d => {
-                    const t = buildDealTrade(d);
+                const built = await Promise.all(chunk.map(async d => {
+                    const t = await withAgentTag(buildDealTrade(d), d);
                     return targetPortfolioId && !(t as Trade).portfolio_id
                         ? { ...t, portfolio_id: targetPortfolioId }
                         : t;
-                });
+                }));
                 const result = await dataService.batchAddTrades(built as Trade[]);
                 // Web batchAddTrades resolves to the saved rows only — it
                 // filters pre-existing tickets before insert, so anything it did
@@ -2017,7 +2018,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
     const handleAddDealToJournal = async (deal: any) => {
         try {
             setSavingDealId(deal.dealId);
-            await persistDealTrade(buildDealTrade(deal));
+            await persistDealTrade(await withAgentTag(buildDealTrade(deal), deal));
             markDealSaved(deal.dealId);
         } catch (err) {
             console.error('Failed to add deal to journal:', err);
@@ -2272,7 +2273,7 @@ const CtraderConnect: React.FC<CtraderConnectProps> = ({ isDarkMode, onBack, use
             let added = 0;
             for (const deal of recent) {
                 try {
-                    await persistDealTrade(buildDealTrade(deal));
+                    await persistDealTrade(await withAgentTag(buildDealTrade(deal), deal));
                     markDealSaved(deal.dealId);
                     added++;
                 } catch (e) {

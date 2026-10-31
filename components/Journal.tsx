@@ -8,6 +8,7 @@ import {
   Pencil, Check, XCircle
 } from 'lucide-react';
 import { Trade, UserProfile, Portfolio } from '../types';
+import AgentBadge from './AgentBadge';
 import { haptic } from '../lib/haptics';
 import { getSASTDateTime, getDefaultTimezone } from '../lib/timeUtils';
 import { getPipSize } from '../lib/trade-calculations';
@@ -990,6 +991,9 @@ const MobileTradeCard: React.FC<{ trade: Trade; onToggle: () => void; isSelected
             <div className="min-w-0 pr-3 flex-1">
                 <h3 className={`text-[16px] font-black uppercase tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                     {trade.pair || 'UNKNOWN'}
+                    {(trade.tags || []).includes('Agent') && (
+                        <AgentBadge pnl={trade.pnl || 0} className="ml-1.5 inline-block h-[13px] w-[13px] align-[-1px]" />
+                    )}
                 </h3>
                 <p className={`text-[13px] font-medium leading-tight mt-1 ${isDarkMode ? 'text-zinc-400' : 'text-slate-500'}`}>
                     {trade.direction || 'Trade'}{displayDate ? ` · ${displayDate}` : ''}
